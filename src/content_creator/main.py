@@ -10,6 +10,7 @@ from content_creator.services.music.beat_detector import BeatAnalysis
 from content_creator.services.timeline import build_timeline
 from content_creator.agents.director_agent import create_director_plan, plan_to_storyboard
 from content_creator.agents.render_agent import compile_render_plan
+from content_creator.agents.remotion_agent import create_animation_plan
 from content_creator.services.llm.router import get_agent_provider
 
 
@@ -29,7 +30,7 @@ def _create_project(args: argparse.Namespace) -> tuple[VideoProject, BeatAnalysi
     adapted_name = "bgm_adapted.wav"
     adapt_audio_to_duration(audio_target, total_frames / args.fps, audio_dir / adapted_name)
     output = VideoOutput(project_dir=str(project_dir), render_data=str(project_dir / "render_data.json"), final_video=str(project_dir / "render" / "final.mp4"))
-    project = VideoProject(project_id=project_id, fps=args.fps, width=args.width, height=args.height, images=assets, audio=AudioConfig(path="audio/" + adapted_name, duration=total_frames / args.fps, sample_rate=44100, bpm=analysis.bpm), timeline=timeline, output=output)
+    project = VideoProject(project_id=project_id, fps=args.fps, width=args.width, height=args.height, images=assets, audio=AudioConfig(path="audio/" + adapted_name, source_path="audio/" + audio.name, duration=total_frames / args.fps, sample_rate=analysis.sample_rate, bpm=analysis.bpm), timeline=timeline, output=output)
     exported = project.model_dump(mode="json")
     exported["output"] = {"project_dir": ".", "render_data": "render_data.json", "final_video": "render/final.mp4"}
     Path(output.render_data).write_text(json.dumps(exported, indent=2), encoding="utf-8")
@@ -50,7 +51,15 @@ def apply_director(project: VideoProject, analysis: BeatAnalysis, style: str) ->
     plan_path = Path(project.output.project_dir) / "director_plan.json"
     plan_path.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
     print("[Director] Plan validated")
-    return compile_render_plan(project, plan_to_storyboard(plan, style))
+    storyboard = plan_to_storyboard(plan, style)
+    animation_plan = create_animation_plan(plan)
+    try:
+        return compile_render_plan(project, storyboard, animation_plan)
+    except TypeError as exc:
+        # Keep compatibility with callers/tests that inject the legacy 2-arg compiler.
+        if "positional argument" not in str(exc):
+            raise
+        return compile_render_plan(project, storyboard)
 
 
 def main() -> None:

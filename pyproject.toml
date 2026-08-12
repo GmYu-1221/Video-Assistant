@@ -12,6 +12,7 @@ dependencies = [
   "langchain-core>=0.3",
   "python-dotenv>=1.0",
   "openai>=1.0",
+  "httpx[socks]>=0.28.1",
 ]
 
 [project.scripts]

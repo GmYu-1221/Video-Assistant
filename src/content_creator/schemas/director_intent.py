@@ -15,6 +15,9 @@ class AnimationIntent(BaseModel):
     camera_motion: str | None = None
     visual_effect: str | None = None
     duration_frames: int = Field(default=18, gt=0, le=120)
+    energy: float = Field(default=0.5, ge=0, le=1)
+    visual_effects: list[str] = Field(default_factory=list)
+    description: str = ""
 
 
 class DirectorIntent(BaseModel):

@@ -2,6 +2,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from .transition import TransitionConfig
 from .color import RGBColor
+from .animation_plan import AnimationEffect
 
 
 class EntranceConfig(BaseModel):
@@ -24,6 +25,7 @@ class ImageAsset(BaseModel):
 
 class AudioConfig(BaseModel):
     path: str
+    source_path: str | None = None
     duration: float = Field(ge=0)
     sample_rate: int = Field(gt=0)
     bpm: float = Field(default=120.0, gt=0)
@@ -35,6 +37,7 @@ class TimelineItem(BaseModel):
     end_frame: int = Field(gt=0)
     duration_frames: int = Field(gt=0)
     transition: TransitionConfig
+    animation: AnimationEffect | None = None
 
 
 class VideoOutput(BaseModel):

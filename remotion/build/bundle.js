@@ -1,7 +1,7 @@
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
-/***/ 5482
+/***/ 8586
 (__unused_webpack_module, __unused_webpack___webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -2860,7 +2860,91 @@ const TransitionRegistry = {
 const TransitionFactory = (transition, key) => (TransitionRegistry[transition.type] ?? TransitionRegistry.fade)(transition, key);
 
 
+;// ./src/effects/CameraPush.tsx
+
+
+
+const CameraPush = ({ animation, children }) => {
+  const frame = (0,esm/* useCurrentFrame */.UC)();
+  const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 18);
+  if (frame >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const amount = Number((animation == null ? void 0 : animation.props.translatePercent) ?? 4);
+  const translateX = (0,esm/* interpolate */.GW)(frame, [0, duration], [amount, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  return /* @__PURE__ */ (0,jsx_runtime.jsxs)("div", { style: { position: "absolute", inset: 0 }, children: [
+    children,
+    /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `translateX(${translateX}%)`, opacity: 0.2, pointerEvents: "none" }, children })
+  ] });
+};
+
+;// ./src/effects/CardFlipReveal.tsx
+
+
+
+const CardFlipReveal = ({ animation, children }) => {
+  const frame = (0,esm/* useCurrentFrame */.UC)();
+  const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 18);
+  if (frame >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const rotateY = (0,esm/* interpolate */.GW)(frame, [0, duration], [180, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const opacity = (0,esm/* interpolate */.GW)(frame, [0, Math.min(3, duration)], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const perspective = Number((animation == null ? void 0 : animation.props.perspective) ?? 800);
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, perspective, opacity }, children: /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `rotateY(${rotateY}deg)`, transformStyle: "preserve-3d", backfaceVisibility: "hidden" }, children }) });
+};
+
+;// ./src/effects/GlitchReveal.tsx
+
+
+
+const GlitchReveal = ({ animation, children }) => {
+  const frame = (0,esm/* useCurrentFrame */.UC)();
+  const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 5);
+  if (frame >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const offset = (0,esm/* interpolate */.GW)(frame, [0, duration], [Number((animation == null ? void 0 : animation.props.rgbOffset) ?? 8), 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const slice = `${30 + frame % 3 * 12}% 0 ${35 - frame % 3 * 7}% 0`;
+  return /* @__PURE__ */ (0,jsx_runtime.jsxs)("div", { style: { position: "absolute", inset: 0 }, children: [
+    /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `translateX(${offset}px)`, opacity: offset ? 0.35 : 0, filter: "sepia(1) saturate(6) hue-rotate(315deg)", mixBlendMode: "screen" }, children }),
+    /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `translateX(${-offset}px)`, opacity: offset ? 0.3 : 0, filter: "sepia(1) saturate(7) hue-rotate(165deg)", mixBlendMode: "screen" }, children }),
+    /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, clipPath: `inset(${slice})`, transform: `translateX(${offset}px)` }, children }),
+    /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0 }, children })
+  ] });
+};
+
+;// ./src/effects/LightLeak.tsx
+
+
+
+const LightLeak = ({ animation, children }) => {
+  const frame = (0,esm/* useCurrentFrame */.UC)();
+  const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 5);
+  if (frame >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const progress = (0,esm/* interpolate */.GW)(frame, [0, duration], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const intensity = Number((animation == null ? void 0 : animation.props.intensity) ?? 0.75);
+  return /* @__PURE__ */ (0,jsx_runtime.jsxs)("div", { style: { position: "absolute", inset: 0 }, children: [
+    children,
+    /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(circle at 20% 55%, rgba(255,170,60,0.9), transparent 64%)", mixBlendMode: "screen", opacity: Math.sin(progress * Math.PI) * intensity } })
+  ] });
+};
+
+;// ./src/effects/index.tsx
+
+
+
+
+
+
+const EffectRegistry = {
+  card_flip_reveal: CardFlipReveal,
+  camera_push: CameraPush,
+  glitch_reveal: GlitchReveal,
+  light_leak: LightLeak
+};
+const EffectRenderer = ({ animation, children }) => {
+  if (!animation || animation.implementation === "fallback" || animation.effect === "none") return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const Component = EffectRegistry[animation.effect];
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)(Component, { animation, children });
+};
+
 ;// ./src/Composition.tsx
+
 
 
 
@@ -2876,7 +2960,7 @@ const Slideshow = (props) => {
       const asset = map.get(item.asset_id);
       const isLast = index === props.timeline.length - 1;
       const transitionFrames = isLast ? 0 : item.transition.duration_frames;
-      const sequence = /* @__PURE__ */ (0,jsx_runtime.jsx)(TransitionSeries.Sequence, { durationInFrames: item.duration_frames + transitionFrames, children: /* @__PURE__ */ (0,jsx_runtime.jsx)(ImageFrame, { src: `${base}/${(asset == null ? void 0 : asset.relative_path) ?? ""}`, imageWidth: (asset == null ? void 0 : asset.width) ?? props.width, imageHeight: (asset == null ? void 0 : asset.height) ?? props.height, motion: (asset == null ? void 0 : asset.motion) ?? "static", entrance: asset == null ? void 0 : asset.entrance }) }, `sequence-${item.asset_id}`);
+      const sequence = /* @__PURE__ */ (0,jsx_runtime.jsx)(TransitionSeries.Sequence, { durationInFrames: item.duration_frames + transitionFrames, children: /* @__PURE__ */ (0,jsx_runtime.jsx)(EffectRenderer, { animation: item.animation, children: /* @__PURE__ */ (0,jsx_runtime.jsx)(ImageFrame, { src: `${base}/${(asset == null ? void 0 : asset.relative_path) ?? ""}`, imageWidth: (asset == null ? void 0 : asset.width) ?? props.width, imageHeight: (asset == null ? void 0 : asset.height) ?? props.height, motion: (asset == null ? void 0 : asset.motion) ?? "static", entrance: asset == null ? void 0 : asset.entrance }) }) }, `sequence-${item.asset_id}`);
       if (isLast) return [sequence];
       const nextItem = props.timeline[index + 1];
       const safeTransition = {
@@ -19985,7 +20069,7 @@ var NoReactInternals = {
 /******/ 	// Load entry module and return exports
 /******/ 	// This entry module is referenced by other modules so it can't be inlined
 /******/ 	__webpack_require__(2675);
-/******/ 	__webpack_require__(5482);
+/******/ 	__webpack_require__(8586);
 /******/ 	__webpack_require__(7858);
 /******/ 	var __webpack_exports__ = __webpack_require__(1313);
 /******/ 	
