@@ -38,7 +38,12 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=1920); parser.add_argument("--height", type=int, default=1080); parser.add_argument("--fps", type=int, default=30); parser.add_argument("--preview", action="store_true")
     parser.add_argument("--transition-mode", choices=["random", "sequential", "weighted"], default="sequential")
     parser.add_argument("--style", choices=sorted(PRESETS), default="minimal")
+    parser.add_argument("--agent-mode", action="store_true")
     args = parser.parse_args(); project = create_project(args)
+    if args.agent_mode:
+        from content_creator.workflow import build_graph
+        result = build_graph().invoke({"project": project, "style": args.style, "errors": []})
+        project = result["project"]
     repo_root = Path(__file__).resolve().parents[2]
     export_types(repo_root / "remotion/src/types.ts")
     from content_creator.services.renderer import render_project
