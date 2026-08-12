@@ -19,7 +19,12 @@ export const Slideshow: React.FC<RemotionProps> = (props) => {
           <ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} motion={asset?.motion ?? 'static'} entrance={asset?.entrance} />
         </TransitionSeries.Sequence>;
         if (isLast) return [sequence];
-        return [sequence, TransitionFactory(item.transition, `transition-${item.asset_id}`)];
+        const nextItem = props.timeline[index + 1];
+        const safeTransition = {
+          ...item.transition,
+          duration_frames: Math.min(item.transition.duration_frames, item.duration_frames, nextItem.duration_frames),
+        };
+        return [sequence, TransitionFactory(safeTransition, `transition-${item.asset_id}`)];
       })}
     </TransitionSeries>
     <AudioTrack src={`${base}/${props.audio.path}`} />

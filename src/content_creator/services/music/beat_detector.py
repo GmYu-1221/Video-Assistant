@@ -9,6 +9,7 @@ class BeatAnalysis:
     bpm: float
     beats: list[float]
     downbeats: list[float]
+    beat_strengths: list[float] | None = None
 
 
 def analyze_audio(path: str) -> BeatAnalysis:
@@ -23,7 +24,9 @@ def analyze_audio(path: str) -> BeatAnalysis:
             raise ValueError("beat tracker returned no beats")
         step = max(1, round(bpm / 60.0 * 4))
         downbeats = beats[::step] if len(beats) >= step else [beats[0]]
-        return BeatAnalysis(duration, int(sample_rate), bpm, beats, downbeats)
+        onset = librosa.onset.onset_strength(y=samples, sr=sample_rate)
+        strengths = [float(onset[min(len(onset) - 1, int(frame))]) for frame in beat_frames] if len(onset) else None
+        return BeatAnalysis(duration, int(sample_rate), bpm, beats, downbeats, strengths)
     except Exception:
         # A deterministic fallback keeps timeline generation usable for unusual codecs.
         import wave
