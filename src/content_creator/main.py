@@ -5,7 +5,7 @@ from content_creator.schemas import AudioConfig, VideoOutput, VideoProject, Tran
 from content_creator.schemas.exporter import export_types
 from content_creator.security.files import AUDIO_EXTENSIONS, validate_regular_file
 from content_creator.services.assets import scan_and_process
-from content_creator.services.music import analyze_audio
+from content_creator.services.music import analyze_audio, adapt_audio_to_duration
 from content_creator.services.timeline import build_timeline
 
 
@@ -18,12 +18,14 @@ def create_project(args: argparse.Namespace) -> VideoProject:
     audio_target = audio_dir / audio.name; shutil.copy2(audio, audio_target)
     assets = scan_and_process(args.images, project_dir, (args.width, args.height))
     analysis = analyze_audio(str(audio_target))
-    for asset in assets: asset.duration_frames = max(1, round(analysis.duration * args.fps / len(assets)))
     allowed = PRESETS.get(args.style, PRESETS["minimal"])
     policy = TransitionPolicy(mode=args.transition_mode, allowed=allowed, seed=0)
     timeline = build_timeline(assets, analysis, args.fps, policy=policy, style=args.style)
+    total_frames = max(item.end_frame for item in timeline)
+    adapted_name = "bgm_adapted.wav"
+    adapt_audio_to_duration(audio_target, total_frames / args.fps, audio_dir / adapted_name)
     output = VideoOutput(project_dir=str(project_dir), render_data=str(project_dir / "render_data.json"), final_video=str(project_dir / "render" / "final.mp4"))
-    project = VideoProject(project_id=project_id, fps=args.fps, width=args.width, height=args.height, images=assets, audio=AudioConfig(path="audio/" + audio.name, duration=analysis.duration, sample_rate=analysis.sample_rate, bpm=analysis.bpm), timeline=timeline, output=output)
+    project = VideoProject(project_id=project_id, fps=args.fps, width=args.width, height=args.height, images=assets, audio=AudioConfig(path="audio/" + adapted_name, duration=total_frames / args.fps, sample_rate=44100, bpm=analysis.bpm), timeline=timeline, output=output)
     exported = project.model_dump(mode="json")
     exported["output"] = {"project_dir": ".", "render_data": "render_data.json", "final_video": "render/final.mp4"}
     Path(output.render_data).write_text(json.dumps(exported, indent=2), encoding="utf-8")

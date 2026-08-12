@@ -7,11 +7,13 @@ type ImageFrameProps = {src: string; imageWidth: number; imageHeight: number; mo
 export const ImageFrame: React.FC<ImageFrameProps> = ({src, imageWidth, imageHeight, motion = 'static', entrance, backgroundColor = '#000000'}) => {
   const frame = useCurrentFrame();
   const {durationInFrames, width: videoWidth, height: videoHeight} = useVideoConfig();
+  // Scale to the largest rectangle that fits the canvas. Upscaling small images
+  // is intentional: a correctly fitted image leaves black bars on only one axis.
   const fitScale = Math.min(videoWidth / imageWidth, videoHeight / imageHeight);
   // Contain is the invariant: every transformed corner must remain in the canvas.
   // Explicit motion receives a small safety margin; static images use the maximal fit.
   const requestedMotionScale = motion === 'zoom_in' || motion === 'ken_burns' ? 1.14 : motion === 'zoom_out' ? 1.14 : 1;
-  const safeScale = Math.min(1, fitScale / requestedMotionScale);
+  const safeScale = fitScale / requestedMotionScale;
   const renderWidth = Math.max(1, Math.round(imageWidth * safeScale));
   const renderHeight = Math.max(1, Math.round(imageHeight * safeScale));
   const entranceType = entrance?.type ?? 'fade';
