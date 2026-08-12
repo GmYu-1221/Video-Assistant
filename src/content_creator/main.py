@@ -6,10 +6,14 @@ from content_creator.schemas.exporter import export_types
 from content_creator.security.files import AUDIO_EXTENSIONS, validate_regular_file
 from content_creator.services.assets import scan_and_process
 from content_creator.services.music import analyze_audio, adapt_audio_to_duration
+from content_creator.services.music.beat_detector import BeatAnalysis
 from content_creator.services.timeline import build_timeline
+from content_creator.agents.director_agent import create_director_plan, plan_to_storyboard
+from content_creator.agents.render_agent import compile_render_plan
+from content_creator.services.llm.router import get_agent_provider
 
 
-def create_project(args: argparse.Namespace) -> VideoProject:
+def _create_project(args: argparse.Namespace) -> tuple[VideoProject, BeatAnalysis]:
     audio = validate_regular_file(args.audio, AUDIO_EXTENSIONS)
     project_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     project_dir = Path(args.output).resolve() / "projects" / project_id
@@ -29,7 +33,24 @@ def create_project(args: argparse.Namespace) -> VideoProject:
     exported = project.model_dump(mode="json")
     exported["output"] = {"project_dir": ".", "render_data": "render_data.json", "final_video": "render/final.mp4"}
     Path(output.render_data).write_text(json.dumps(exported, indent=2), encoding="utf-8")
+    return project, analysis
+
+
+def create_project(args: argparse.Namespace) -> VideoProject:
+    """Build the original rule-based project; kept as a stable Python API."""
+    project, _analysis = _create_project(args)
     return project
+
+
+def apply_director(project: VideoProject, analysis: BeatAnalysis, style: str) -> VideoProject:
+    """Run the Director and adapt its validated decisions to the render pipeline."""
+    print("[Director] Analyzing assets")
+    print("[Director] Generating plan")
+    plan = create_director_plan(project.images, analysis, style)
+    plan_path = Path(project.output.project_dir) / "director_plan.json"
+    plan_path.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+    print("[Director] Plan validated")
+    return compile_render_plan(project, plan_to_storyboard(plan, style))
 
 
 def main() -> None:
@@ -39,8 +60,22 @@ def main() -> None:
     parser.add_argument("--transition-mode", choices=["random", "sequential", "weighted"], default="sequential")
     parser.add_argument("--style", choices=sorted(PRESETS), default="minimal")
     parser.add_argument("--agent-mode", action="store_true")
-    args = parser.parse_args(); project = create_project(args)
+    parser.add_argument(
+        "--director",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Use the Director Agent when a configured LLM is available (default: auto)",
+    )
+    args = parser.parse_args(); project, analysis = _create_project(args)
+    director_provider = get_agent_provider("director")
+    director_enabled = args.director if args.director is not None else director_provider.model_name != "mock"
+    if director_enabled:
+        try:
+            project = apply_director(project, analysis, args.style)
+        except Exception as exc:
+            print(f"[Director] Failed, using rule-based storyboard: {type(exc).__name__}: {exc}")
     if args.agent_mode:
+        print(f"Content Creator\nLLM: {director_provider.model_name}\nAgents: Director={director_provider.model_name}, Remotion={get_agent_provider('remotion').model_name}, Renderer=local")
         from content_creator.workflow import build_graph
         result = build_graph().invoke({"project": project, "style": args.style, "errors": []})
         project = result["project"]
