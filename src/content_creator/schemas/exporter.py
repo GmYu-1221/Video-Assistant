@@ -9,7 +9,7 @@ export interface RGBColor { r: number; g: number; b: number; }
 export type MotionType = "static" | "zoom_in" | "zoom_out" | "pan_left" | "pan_right" | "pan_up" | "pan_down" | "ken_burns";
 export type EntranceType = "fade" | "fade_scale" | "slide_up" | "none";
 export interface EntranceConfig { type: EntranceType | string; durationInFrames: number; }
-export interface TransitionConfig { type: TransitionType; duration_frames: number; direction: string; intensity: number; easing: string; background_color?: RGBColor | null; }
+export interface TransitionConfig { type: TransitionType; duration_frames: number; direction: string; intensity: number; easing: string; background_color?: RGBColor | null; allow_distortion: boolean; }
 export type AnimationEffectType = "none" | "card_flip_reveal" | "camera_push" | "glitch_reveal" | "light_leak";
 export interface AnimationEffect { asset_id: string; effect: AnimationEffectType; component: string; implementation: "custom" | "fallback"; duration_frames: number; props: Record<string, unknown>; fallback: AnimationEffectType; }
 export interface TransitionPlanItem { index: number; transition: TransitionConfig; }

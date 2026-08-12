@@ -1,5 +1,5 @@
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from .color import RGBColor
 
 
@@ -49,6 +49,8 @@ class TransitionType(str, Enum):
     scanline = "scanline"
     push = "push"
     whip = "whip"
+    stretch_whip = "stretch_whip"
+    liquid = "liquid"
     zoom_cut = "zoom_cut"
     spin = "spin"
     clock_wipe = "clock_wipe"
@@ -63,6 +65,14 @@ class TransitionConfig(BaseModel):
     intensity: float = Field(default=0.6, ge=0, le=1)
     easing: str = "easeInOut"
     background_color: RGBColor | None = None
+    allow_distortion: bool = False
+
+    @model_validator(mode="after")
+    def validate_distortion_policy(self) -> "TransitionConfig":
+        distortion_types = {TransitionType.stretch_whip, TransitionType.liquid, TransitionType.glitch, TransitionType.whip}
+        if self.allow_distortion and self.type not in distortion_types:
+            raise ValueError(f"allow_distortion is not permitted for transition '{self.type.value}'")
+        return self
 
     @property
     def duration(self) -> int:

@@ -93,7 +93,7 @@ def apply_transition_policy(plan: DirectorPlan, beat_strengths: list[float] | No
             candidates = [candidate for candidate in candidates if candidate not in previous[-2:]] or candidates
             transition = rng.choice(candidates)
         duration = _duration_for(transition, item.transition.duration_frames)
-        updated = item.model_copy(update={"transition": TransitionConfig(type=transition, duration_frames=duration, direction=item.transition.direction, intensity=item.transition.intensity, easing=item.transition.easing, background_color=item.transition.background_color)})
+        updated = item.model_copy(update={"transition": TransitionConfig(type=transition, duration_frames=duration, direction=item.transition.direction, intensity=item.transition.intensity, easing=item.transition.easing, background_color=item.transition.background_color, allow_distortion=transition in {TransitionType.stretch_whip, TransitionType.liquid, TransitionType.glitch, TransitionType.whip})})
         repaired.append(updated)
         previous.append(transition)
     return plan.model_copy(update={"timeline": repaired})

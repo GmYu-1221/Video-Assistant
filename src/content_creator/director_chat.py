@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
+
 from content_creator.agents.director_chat import format_plan, generate_plan, update_plan
 from content_creator.agents.remotion_agent import create_animation_plan
 from content_creator.agents.render_agent import compile_render_plan
@@ -50,6 +53,44 @@ def _help() -> None:
     print("plan: 生成或重新生成 DirectorPlan\nshow: 查看当前方案；show json 输出 JSON\npreview: 用当前方案低分辨率预览渲染\nrender: 按原始尺寸渲染 final.mp4\nsave: 保存 session.json 和 director_plan.json\nquit: 保存并退出")
 
 
+def history_path(session: ProjectSession) -> Path:
+    """Return the per-project prompt history file."""
+    path = Path(session.project_dir).resolve() / ".director_history"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def create_prompt_session(session: ProjectSession) -> PromptSession:
+    """Create a UTF-8 aware prompt with persistent history."""
+    return PromptSession(history=FileHistory(str(history_path(session))))
+
+
+def dispatch_command(session: ProjectSession, text: str) -> tuple[ProjectSession, bool]:
+    """Handle one command; return the possibly updated session and continue flag."""
+    text = text.strip()
+    if text in {"quit", "exit"}:
+        session.save()
+        return session, False
+    if text == "help":
+        _help()
+    elif text == "plan":
+        session, response = generate_plan(session)
+        session.save(); print(response)
+    elif text in {"show", "show json"}:
+        print(format_plan(session, as_json=text == "show json"))
+    elif text == "save":
+        session.save(); print("当前计划已保存。")
+    elif text == "preview":
+        print(f"Preview: {_render(session, preview=True)}")
+    elif text == "render":
+        print(f"Rendered: {_render(session, preview=False)}")
+    elif text:
+        session, response = update_plan(session, text)
+        session.save()
+        print(f"{response}\n当前计划已保存。输入 show 查看完整方案，输入 preview 生成预览。")
+    return session, True
+
+
 def _parse_session(args: argparse.Namespace) -> ProjectSession:
     if args.project:
         return load_project_session(args.project)
@@ -73,31 +114,15 @@ def main() -> int:
         parser.error("New workspace requires --images and --audio")
     session = _parse_session(args)
     _header(session)
+    prompt_session = create_prompt_session(session)
     while True:
         try:
-            text = input("\nDirector> ").strip()
+            text = prompt_session.prompt("\nDirector> ").strip()
         except (EOFError, KeyboardInterrupt):
             text = "quit"
-        if text in {"quit", "exit"}:
-            session.save()
+        session, keep_running = dispatch_command(session, text)
+        if not keep_running:
             return 0
-        if text == "help":
-            _help()
-        elif text == "plan":
-            session, response = generate_plan(session)
-            session.save(); print(response)
-        elif text == "show" or text == "show json":
-            print(format_plan(session, as_json=text == "show json"))
-        elif text == "save":
-            session.save(); print("当前计划已保存。")
-        elif text == "preview":
-            print(f"Preview: {_render(session, preview=True)}")
-        elif text == "render":
-            print(f"Rendered: {_render(session, preview=False)}")
-        elif text:
-            session, response = update_plan(session, text)
-            session.save()
-            print(f"{response}\n当前计划已保存。输入 show 查看完整方案，输入 preview 生成预览。")
 
 
 if __name__ == "__main__":
