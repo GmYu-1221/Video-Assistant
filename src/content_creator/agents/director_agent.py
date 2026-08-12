@@ -18,6 +18,7 @@ from content_creator.services.llm.router import get_agent_provider
 from content_creator.services.llm.validator import validate_director_plan_json
 from content_creator.services.music.beat_detector import BeatAnalysis
 from content_creator.services.timeline.slideshow_builder import ImageDurationPolicy
+from content_creator.services.director.transition_policy import apply_transition_policy, build_transition_sequence, DEFAULT_DURATION
 
 
 VideoStyle = str
@@ -27,17 +28,19 @@ def _fallback_plan(images: list[ImageAsset], beat_analysis: BeatAnalysis) -> Dir
     policy = ImageDurationPolicy()
     beat_seconds = 60.0 / max(beat_analysis.bpm, 1.0)
     duration = max(1, round(policy.default_beats * beat_seconds * 30))
+    strengths = beat_analysis.beat_strengths
+    transitions = build_transition_sequence(len(images), strengths, seed=0)
     return DirectorPlan(
         timeline=[
             DirectorTimelineItem(
                 asset_id=asset.id,
                 duration_frames=duration,
-                transition=TransitionConfig(),
+                transition=TransitionConfig(type=transitions[index], duration_frames=DEFAULT_DURATION.get(transitions[index], 6)),
                 transition_strength=0.5,
                 motion="static",
                 reason="Rule-based pacing from the BGM beat grid.",
             )
-            for asset in images
+            for index, asset in enumerate(images)
         ]
     )
 
@@ -64,10 +67,15 @@ def create_director_plan(
         "downbeats": beat_analysis.downbeats,
         "beat_strengths": beat_analysis.beat_strengths,
     }
-    raw = active_provider.complete(
-        director_prompt([asset.model_dump(mode="json") for asset in images], payload, style)
-    )
-    return validate_director_plan_json(raw, fallback, [asset.id for asset in images])
+    try:
+        raw = active_provider.complete(
+            director_prompt([asset.model_dump(mode="json") for asset in images], payload, style)
+        )
+    except Exception:
+        # Provider/network failures must never stop local video generation.
+        return fallback
+    validated = validate_director_plan_json(raw, fallback, [asset.id for asset in images])
+    return apply_transition_policy(validated, beat_analysis.beat_strengths)
 
 
 def plan_to_storyboard(plan: DirectorPlan, style: VideoStyle) -> Storyboard:

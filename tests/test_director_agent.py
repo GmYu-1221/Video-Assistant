@@ -55,3 +55,17 @@ def test_director_agent_rejects_unsafe_or_out_of_order_llm_output():
     assert plan.timeline[0].asset_id == "a"
     assert plan.timeline[0].motion == "static"
     assert plan.timeline[0].reason == "Rule-based pacing from the BGM beat grid."
+
+
+def test_eight_images_get_cinematic_varied_transitions():
+    assets = [ImageAsset(id=f"a{i}", filename=f"a{i}.jpg", relative_path=f"materials/a{i}.jpg", width=100, height=100) for i in range(8)]
+    plan = create_director_plan(
+        assets,
+        BeatAnalysis(duration=16, sample_rate=44100, bpm=120, beats=[], downbeats=[], beat_strengths=[0.2, 0.45, 0.8, 0.75, 0.3, 0.85, 0.4, 0.9]),
+        "cinematic",
+    )
+    transitions = [item.transition.type.value for item in plan.timeline]
+    assert len(set(transitions)) >= 4
+    assert all(not (a == b == c) for a, b, c in zip(transitions, transitions[1:], transitions[2:]))
+    assert transitions.count("fade") / len(transitions) < 0.30
+    assert all(item.transition.duration_frames <= {"fade": 8, "crossfade": 8, "push": 6, "whip": 5, "glitch": 5, "flash": 3, "iris": 8}.get(item.transition.type.value, 6) for item in plan.timeline)
