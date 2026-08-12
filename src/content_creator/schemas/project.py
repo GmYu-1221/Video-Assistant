@@ -2,6 +2,11 @@ from pydantic import BaseModel, Field
 from .transition import TransitionConfig
 
 
+class EntranceConfig(BaseModel):
+    type: str = "fade_scale"
+    durationInFrames: int = Field(default=15, ge=1)
+
+
 class ImageAsset(BaseModel):
     id: str
     filename: str
@@ -10,6 +15,7 @@ class ImageAsset(BaseModel):
     height: int = Field(gt=0)
     duration_frames: int = Field(default=1, ge=1)
     motion: str = "static"
+    entrance: EntranceConfig = Field(default_factory=EntranceConfig)
 
 
 class AudioConfig(BaseModel):
