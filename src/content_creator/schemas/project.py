@@ -1,9 +1,10 @@
+from typing import Literal
 from pydantic import BaseModel, Field
 from .transition import TransitionConfig
 
 
 class EntranceConfig(BaseModel):
-    type: str = "fade_scale"
+    type: str = "fade"
     durationInFrames: int = Field(default=15, ge=1)
 
 
@@ -13,6 +14,7 @@ class ImageAsset(BaseModel):
     relative_path: str
     width: int = Field(gt=0)
     height: int = Field(gt=0)
+    fit: Literal["contain"] = "contain"
     duration_frames: int = Field(default=1, ge=1)
     motion: str = "static"
     entrance: EntranceConfig = Field(default_factory=EntranceConfig)

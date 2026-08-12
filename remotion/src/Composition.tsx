@@ -16,7 +16,7 @@ export const Slideshow: React.FC<RemotionProps> = (props) => {
         const isLast = index === props.timeline.length - 1;
         const transitionFrames = isLast ? 0 : item.transition.duration_frames;
         const sequence = <TransitionSeries.Sequence key={`sequence-${item.asset_id}`} durationInFrames={item.duration_frames + transitionFrames}>
-          <ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} motion={asset?.motion ?? 'static'} entrance={asset?.entrance} />
+          <ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} imageWidth={asset?.width ?? props.width} imageHeight={asset?.height ?? props.height} motion={asset?.motion ?? 'static'} entrance={asset?.entrance} />
         </TransitionSeries.Sequence>;
         if (isLast) return [sequence];
         const nextItem = props.timeline[index + 1];

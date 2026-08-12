@@ -10,7 +10,7 @@ export interface EntranceConfig { type: EntranceType | string; durationInFrames:
 export interface TransitionConfig { type: TransitionType; duration_frames: number; direction: string; intensity: number; easing: string; }
 export interface TransitionPlanItem { index: number; transition: TransitionConfig; }
 export interface TransitionPlan { transitions: TransitionPlanItem[]; }
-export interface ImageAsset { id: string; filename: string; relative_path: string; width: number; height: number; duration_frames: number; motion: MotionType | string; entrance: EntranceConfig; }
+export interface ImageAsset { id: string; filename: string; relative_path: string; width: number; height: number; fit: "contain"; duration_frames: number; motion: MotionType | string; entrance: EntranceConfig; }
 export interface AudioConfig { path: string; duration: number; sample_rate: number; bpm: number; }
 export interface TimelineItem { asset_id: string; start_frame: number; end_frame: number; duration_frames: number; transition: TransitionConfig; }
 export interface VideoOutput { project_dir: string; render_data: string; final_video: string; }

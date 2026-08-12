@@ -1,7 +1,7 @@
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
-/***/ 2697
+/***/ 7720
 (__unused_webpack_module, __unused_webpack___webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -1873,9 +1873,14 @@ var useTransitionProgress = () => {
 
 
 
-const ImageFrame = ({ src, motion = "static", entrance }) => {
+const ImageFrame = ({ src, imageWidth, imageHeight, motion = "static", entrance, backgroundColor = "#000000" }) => {
   const frame = (0,esm/* useCurrentFrame */.UC)();
-  const { durationInFrames } = (0,esm/* useVideoConfig */.Bk)();
+  const { durationInFrames, width: videoWidth, height: videoHeight } = (0,esm/* useVideoConfig */.Bk)();
+  const fitScale = Math.min(videoWidth / imageWidth, videoHeight / imageHeight);
+  const requestedMotionScale = motion === "zoom_in" || motion === "ken_burns" ? 1.14 : motion === "zoom_out" ? 1.14 : 1;
+  const safeScale = Math.min(1, fitScale / requestedMotionScale);
+  const renderWidth = Math.max(1, Math.round(imageWidth * safeScale));
+  const renderHeight = Math.max(1, Math.round(imageHeight * safeScale));
   const entranceType = (entrance == null ? void 0 : entrance.type) ?? "fade_scale";
   const entranceDuration = Math.max(1, (entrance == null ? void 0 : entrance.durationInFrames) ?? 15);
   const entranceProgress = (0,esm/* interpolate */.GW)(frame, [0, entranceDuration], [0, 1], {
@@ -1894,15 +1899,17 @@ const ImageFrame = ({ src, motion = "static", entrance }) => {
       extrapolateRight: "clamp",
       easing: esm/* Easing */.GS.inOut(esm/* Easing */.GS.quad)
     });
-    if (motion === "zoom_in" || motion === "ken_burns") scale = 1.04 + 0.1 * progress;
-    if (motion === "zoom_out") scale = 1.14 - 0.1 * progress;
-    if (motion === "pan_left") x = -4 * progress;
-    if (motion === "pan_right") x = 4 * progress;
-    if (motion === "pan_up") y = -4 * progress;
-    if (motion === "pan_down") y = 4 * progress;
+    if (motion === "zoom_in" || motion === "ken_burns") scale = (1.04 + 0.1 * progress) / requestedMotionScale;
+    if (motion === "zoom_out") scale = (1.14 - 0.1 * progress) / requestedMotionScale;
+    const horizontalMargin = Math.max(0, (videoWidth - renderWidth * requestedMotionScale) / renderWidth * 50);
+    const verticalMargin = Math.max(0, (videoHeight - renderHeight * requestedMotionScale) / renderHeight * 50);
+    if (motion === "pan_left") x = -horizontalMargin * progress;
+    if (motion === "pan_right") x = horizontalMargin * progress;
+    if (motion === "pan_up") y = -verticalMargin * progress;
+    if (motion === "pan_down") y = verticalMargin * progress;
   }
   const transform = motion === "static" && entranceType === "fade" ? "none" : `translate(${x}%, ${y}%) scale(${scale})`;
-  return /* @__PURE__ */ (0,jsx_runtime.jsx)("img", { src, style: { width: "100%", height: "100%", objectFit: "cover", transform, opacity } });
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, backgroundColor }, children: /* @__PURE__ */ (0,jsx_runtime.jsx)("img", { src, style: { position: "absolute", left: (videoWidth - renderWidth) / 2, top: (videoHeight - renderHeight) / 2, width: renderWidth, height: renderHeight, transform, opacity, transformOrigin: "center center" } }) });
 };
 
 ;// ./src/components/AudioTrack.tsx
@@ -2626,7 +2633,43 @@ var zoomBlur = zoom_blur_makeHtmlInCanvasPresentation(zoomBlurShader);
 
 
 
+;// ./src/transitions/flash.ts
+
+
+const flash = fade;
+
+;// ./src/transitions/push.ts
+
+
+const push = pushCut;
+
+;// ./src/transitions/whip.ts
+
+
+const whip = slide_slide;
+
+;// ./src/transitions/zoom-cut.ts
+
+
+const zoomCut = fade;
+
+;// ./src/transitions/spin.ts
+
+
+const spin = flip;
+
+;// ./src/transitions/glitch.ts
+
+
+const glitch = wipe;
+
 ;// ./src/transitions/index.tsx
+
+
+
+
+
+
 
 
 
@@ -2652,14 +2695,20 @@ const TransitionRegistry = {
   wipe_right: (c, k) => transitions_element(k, c, wipe({ direction: "from-right" })),
   wipe_up: (c, k) => transitions_element(k, c, wipe({ direction: "from-left" })),
   wipe_down: (c, k) => transitions_element(k, c, wipe({ direction: "from-right" })),
-  zoom_in: (c, k) => transitions_element(k, c, dreamyZoom({})),
-  zoom_out: (c, k) => transitions_element(k, c, dreamyZoom({})),
+  // Headless rendering has no guaranteed WebGL2 context; keep these aliases stable and deterministic.
+  zoom_in: (c, k) => transitions_element(k, c, fade()),
+  zoom_out: (c, k) => transitions_element(k, c, fade()),
   zoom_blur: (c, k) => transitions_element(k, c, zoomBlur({ rotation: 0.15 })),
-  zoom_crossfade: (c, k) => transitions_element(k, c, crossZoom({})),
+  zoom_crossfade: (c, k) => transitions_element(k, c, fade()),
   push_left: (c, k) => transitions_element(k, c, pushCut({ incomingStartScale: 1.08 })),
   push_right: (c, k) => transitions_element(k, c, pushCut({ incomingStartScale: 1.08 })),
   push_up: (c, k) => transitions_element(k, c, pushCut({ incomingStartScale: 1.08 })),
   push_down: (c, k) => transitions_element(k, c, pushCut({ incomingStartScale: 1.08 })),
+  push: (c, k) => transitions_element(k, c, push({ incomingStartScale: 1.08 })),
+  whip: (c, k) => transitions_element(k, c, whip({ direction: direction(c) })),
+  zoom_cut: (c, k) => transitions_element(k, c, zoomCut()),
+  spin: (c, k) => transitions_element(k, c, spin({ direction: direction(c) })),
+  glitch: (c, k) => transitions_element(k, c, glitch({ direction: direction(c) })),
   circle: (c, k) => transitions_element(k, c, wipe({ direction: "from-left" })),
   rectangle: (c, k) => transitions_element(k, c, wipe({ direction: "from-left" })),
   diagonal: (c, k) => transitions_element(k, c, wipe({ direction: "from-left" })),
@@ -2674,13 +2723,12 @@ const TransitionRegistry = {
   cube_right: (c, k) => transitions_element(k, c, flip({ direction: "from-right" })),
   blur: (c, k) => transitions_element(k, c, linearBlur({})),
   blur_zoom: (c, k) => transitions_element(k, c, linearBlur({})),
-  flash: (c, k) => transitions_element(k, c, fade()),
+  flash: (c, k) => transitions_element(k, c, flash()),
   light_leak: (c, k) => transitions_element(k, c, fade()),
-  white_flash: (c, k) => transitions_element(k, c, fade()),
+  white_flash: (c, k) => transitions_element(k, c, flash()),
   black_flash: (c, k) => transitions_element(k, c, fade()),
-  glitch: (c, k) => transitions_element(k, c, pushCut({})),
   digital_wipe: (c, k) => transitions_element(k, c, wipe({ direction: "from-right" })),
-  rgb_split: (c, k) => transitions_element(k, c, crossZoom({})),
+  rgb_split: (c, k) => transitions_element(k, c, fade()),
   scanline: (c, k) => transitions_element(k, c, wipe({ direction: "from-left" }))
 };
 const TransitionFactory = (transition, key) => (TransitionRegistry[transition.type] ?? TransitionRegistry.fade)(transition, key);
@@ -2701,9 +2749,14 @@ const Slideshow = (props) => {
       const asset = map.get(item.asset_id);
       const isLast = index === props.timeline.length - 1;
       const transitionFrames = isLast ? 0 : item.transition.duration_frames;
-      const sequence = /* @__PURE__ */ (0,jsx_runtime.jsx)(TransitionSeries.Sequence, { durationInFrames: item.duration_frames + transitionFrames, children: /* @__PURE__ */ (0,jsx_runtime.jsx)(ImageFrame, { src: `${base}/${(asset == null ? void 0 : asset.relative_path) ?? ""}`, motion: (asset == null ? void 0 : asset.motion) ?? "static", entrance: asset == null ? void 0 : asset.entrance }) }, `sequence-${item.asset_id}`);
+      const sequence = /* @__PURE__ */ (0,jsx_runtime.jsx)(TransitionSeries.Sequence, { durationInFrames: item.duration_frames + transitionFrames, children: /* @__PURE__ */ (0,jsx_runtime.jsx)(ImageFrame, { src: `${base}/${(asset == null ? void 0 : asset.relative_path) ?? ""}`, imageWidth: (asset == null ? void 0 : asset.width) ?? props.width, imageHeight: (asset == null ? void 0 : asset.height) ?? props.height, motion: (asset == null ? void 0 : asset.motion) ?? "static", entrance: asset == null ? void 0 : asset.entrance }) }, `sequence-${item.asset_id}`);
       if (isLast) return [sequence];
-      return [sequence, TransitionFactory(item.transition, `transition-${item.asset_id}`)];
+      const nextItem = props.timeline[index + 1];
+      const safeTransition = {
+        ...item.transition,
+        duration_frames: Math.min(item.transition.duration_frames, item.duration_frames, nextItem.duration_frames)
+      };
+      return [sequence, TransitionFactory(safeTransition, `transition-${item.asset_id}`)];
     }) }),
     /* @__PURE__ */ (0,jsx_runtime.jsx)(AudioTrack, { src: `${base}/${props.audio.path}` })
   ] });
@@ -19804,7 +19857,7 @@ var NoReactInternals = {
 /******/ 	// Load entry module and return exports
 /******/ 	// This entry module is referenced by other modules so it can't be inlined
 /******/ 	__webpack_require__(2675);
-/******/ 	__webpack_require__(2697);
+/******/ 	__webpack_require__(7720);
 /******/ 	__webpack_require__(7858);
 /******/ 	var __webpack_exports__ = __webpack_require__(1313);
 /******/ 	

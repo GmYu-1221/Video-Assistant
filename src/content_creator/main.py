@@ -11,10 +11,10 @@ from content_creator.services.timeline import build_timeline
 
 def create_project(args: argparse.Namespace) -> VideoProject:
     audio = validate_regular_file(args.audio, AUDIO_EXTENSIONS)
-    project_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    project_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     project_dir = Path(args.output).resolve() / "projects" / project_id
     project_dir.mkdir(parents=True, exist_ok=True)
-    audio_dir = project_dir / "audio"; audio_dir.mkdir()
+    audio_dir = project_dir / "audio"; audio_dir.mkdir(parents=True, exist_ok=True)
     audio_target = audio_dir / audio.name; shutil.copy2(audio, audio_target)
     assets = scan_and_process(args.images, project_dir, (args.width, args.height))
     analysis = analyze_audio(str(audio_target))
