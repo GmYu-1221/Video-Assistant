@@ -20,9 +20,20 @@ class OpenAICompatibleProvider:
         self._client = client or OpenAI(api_key=api_key, base_url=base_url)
 
     def complete(self, prompt: str) -> str:
+        return self._complete(prompt)
+
+    def complete_json(self, prompt: str) -> str:
+        """Prefer JSON mode, while retaining compatibility with Claude-style gateways."""
+        try:
+            return self._complete(prompt, response_format={"type": "json_object"})
+        except Exception:
+            return self._complete(prompt)
+
+    def _complete(self, prompt: str, **kwargs: object) -> str:
         response = self._client.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
+            **kwargs,
         )
         return response.choices[0].message.content or ""

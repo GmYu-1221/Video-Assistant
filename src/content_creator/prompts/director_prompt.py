@@ -1,7 +1,7 @@
 import json
 
 
-def director_prompt(images: list[dict], beat_analysis: dict, style: str) -> str:
+def director_prompt(images: list[dict], beat_analysis: dict, style: str, remotion_guidance: str = "") -> str:
     """Ask an LLM for decisions only, never implementation code or frame positions."""
     instructions = {
         "task": "Create an image video director plan.",
@@ -13,7 +13,7 @@ def director_prompt(images: list[dict], beat_analysis: dict, style: str) -> str:
                     "transition": {"type": "registered transition type", "duration_frames": "positive integer"},
                     "transition_strength": "number from 0 to 1",
                     "motion": "static",
-                    "animation_intent": {"type": "optional director intent only", "direction": "optional", "speed": "slow|medium|fast", "duration_frames": "positive integer", "energy": "0 to 1", "camera_motion": "optional", "visual_effects": [], "description": "optional"},
+                    "creative_intent": {"scene_id": "input asset id", "description": "director language describing the shot", "movement": "optional movement description", "emotion": "optional emotional tone", "timing": "optional timing description", "style": "cinematic style", "energy": "0 to 1"},
                     "reason": "brief director rationale",
                 }
             ]
@@ -24,7 +24,10 @@ def director_prompt(images: list[dict], beat_analysis: dict, style: str) -> str:
             "Use beat analysis for pacing, but never set timeline start or end frames.",
             "Do not emit TypeScript, React, ffmpeg, crop, cover, scaleX, or scaleY.",
             "Motion must always be static unless a future explicit motion policy changes this contract.",
-            "Use animation_intent only for an explicit entrance or visual direction. Example: 3d_card_flip with back_to_front direction. Never emit TSX, React, CSS, or component source.",
+            "You are a film director, not a component selector. Describe every requested entrance through creative_intent; do not select from an animation or EffectRegistry list.",
+            "Words such as 入场、进入、出现、展开、飞入、翻转、推进 describe creative_intent on a scene, not a transition.",
+            "Words such as 切换、下一张、两张之间、转场 describe the transition between scenes.",
+            "Describe visual movement, camera behavior, effect layers and timing in natural film language. Never output an implementation, component, TypeScript, CSS, or fixed animation type.",
             "Opening transition: use fade or crossfade.",
             "Normal beats: use crossfade, push, or digital_wipe.",
             "Strong beats: use whip, glitch, flash, or zoom_cut.",
@@ -36,6 +39,7 @@ def director_prompt(images: list[dict], beat_analysis: dict, style: str) -> str:
             "Use fast durations: fade/crossfade 8, push 6, whip/glitch 5, flash 3, iris 8 frames. Never default to 15 frames.",
         ],
         "style": style,
+        "remotion_capability_guidance": remotion_guidance,
         "images": images,
         "beat_analysis": beat_analysis,
     }

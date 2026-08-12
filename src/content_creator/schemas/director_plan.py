@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .transition import TransitionConfig
-from .director_intent import AnimationIntent
+from .creative_intent import CreativeIntent
 
 
 class DirectorTimelineItem(BaseModel):
@@ -17,7 +17,8 @@ class DirectorTimelineItem(BaseModel):
     transition_strength: float = Field(default=0.5, ge=0, le=1)
     motion: Literal["static"] = "static"
     reason: str = Field(default="Balanced pacing.", min_length=1, max_length=500)
-    animation_intent: AnimationIntent | None = None
+    creative_intent: CreativeIntent | None = None
+    timing: str | None = Field(default=None, max_length=160)
 
 
 class DirectorPlan(BaseModel):

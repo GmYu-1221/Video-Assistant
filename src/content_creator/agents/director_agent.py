@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from content_creator.prompts.director_prompt import director_prompt
 from content_creator.schemas import (
     DirectorPlan,
@@ -22,6 +24,17 @@ from content_creator.services.director.transition_policy import apply_transition
 
 
 VideoStyle = str
+
+
+def load_remotion_skill_guidance() -> str:
+    """Read installed Remotion guidance as design constraints, not templates."""
+    root = Path(__file__).resolve().parents[3] / ".agents" / "skills"
+    documents = [root / "remotion-best-practices" / "SKILL.md", root / "remotion-docs" / "SKILL.md", root / "remotion-markup" / "SKILL.md"]
+    content = [path.read_text(encoding="utf-8") for path in documents if path.is_file()]
+    if not content:
+        raise RuntimeError("installed Remotion Skill documents are unavailable")
+    # The Director needs capability boundaries only; Creative Agent owns code.
+    return "Remotion supports frame-driven animation, interpolation, spring timing, transforms, opacity, filters, masks, and composition-based scenes. Describe these visually; never name components or write code."
 
 
 def _fallback_plan(images: list[ImageAsset], beat_analysis: BeatAnalysis) -> DirectorPlan:
@@ -69,7 +82,7 @@ def create_director_plan(
     }
     try:
         raw = active_provider.complete(
-            director_prompt([asset.model_dump(mode="json") for asset in images], payload, style)
+            director_prompt([asset.model_dump(mode="json") for asset in images], payload, style, load_remotion_skill_guidance())
         )
     except Exception:
         # Provider/network failures must never stop local video generation.
@@ -87,10 +100,12 @@ def plan_to_storyboard(plan: DirectorPlan, style: VideoStyle) -> Storyboard:
                 scene_id=f"{index + 1:03d}",
                 asset_id=item.asset_id,
                 duration_frames=item.duration_frames,
-                entrance=EntrancePlan(type="fade"),
+                entrance=EntrancePlan(type="none" if item.creative_intent else "fade"),
                 motion=MotionPlan(type=item.motion),
                 transition=item.transition,
                 emotion=item.reason,
+                creative_intent=item.creative_intent,
+                timing=item.timing,
             )
             for index, item in enumerate(plan.timeline)
         ],

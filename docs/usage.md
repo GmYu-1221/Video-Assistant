@@ -99,6 +99,14 @@ uv run python -m content_creator.director_chat \
 
 ## 7. Remotion Creative Agent
 
+### "director>"使用方法
+- plan: 生成或重新生成 DirectorPlan
+- show: 查看当前方案；show json 输出 JSON
+- preview: 用当前方案低分辨率预览渲染
+- render: 按原始尺寸渲染 final.mp4
+- save: 保存 session.json 和 director_plan.json
+- quit: 保存并退出
+
 Creative Agent 将 `DirectorPlan.timeline[].animation_intent` 转为实现中立的 `AnimationPlan`，再由 Render Agent 写入 `render_data.json` 的 `timeline[].animation`。当前支持：
 
 - `3d_card_flip` -> `card_flip_reveal` / `CardFlipReveal`

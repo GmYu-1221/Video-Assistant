@@ -1,6 +1,11 @@
 from pathlib import Path
 from content_creator.agents.remotion_agent import build_advice, create_animation_plan, load_skill_documents
-from content_creator.schemas import AnimationIntent, DirectorPlan, ScenePlan, Storyboard
+from content_creator.schemas import DirectorPlan, ScenePlan, Storyboard
+from content_creator.services.llm.provider import MockLLMProvider
+
+
+def _use_fallback(monkeypatch):
+    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: MockLLMProvider())
 
 def test_remotion_agent_reads_official_skill_documents():
     documents = load_skill_documents()
@@ -14,17 +19,26 @@ def test_remotion_advice_enforces_existing_rendering_rules():
     assert advice.transition_registry_required
 
 
-def test_animation_intent_maps_to_custom_effect_plan():
-    plan = DirectorPlan.model_validate({"timeline": [{"asset_id": "image-001", "duration_frames": 60, "reason": "flip", "animation_intent": {"type": "3d_card_flip", "duration_frames": 18}}]})
+def test_creative_intent_maps_to_effect_plan(monkeypatch):
+    _use_fallback(monkeypatch)
+    plan = DirectorPlan.model_validate({"timeline": [{"asset_id": "image-001", "duration_frames": 60, "reason": "flip", "creative_intent": {"description": "Image rotates from back to front", "movement": "Y rotation", "effects": ["motion blur"]}}]})
     animation = create_animation_plan(plan).animations[0]
-    assert animation.effect.value == "card_flip_reveal"
-    assert animation.component == "CardFlipReveal"
-    assert animation.implementation == "custom"
-    assert animation.props == {"perspective": 800, "rotateY": 180}
-
-
-def test_unknown_animation_intent_has_safe_fallback():
-    plan = DirectorPlan.model_validate({"timeline": [{"asset_id": "image-001", "duration_frames": 60, "reason": "unknown", "animation_intent": {"type": "laser_portal", "duration_frames": 18}}]})
-    animation = create_animation_plan(plan).animations[0]
+    assert animation.type.value == "creative_reveal"
+    assert animation.component == "CreativeReveal"
     assert animation.implementation == "fallback"
-    assert animation.component == "FadeFallback"
+
+
+def test_particle_flip_creative_intent_has_executable_particle_parameters(monkeypatch):
+    _use_fallback(monkeypatch)
+    plan = DirectorPlan.model_validate({"timeline": [{"asset_id": "image-001", "duration_frames": 60, "reason": "opening", "creative_intent": {"description": "Image flips upward from bottom with particles", "effects": ["particle dissolve"]}}]})
+    animation = create_animation_plan(plan).animations[0]
+    assert animation.type.value == "particle_flip_reveal"
+    assert animation.duration_frames == 24
+    assert animation.params == {"particle_density": 120, "rotation_axis": "Y", "motion_blur": True, "perspective": 800, "energy": 0.5}
+    assert animation.implementation == "fallback"
+
+
+def test_scene_without_creative_intent_does_not_receive_an_animation(monkeypatch):
+    _use_fallback(monkeypatch)
+    plan = DirectorPlan.model_validate({"timeline": [{"asset_id": "image-001", "duration_frames": 60, "reason": "opening"}]})
+    assert create_animation_plan(plan).animations == []

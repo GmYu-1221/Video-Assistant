@@ -62,3 +62,21 @@ def test_provider_initialization_and_missing_configuration(monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "claude-sonnet-4-20250514")
     assert get_provider().model_name == "mock"
     assert MockLLMProvider('{"x":1}').complete("test") == '{"x":1}'
+
+
+def test_provider_falls_back_when_gateway_does_not_support_json_mode():
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if "response_format" in payload:
+            return httpx.Response(400, json={"error": {"message": "unsupported response_format"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"operations": []}'}}]})
+
+    client = OpenAI(api_key="test-key", base_url="https://gateway.example/v1", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    provider = OpenAICompatibleProvider(api_key="test-key", model_name="claude", client=client)
+
+    assert provider.complete_json("return JSON") == '{"operations": []}'
+    assert requests[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in requests[1]

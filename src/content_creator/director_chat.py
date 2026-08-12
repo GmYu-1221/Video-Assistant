@@ -21,9 +21,6 @@ def _render(session: ProjectSession, preview: bool) -> Path:
         session, _ = generate_plan(session)
     assert session.current_storyboard is not None
     animation_plan = create_animation_plan(session.current_plan)
-    for animation in animation_plan.animations:
-        if animation.implementation == "fallback":
-            print(f"Animation intent '{animation.props.get('intent_type', 'unknown')}' is not implemented yet; using safe fallback 'fade'.")
     session.project = compile_render_plan(session.project, session.current_storyboard, animation_plan)
     repo_root = Path(__file__).resolve().parents[2]
     target = Path(session.preview_path if preview else session.final_video_path).resolve()

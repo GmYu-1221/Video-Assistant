@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from .transition import TransitionConfig
+from .creative_intent import CreativeIntent
 
 class EntrancePlan(BaseModel):
     type: str = "fade"
@@ -16,3 +17,5 @@ class ScenePlan(BaseModel):
     motion: MotionPlan = Field(default_factory=MotionPlan)
     transition: TransitionConfig = Field(default_factory=TransitionConfig)
     emotion: str = "neutral"
+    creative_intent: CreativeIntent | None = None
+    timing: str | None = None

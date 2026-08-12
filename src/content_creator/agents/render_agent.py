@@ -1,12 +1,17 @@
 import json
 from pathlib import Path
-from content_creator.schemas import AnimationPlan, TimelineItem, VideoProject
+from content_creator.schemas import AnimationPlan, DirectorPlan, DirectorTimelineItem, TimelineItem, VideoProject
+from content_creator.agents.remotion_agent import create_animation_plan
 from content_creator.services.music import adapt_audio_to_duration
 
 def compile_render_plan(project: VideoProject, storyboard, animation_plan: AnimationPlan | None = None) -> VideoProject:
     cursor = 0
     timeline = []
-    animation_by_asset = {item.asset_id: item for item in animation_plan.animations} if animation_plan else {}
+    if animation_plan is None:
+        # Storyboard is a durable plan boundary. Rebuild a compatible DirectorPlan
+        # so animations survive callers that compile a storyboard directly.
+        animation_plan = create_animation_plan(DirectorPlan(timeline=[DirectorTimelineItem(asset_id=scene.asset_id, duration_frames=scene.duration_frames, transition=scene.transition, motion=scene.motion.type, reason=scene.emotion, creative_intent=scene.creative_intent, timing=scene.timing) for scene in storyboard.scenes]))
+    animation_by_asset = {item.asset_id: item for item in animation_plan.animations}
     for scene in storyboard.scenes:
         end = cursor + scene.duration_frames
         timeline.append(TimelineItem(asset_id=scene.asset_id, start_frame=cursor, end_frame=end, duration_frames=scene.duration_frames, transition=scene.transition, animation=animation_by_asset.get(scene.asset_id)))
