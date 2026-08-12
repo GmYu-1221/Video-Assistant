@@ -1,0 +1,8 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+remotion/node_modules/
+output/projects/*
+!output/projects/.gitkeep
+input/bgm.*
