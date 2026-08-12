@@ -1,0 +1,3 @@
+import {AbsoluteFill} from 'remotion';
+import {presentation} from './types';
+export const clockWipe = () => presentation(({children, presentationProgress, presentationDirection}) => { const p = presentationDirection === 'entering' ? presentationProgress : 1 - presentationProgress; const a = p * 360; const rad = (a - 90) * Math.PI / 180; const x = 50 + 50 * Math.cos(rad); const y = 50 + 50 * Math.sin(rad); return <AbsoluteFill style={{clipPath:`polygon(50% 50%, 50% 0%, ${a < 90 ? `${x}% ${y}%` : '100% 0%'}, ${a < 180 ? `${x}% ${y}%` : '100% 100%'}, ${a < 270 ? `${x}% ${y}%` : '0% 100%'}, ${a < 360 ? `${x}% ${y}%` : '0% 0%'})`}}>{children}</AbsoluteFill>; });

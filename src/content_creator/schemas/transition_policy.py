@@ -22,12 +22,12 @@ class TransitionPlan(BaseModel):
 
 
 PRESETS: dict[str, list[TransitionType]] = {
-    "cinematic": [TransitionType.fade, TransitionType.dissolve, TransitionType.zoom_out, TransitionType.slide_left],
-    "modern": [TransitionType.fade, TransitionType.crossfade, TransitionType.slide_left, TransitionType.wipe_right],
-    "minimal": [TransitionType.fade, TransitionType.dissolve, TransitionType.slide_left],
-    "dynamic": [TransitionType.zoom_in, TransitionType.push_left, TransitionType.wipe_right, TransitionType.flash],
-    "social_media": [TransitionType.zoom_in, TransitionType.slide_left, TransitionType.flash, TransitionType.wipe_up],
-    "tech": [TransitionType.glitch, TransitionType.digital_wipe, TransitionType.rgb_split, TransitionType.slide_right],
-    "news": [TransitionType.wipe_left, TransitionType.slide_left, TransitionType.fade],
-    "documentary": [TransitionType.fade, TransitionType.dissolve, TransitionType.slide_right],
+    "cinematic": [TransitionType.crossfade, TransitionType.black_flash, TransitionType.iris, TransitionType.light_leak],
+    "modern": [TransitionType.fade, TransitionType.crossfade, TransitionType.slide_left, TransitionType.digital_wipe],
+    "minimal": [TransitionType.fade, TransitionType.crossfade, TransitionType.push],
+    "dynamic": [TransitionType.push, TransitionType.whip, TransitionType.digital_wipe, TransitionType.white_flash],
+    "social_media": [TransitionType.whip, TransitionType.pixel_reveal, TransitionType.white_flash, TransitionType.push],
+    "tech": [TransitionType.glitch, TransitionType.digital_wipe, TransitionType.pixel_reveal, TransitionType.clock_wipe],
+    "news": [TransitionType.push, TransitionType.digital_wipe, TransitionType.crossfade],
+    "documentary": [TransitionType.crossfade, TransitionType.black_flash, TransitionType.iris],
 }

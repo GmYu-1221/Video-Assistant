@@ -1,9 +1,10 @@
 """Export the Python protocol as a TypeScript declaration."""
 from pathlib import Path
 from .project import VideoProject
+from .transition import TransitionType
 
 
-TS_TYPES = '''export type TransitionType = "fade" | "crossfade" | "dissolve" | "slide" | "slide_left" | "slide_right" | "slide_up" | "slide_down" | "wipe" | "wipe_left" | "wipe_right" | "wipe_up" | "wipe_down" | "zoom_in" | "zoom_out" | "flip" | "zoom_blur" | "zoom_crossfade" | "push_left" | "push_right" | "push_up" | "push_down" | "circle" | "rectangle" | "diagonal" | "diagonal_reverse" | "iris" | "radial" | "flip_x" | "flip_y" | "rotate" | "cube_left" | "cube_right" | "blur" | "blur_zoom" | "flash" | "light_leak" | "white_flash" | "black_flash" | "glitch" | "digital_wipe" | "rgb_split" | "scanline" | "push" | "whip" | "zoom_cut" | "spin";
+TS_TYPES = '''export type TransitionType = __TRANSITION_TYPES__;
 export type MotionType = "static" | "zoom_in" | "zoom_out" | "pan_left" | "pan_right" | "pan_up" | "pan_down" | "ken_burns";
 export type EntranceType = "fade" | "fade_scale" | "slide_up" | "none";
 export interface EntranceConfig { type: EntranceType | string; durationInFrames: number; }
@@ -22,7 +23,8 @@ export type RemotionProps = VideoProject & Record<string, unknown>;
 def export_types(path: str | Path) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(TS_TYPES, encoding="utf-8")
+    transition_types = " | ".join(f'"{item.value}"' for item in TransitionType)
+    target.write_text(TS_TYPES.replace("__TRANSITION_TYPES__", transition_types), encoding="utf-8")
     return target
 
 

@@ -50,6 +50,9 @@ class TransitionType(str, Enum):
     whip = "whip"
     zoom_cut = "zoom_cut"
     spin = "spin"
+    clock_wipe = "clock_wipe"
+    blinds = "blinds"
+    pixel_reveal = "pixel_reveal"
 
 
 class TransitionConfig(BaseModel):
