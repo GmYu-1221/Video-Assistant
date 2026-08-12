@@ -9,7 +9,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 
 from content_creator.agents.director_chat import format_plan, generate_plan, update_plan
-from content_creator.agents.remotion_agent import create_animation_plan
+from content_creator.agents.remotion_agent import create_remotion_plans
 from content_creator.agents.render_agent import compile_render_plan
 from content_creator.services.llm.router import get_agent_provider
 from content_creator.services.renderer import render_project
@@ -20,8 +20,8 @@ def _render(session: ProjectSession, preview: bool) -> Path:
     if session.current_plan is None:
         session, _ = generate_plan(session)
     assert session.current_storyboard is not None
-    animation_plan = create_animation_plan(session.current_plan)
-    session.project = compile_render_plan(session.project, session.current_storyboard, animation_plan)
+    animation_plan, transition_effect_plan = create_remotion_plans(session.current_plan)
+    session.project = compile_render_plan(session.project, session.current_storyboard, animation_plan, transition_effect_plan)
     repo_root = Path(__file__).resolve().parents[2]
     target = Path(session.preview_path if preview else session.final_video_path).resolve()
     result = render_project(session.project, repo_root / "remotion", target, preview=preview)

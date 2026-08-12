@@ -1,20 +1,24 @@
 import json
 from pathlib import Path
-from content_creator.schemas import AnimationPlan, DirectorPlan, DirectorTimelineItem, TimelineItem, VideoProject
-from content_creator.agents.remotion_agent import create_animation_plan
+from content_creator.schemas import AnimationPlan, DirectorPlan, DirectorTimelineItem, TimelineItem, TransitionEffectPlan, VideoProject
+from content_creator.agents.remotion_agent import create_remotion_plans
 from content_creator.services.music import adapt_audio_to_duration
 
-def compile_render_plan(project: VideoProject, storyboard, animation_plan: AnimationPlan | None = None) -> VideoProject:
+def compile_render_plan(project: VideoProject, storyboard, animation_plan: AnimationPlan | None = None, transition_effect_plan: TransitionEffectPlan | None = None) -> VideoProject:
     cursor = 0
     timeline = []
-    if animation_plan is None:
+    if animation_plan is None or transition_effect_plan is None:
         # Storyboard is a durable plan boundary. Rebuild a compatible DirectorPlan
         # so animations survive callers that compile a storyboard directly.
-        animation_plan = create_animation_plan(DirectorPlan(timeline=[DirectorTimelineItem(asset_id=scene.asset_id, duration_frames=scene.duration_frames, transition=scene.transition, motion=scene.motion.type, reason=scene.emotion, creative_intent=scene.creative_intent, timing=scene.timing) for scene in storyboard.scenes]))
+        rebuilt_plan = DirectorPlan(timeline=[DirectorTimelineItem(asset_id=scene.asset_id, duration_frames=scene.duration_frames, transition=scene.transition, motion=scene.motion.type, reason=scene.emotion, creative_intent=scene.creative_intent, transition_intent=scene.transition_intent, timing=scene.timing) for scene in storyboard.scenes])
+        generated_animation, generated_transitions = create_remotion_plans(rebuilt_plan)
+        animation_plan = animation_plan or generated_animation
+        transition_effect_plan = transition_effect_plan or generated_transitions
     animation_by_asset = {item.asset_id: item for item in animation_plan.animations}
+    transition_by_source = {item.from_asset_id: item for item in transition_effect_plan.transitions}
     for scene in storyboard.scenes:
         end = cursor + scene.duration_frames
-        timeline.append(TimelineItem(asset_id=scene.asset_id, start_frame=cursor, end_frame=end, duration_frames=scene.duration_frames, transition=scene.transition, animation=animation_by_asset.get(scene.asset_id)))
+        timeline.append(TimelineItem(asset_id=scene.asset_id, start_frame=cursor, end_frame=end, duration_frames=scene.duration_frames, transition=scene.transition, animation=animation_by_asset.get(scene.asset_id), transition_effect=transition_by_source.get(scene.asset_id)))
         cursor = end
     project_dir = Path(project.output.project_dir).resolve()
     audio_dir = project_dir / "audio"
@@ -35,5 +39,5 @@ def compile_render_plan(project: VideoProject, storyboard, animation_plan: Anima
     return updated
 
 def render_node(state: dict) -> dict:
-    project = compile_render_plan(state["project"], state["storyboard"], state.get("animation_plan"))
+    project = compile_render_plan(state["project"], state["storyboard"], state.get("animation_plan"), state.get("transition_effect_plan"))
     return {"project": project, "render_plan": project.model_dump(mode="json")}

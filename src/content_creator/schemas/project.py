@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from .transition import TransitionConfig
 from .color import RGBColor
 from .animation_plan import AnimationEffect
+from .transition_effect_plan import TransitionEffectPlanItem
 
 
 class EntranceConfig(BaseModel):
@@ -38,6 +39,7 @@ class TimelineItem(BaseModel):
     duration_frames: int = Field(gt=0)
     transition: TransitionConfig
     animation: AnimationEffect | None = None
+    transition_effect: TransitionEffectPlanItem | None = None
 
 
 class VideoOutput(BaseModel):

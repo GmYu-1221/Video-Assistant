@@ -49,7 +49,7 @@ def _chat_prompt(session: ProjectSession, message: str) -> str:
                                 "style": "optional style",
                             },
                             "duration_frames": "optional positive integer",
-                            "transition": {"type": "registered transition", "duration_frames": "positive integer"},
+                            "transition_intent": {"description": "natural-language visual transition to the following scene", "effects": ["descriptive visual layers"]},
                             "emotion": "optional scene rationale/emotion",
                             "timing": "optional scene timing note",
                         },
@@ -76,9 +76,9 @@ def _chat_prompt(session: ProjectSession, message: str) -> str:
                 "scene_id must be an exact supplied asset_id, never Scene01, scene_001, or an index.",
                 "Only include fields the user explicitly asked to change; omit all other changes fields.",
                 "For an entrance or visual motion request, set changes.creative_intent. It describes visuals, never a Remotion component or effect ID.",
-                "For a duration request, set changes.duration_frames only. For transition/pacing requests, set changes.transition only on affected scenes.",
+                "For a duration request, set changes.duration_frames only. For a visual transition request, set changes.transition_intent on the outgoing scene. Describe it naturally; never name an effect type or component.",
                 "Keep static image motion policy unchanged. Do not write TSX, React, CSS, ffmpeg, crop, cover, scaleX, or scaleY.",
-                "Use only registered TransitionConfig types and preserve all other current-plan values locally.",
+                "Do not output transition.type or TransitionConfig. Preserve internal baseline transitions locally.",
             ],
         },
         ensure_ascii=False,
@@ -95,6 +95,10 @@ def merge_director_plan_patch(plan: DirectorPlan, patch: DirectorPlanPatch) -> D
         update: dict[str, object] = {}
         if "duration_frames" in changes.model_fields_set:
             update["duration_frames"] = changes.duration_frames
+        if "transition_intent" in changes.model_fields_set:
+            update["transition_intent"] = changes.transition_intent.model_copy(
+                update={"scene_id": current.asset_id, "style": changes.transition_intent.style or "cinematic"}
+            )
         if "transition" in changes.model_fields_set:
             update["transition"] = changes.transition
         if "timing" in changes.model_fields_set:
@@ -174,7 +178,7 @@ def format_plan(session: ProjectSession, as_json: bool = False) -> str:
             f"Asset: {item.asset_id}",
             f"Duration: {item.duration_frames} frames / {item.duration_frames / session.fps:.1f}s",
             f"Animation Design: {animation}",
-            f"Transition: {item.transition.type.value} / {item.transition.duration_frames}f",
+            f"Transition: {item.transition_intent.description if item.transition_intent else item.transition.type.value} / {item.transition.duration_frames}f",
             f"Emotion: {item.reason}",
             "",
         ])

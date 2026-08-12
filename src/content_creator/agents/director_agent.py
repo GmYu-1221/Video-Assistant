@@ -105,6 +105,7 @@ def plan_to_storyboard(plan: DirectorPlan, style: VideoStyle) -> Storyboard:
                 transition=item.transition,
                 emotion=item.reason,
                 creative_intent=item.creative_intent,
+                transition_intent=item.transition_intent,
                 timing=item.timing,
             )
             for index, item in enumerate(plan.timeline)

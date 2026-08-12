@@ -15,6 +15,9 @@ class DirectorPlanChanges(BaseModel):
 
     creative_intent: CreativeIntent | None = None
     duration_frames: int | None = Field(default=None, gt=0)
+    transition_intent: CreativeIntent | None = None
+    # Deprecated compatibility input for callers of the pre-intent Python API.
+    # Director-facing prompts never include this field.
     transition: TransitionConfig | None = None
     emotion: str | None = Field(default=None, min_length=1, max_length=500)
     timing: str | None = Field(default=None, min_length=1, max_length=160)
@@ -25,6 +28,8 @@ class DirectorPlanChanges(BaseModel):
             raise ValueError("changes must contain at least one field")
         if "creative_intent" in self.model_fields_set and self.creative_intent is None:
             raise ValueError("creative_intent cannot be null")
+        if "transition_intent" in self.model_fields_set and self.transition_intent is None:
+            raise ValueError("transition_intent cannot be null")
         return self
 
 

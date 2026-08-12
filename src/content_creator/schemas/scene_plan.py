@@ -18,4 +18,5 @@ class ScenePlan(BaseModel):
     transition: TransitionConfig = Field(default_factory=TransitionConfig)
     emotion: str = "neutral"
     creative_intent: CreativeIntent | None = None
+    transition_intent: CreativeIntent | None = None
     timing: str | None = None

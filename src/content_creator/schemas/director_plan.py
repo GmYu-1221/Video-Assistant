@@ -18,6 +18,9 @@ class DirectorTimelineItem(BaseModel):
     motion: Literal["static"] = "static"
     reason: str = Field(default="Balanced pacing.", min_length=1, max_length=500)
     creative_intent: CreativeIntent | None = None
+    # Describes the boundary from this scene to the following scene.  The
+    # Remotion Creative Agent owns conversion to a registered effect type.
+    transition_intent: CreativeIntent | None = None
     timing: str | None = Field(default=None, max_length=160)
 
 

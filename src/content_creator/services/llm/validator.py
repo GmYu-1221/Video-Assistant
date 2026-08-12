@@ -93,6 +93,10 @@ def _format_patch_validation_error(exc: ValidationError) -> str:
         return "Patch operation changes cannot be empty"
     if location.endswith("creative_intent") and "cannot be null" in message:
         return "Patch creative_intent cannot be null"
+    if location.endswith("transition_intent.description") and error["type"] == "missing":
+        return "Patch is missing required field: transition_intent.description"
+    if location.endswith("transition_intent") and "cannot be null" in message:
+        return "Patch transition_intent cannot be null"
     if ".transition.type" in location:
         return f"Invalid transition type at {location}: {message}"
     if ".transition.duration_frames" in location:
