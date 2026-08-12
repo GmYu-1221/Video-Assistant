@@ -1,5 +1,6 @@
 from enum import Enum
 from pydantic import BaseModel, Field
+from .color import RGBColor
 
 
 class TransitionType(str, Enum):
@@ -61,6 +62,7 @@ class TransitionConfig(BaseModel):
     direction: str = "from-right"
     intensity: float = Field(default=0.6, ge=0, le=1)
     easing: str = "easeInOut"
+    background_color: RGBColor | None = None
 
     @property
     def duration(self) -> int:

@@ -1,6 +1,7 @@
 from typing import Literal
 from pydantic import BaseModel, Field
 from .transition import TransitionConfig
+from .color import RGBColor
 
 
 class EntranceConfig(BaseModel):
@@ -14,6 +15,7 @@ class ImageAsset(BaseModel):
     relative_path: str
     width: int = Field(gt=0)
     height: int = Field(gt=0)
+    backgroundColor: RGBColor = Field(default_factory=lambda: RGBColor(r=17, g=24, b=39))
     fit: Literal["contain"] = "contain"
     duration_frames: int = Field(default=1, ge=1)
     motion: str = "static"

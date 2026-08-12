@@ -23,6 +23,7 @@ export const Slideshow: React.FC<RemotionProps> = (props) => {
         const safeTransition = {
           ...item.transition,
           duration_frames: Math.min(item.transition.duration_frames, item.duration_frames, nextItem.duration_frames),
+          background_color: asset?.backgroundColor,
         };
         return [sequence, TransitionFactory(safeTransition, `transition-${item.asset_id}`)];
       })}

@@ -1,5 +1,5 @@
 from pathlib import Path
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageStat
 from content_creator.schemas import ImageAsset
 from content_creator.security.files import IMAGE_EXTENSIONS, validate_regular_file
 
@@ -22,13 +22,15 @@ def scan_and_process(input_dir: str | Path, project_dir: str | Path, max_size: t
             with Image.open(path) as opened:
                 image = ImageOps.exif_transpose(opened).convert("RGB")
                 image.load()
+                mean = ImageStat.Stat(image).mean
+                background_color = {"r": round(mean[0]), "g": round(mean[1]), "b": round(mean[2])}
         except Exception as exc:
             raise ValueError(f"invalid image {path}: {exc}") from exc
         filename = f"{index:03d}_{path.stem}.jpg"
         image.thumbnail(max_size, Image.Resampling.LANCZOS)
         image.save(processed_dir / filename, "JPEG", quality=94, optimize=True)
         (original_dir / path.name).write_bytes(path.read_bytes())
-        assets.append(ImageAsset(id=f"image-{index:03d}", filename=path.name, relative_path=f"materials/processed/{filename}", width=image.width, height=image.height, motion="static"))
+        assets.append(ImageAsset(id=f"image-{index:03d}", filename=path.name, relative_path=f"materials/processed/{filename}", width=image.width, height=image.height, motion="static", backgroundColor=background_color))
     if not assets:
         raise ValueError("no valid images found")
     return assets
