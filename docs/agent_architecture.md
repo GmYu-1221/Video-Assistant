@@ -1,58 +1,66 @@
 # Agent 架构说明
 
-## 当前 Agent
-
-### Vision Agent
-
-当前实现使用 Pillow 做本地规则分析，包括图片尺寸、宽高比、背景平均色和边缘复杂度。它不调用视觉大模型。
-
-### Director Agent
-
-Director Agent 接收 `ImageAsset`、`BeatAnalysis` 和风格，生成 `DirectorPlan`。它决定图片停留、转场类型、转场强度、情绪和导演理由。LLM 输出必须是 JSON，并经过 Pydantic、转场注册表和安全策略校验。
-
-### Remotion Agent
-
-Remotion Agent 读取 `.agents/skills/` 中安装的 Remotion Skill 文档，检查 Storyboard 是否符合 contain、static motion、合法动画 API 和 Transition Registry 约束。它输出建议，不生成任意 TSX。
-
-### Render Agent
-
-Render Agent 将 Storyboard 编译为 Timeline、生成 `render_data.json`，适配 BGM，并调用现有 Remotion Renderer。Media Server 生命周期由 Renderer 管理。
-
-## LangGraph 流程
+## 当前流程
 
 ```text
-START
-  │
-  v
-Vision Agent（本地图片分析）
-  │ image_analysis
-  v
-Director Agent（LLM 或规则回退）
-  │ DirectorPlan / Storyboard
-  v
-Remotion Agent（Skill 约束建议）
-  │ RemotionAdvice
-  v
-Render Agent（Timeline + Renderer）
-  │
-  v
-END -> final.mp4
+VideoState
+   |
+   v
+Vision Agent       本地分析图片尺寸、平均色、复杂度
+   |
+   v
+Director Agent     LLM 或规则生成 DirectorPlan
+   |
+   v
+Remotion Agent     Skill 约束 + AnimationPlan 映射
+   |
+   v
+Render Agent       Storyboard、Timeline、音频适配和渲染
+   |
+   v
+END -> MP4
 ```
 
-`VideoState` 在节点间携带 `VideoProject`、图片分析、`DirectorPlan`、Storyboard、Remotion 建议、Render Plan 和错误列表。
+LangGraph State 使用 `VideoProject`、`ImageAnalysis`、`BeatAnalysis`、`DirectorPlan`、`AnimationPlan`、Storyboard、RemotionAdvice、Render Plan 和错误列表在节点间传递。
 
-## 交互式 Director Chat
+## Vision Agent
 
-`uv run python -m content_creator.director_chat` 读取现有项目的 `render_data.json` 和 `director_plan.json`。用户输入被转换为结构化 `DirectorIntent`，只对当前计划做增量修改，并保存会话历史。Chat Agent 不修改 Remotion 源码，也不生成实现代码。
+V1 不调用视觉大模型。它使用 Pillow 读取尺寸、宽高比、平均背景色和基础信息密度，为 Director 提供可复现的素材分析。
+
+## Director Agent
+
+Director Agent 负责图片停留时间、转场、节奏、情绪和动画意图。输出必须是 `DirectorPlan`，包含一个与图片一一对应的 `timeline`。默认 `motion=static`，不直接生成 TSX、React、CSS 或 ffmpeg。
+
+## Remotion Creative Agent
+
+Creative Agent 不生成任意源码，而是将 `animation_intent` 映射为 `AnimationPlan`。它读取 `.agents/skills/` 中的官方 Remotion 文档，确认 API 和项目约束后选择已注册效果。当前映射：
+
+```text
+3d_card_flip -> CardFlipReveal
+camera_push  -> CameraPush
+glitch       -> GlitchReveal
+light_leak   -> LightLeak
+```
+
+不支持的意图保留原始 JSON，并降级为 `FadeFallback`。
+
+## Render Agent
+
+Render Agent 将 DirectorPlan 转为 Storyboard，再编译绝对时间轴。它把 AnimationPlan 绑定到 `TimelineItem.animation`，生成 `render_data.json`，按最终 Timeline 时长调用 BGM adapter，最后交给本地 Remotion Renderer。
+
+## Director Workspace
+
+交互 CLI 使用 `ProjectSession` 保存绝对资源路径、当前计划、Storyboard、分析结果、对话历史和预览/正式视频路径。`plan` 生成计划；自然语言输入修改当前计划；`preview` 和 `render` 使用同一份当前计划；`quit` 自动保存。
 
 ## 未来 Agent
 
 ```text
-Vision Agent      -> 图片理解
-Music Agent       -> 音乐段落和能量
-Director Agent    -> 镜头、停留和转场决策
-Remotion Agent    -> 动画实现建议
-Render Agent      -> 最终本地渲染
+Vision Agent   -> 图片理解
+Music Agent    -> 音乐段落和能量
+Director Agent -> 镜头和节奏
+Creative Agent -> 动画实现计划
+Render Agent   -> 本地渲染
+Subtitle Agent -> 未来字幕规划
 ```
 
-当前 Vision 和 Music 已有本地规则能力；独立的未来 Agent 接口尚不代表已经接入云端模型。
+未来 Agent 仍只能通过结构化 Schema 协作，不能让 LLM 直接控制 Remotion 源码、ffmpeg 或文件系统。

@@ -3,119 +3,86 @@
 ## 1. 总体架构
 
 ```text
-本地图片目录 ──> Asset Scanner / Image Processor
-                         │
-本地 BGM ───────> librosa Beat Analyzer
-                         │
-                         v
-                 Director Agent / Rule Policy
-                         │
-                         v
-                    DirectorPlan
-                         │ Pydantic 校验
-                         v
-                     Storyboard
-                         │
-                         v
-                  Render Agent / Timeline
-                         │
-                         v
-                  Media Server + Remotion
-                         │
-                         v
-                         MP4
+Input images / BGM
+        |
+        +--> Vision rules (Pillow)
+        +--> Music analysis (librosa)
+                    |
+                    v
+             Director Agent
+                    |
+                    v
+              DirectorPlan
+                    |
+                    v
+          Remotion Creative Agent
+                    |
+                    v
+             AnimationPlan
+                    |
+                    v
+        Storyboard / Timeline compiler
+                    |
+                    v
+              Render Agent
+                    |
+                    v
+          Remotion Composition -> MP4
 ```
 
-Python 负责素材、音频、Schema、计划和渲染编排；Remotion 负责 Composition、Sequence、ImageFrame、TransitionSeries、Audio 和最终视频帧。
+普通模式保留旧的规则时间轴；`--agent-mode` 通过 LangGraph 编排 Vision、Director、Creative 和 Render 节点。
 
-## 2. Agent 架构
+## 2. Session 与路径
 
-当前代码包含 LangGraph 节点 `vision_agent`、`director_agent`、`remotion_agent` 和 `render_agent`。其中 Vision 使用本地 Pillow 规则分析，Director 可使用 OpenAI Compatible LLM 或本地规则回退，Remotion Agent 读取官方 Skill 文档并输出约束建议，Render Agent 将 Storyboard 编译为现有 Timeline。
+Director Workspace 使用 `ProjectSession` 作为唯一上下文。它保存 `project_dir`、`images_dir`、`audio_path`、`source_audio_path`、输出目录、画布、FPS、风格、分析结果、当前计划、Storyboard、对话历史和渲染路径。所有路径序列化为绝对路径，恢复项目时不会依赖当前工作目录。
 
-```text
-START
-  -> vision_agent
-  -> director_agent
-  -> remotion_agent
-  -> render_agent
-  -> END
-```
+## 3. Director Agent
 
-交互式 Director Chat 是独立 CLI，会对已有 `DirectorPlan` 应用增量 `DirectorIntent`，再调用现有渲染链路。
+Director Agent 的输入是 `ImageAsset`、`BeatAnalysis` 和风格，输出严格的 `DirectorPlan`。LLM 只能做导演决策：时长、转场、节奏、情绪和 `animation_intent`。`start_frame`、`end_frame` 由本地编译器计算，LLM 不生成渲染代码。
 
-## 3. Director Agent 设计
+## 4. Creative Agent 与 AnimationPlan
 
-LLM 不直接写 React、TSX、ffmpeg 或 Remotion 文件，只负责导演决策。
-
-输入：
-
-- `ImageAsset`：资源 ID、相对路径、尺寸、背景色、contain 配置。
-- `BeatAnalysis`：时长、采样率、BPM、beats、downbeats、beat_strengths。
-- `VideoStyle`：例如 `cinematic`、`dynamic`、`minimal`。
-
-输出：
+Creative Agent 读取官方 Remotion Skill 文档，按白名单将意图映射为 `AnimationEffect`：
 
 ```json
 {
-  "timeline": [
-    {
-      "asset_id": "img001",
-      "duration_frames": 120,
-      "transition": {"type": "crossfade", "duration_frames": 8},
-      "transition_strength": 0.5,
-      "motion": "static",
-      "reason": "Opening image establishes the mood."
-    }
-  ]
+  "asset_id": "image-001",
+  "effect": "card_flip_reveal",
+  "component": "CardFlipReveal",
+  "implementation": "custom",
+  "duration_frames": 18,
+  "props": {"perspective": 800, "rotateY": 180},
+  "fallback": "none"
 }
 ```
 
-Pydantic 校验输入输出；资产顺序、转场注册、时长和静态 motion 不符合规则时使用确定性 fallback。
-
-## 4. 数据结构
-
-- `DirectorPlan`：导演输出的场景列表，唯一允许被 LLM 生成的计划协议。
-- `DirectorTimelineItem`：单张图片的停留、转场、强度、运动状态和理由。
-- `TimelineItem`：渲染阶段的绝对 `start_frame`、`end_frame` 和 `duration_frames`。
-- `TransitionConfig`：统一的转场类型、帧数、方向、强度、缓动和背景色配置。
-- `Storyboard` / `ScenePlan`：Render Agent 使用的兼容协议。
-
-LLM 不直接提供 `start_frame` 和 `end_frame`，这些由本地时间轴编译器计算。
+未知意图使用 `implementation=fallback`，保留原始意图类型，不让不支持的效果阻塞预览或正式渲染。
 
 ## 5. Remotion 渲染设计
 
-Remotion 通过 `Root` 注册 `Slideshow` Composition。`Composition.tsx` 将 Timeline 映射为 `TransitionSeries.Sequence`，使用 `ImageFrame` 渲染图片，并通过转场 Registry 生成 `TransitionSeries.Transition`。Composition 的 `calculateMetadata` 根据 Timeline 末帧决定视频时长。
-
-音频通过 `Audio` 组件播放 Media Server 提供的本地音频 URL。Media Server 只监听 `127.0.0.1`，只允许当前项目的 `materials/` 和 `audio/` 路径。
+`Composition.tsx` 负责组合 `TransitionSeries.Sequence`、`ImageFrame`、EffectRenderer 和 Audio。`EffectRegistry` 负责把动画名称映射到独立效果组件；Composition 不维护大量动画类型判断。Timeline 末帧决定视频总时长，音频适配到该时长。
 
 ## 6. 图片安全设计
 
-所有图片始终使用 `contain` 逻辑：按照视频画布和原图尺寸计算最大等比例缩放，居中显示并保留背景区域。
+`ImageFrame` 按 `min(videoWidth/imageWidth, videoHeight/imageHeight)` 计算 contain 尺寸并居中。图片保持原始宽高比，空余区域由背景色填充；当前实现按画布最大 contain 尺寸计算，因此小图也可能被等比例放大。
 
-禁止：
+禁止 `object-fit: cover`、crop、center-crop、`scaleX`、`scaleY` 和改变宽高比的拉伸。默认 `motion=static`；效果动画结束后返回未包装的原始图片场景。
 
-- `object-fit: cover`
-- crop / center-crop
-- `scaleX` / `scaleY`
-- 改变原始宽高比的强制拉伸
+## 7. Effect 系统
 
-默认 `motion=static`。入场动画和转场必须与图片内部 motion 分离，不能使图片永久放大或平移出画布。
+当前效果目录为 `remotion/src/effects/`：
 
-## 7. 转场系统设计
+- `CardFlipReveal`：CSS `rotateY` 卡片翻转。
+- `CameraPush`：短暂 `translate` 叠层，底层保持完整图片。
+- `GlitchReveal`：确定性 RGB 偏移、切片和短暂滤镜。
+- `LightLeak`：只增加 overlay，不改变图片尺寸。
 
-Python 的 `TransitionConfig` 描述转场意图；Remotion 的 Transition Registry 将类型映射到独立 Presentation。当前已实现基础、推入、擦除、闪切、whip、glitch、iris、digital wipe 等效果，并为未知或不稳定效果保留安全 fallback。
+实现使用当前已验证的 Remotion API：`useCurrentFrame`、`interpolate`、`Easing` 和 React 样式。效果结束时恢复原始场景。
 
-转场策略按 beat strength 和风格预设选择候选，并限制连续重复、高复杂度连续出现和过长 duration。Registry 是实现边界，Director 不生成组件代码。
+## 8. 转场与安全边界
 
-## 8. LLM 扩展方向
+转场意图通过 Python `TransitionConfig` 进入 Remotion Transition Registry。动画 Registry 与转场 Registry 分离；两者都不能破坏 contain 规则。未知转场或动画使用安全 fallback。
 
-未来可增加独立 Agent：
+## 9. 扩展方向
 
-- 图片理解 Agent：提供信息密度、主体和构图分析。
-- 音乐 Agent：提供更丰富的段落、高潮和能量分析。
-- Director Agent：综合素材和音乐做镜头设计。
-- Remotion Creative Agent：在约束内提出动画组件建议。
-- 字幕 Agent：当前未实现，未来可作为独立模块。
-- 音乐生成 Agent：当前只使用本地 BGM，不生成音乐。
-
-所有扩展仍需通过 Pydantic Schema 和现有渲染安全规则。
+可独立增加图片理解、音乐段落、字幕和更丰富的 Creative Agent，但所有输出必须先经过 Pydantic Schema、确定性策略和本地渲染安全检查。当前不接入数据库、Web 服务或云端媒体处理。

@@ -1,55 +1,57 @@
 # Remotion Skill 使用说明
 
-## 1. 为什么引入 Skill
+## 1. Skill 的作用
 
-Remotion Skill 是安装在项目 `.agents/skills/` 下的官方知识文档集合。它为开发和 Agent 提供 Remotion API、Composition、动画、转场和渲染实践参考，减少凭空猜测 API 导致的实现错误。
+项目通过 `remotion-dev/skills` 安装官方 Remotion 知识文档，当前位于 `.agents/skills/`。Creative Agent 会读取可用的 `remotion-best-practices`、`remotion-docs`、`remotion-markup` 和 `remotion-render` 文档，用于核对 API、Composition、动画、转场和渲染建议。
 
-Skill 不是运行时视频引擎，也不会替代 Remotion CLI。真正的视频渲染仍由 `remotion/` 工程和本地 `pnpm` 命令完成。
+Skill 是开发期知识资源，不是运行时渲染引擎，也不会替代 Remotion CLI。
 
-## 2. Agent 如何使用
-
-Remotion Agent 在 LangGraph 中读取 Skill 文档，根据已经校验的 Storyboard 输出 `RemotionAdvice`，例如使用哪个 Composition、图片适配方式、动画 API 和 Transition Registry。
+## 2. 使用流程
 
 ```text
-Storyboard
-   -> Remotion Agent 读取 Skill
-   -> RemotionAdvice
-   -> Render Agent
-   -> 现有 Remotion 工程
+DirectorPlan.animation_intent
+          -> Creative Agent
+          -> 读取 Skill 文档
+          -> AnimationPlan
+          -> EffectRegistry
+          -> Remotion Effect
+          -> Render Agent
 ```
 
-当前 Agent 不生成随机 TSX，不调用 ffmpeg，也不直接改写 Remotion 项目。
+Creative Agent 只输出实现中立的 `AnimationPlan`，不让 LLM 直接生成 TSX。未知或暂未实现的意图保留在导演方案中，并使用安全 fallback。
 
-## 3. Skill 覆盖的开发规则
+## 3. 当前开发规则
 
-- 使用 Remotion 官方组件和当前版本真实存在的 API。
-- 动画优先使用 `interpolate`、`spring`、`Easing`。
-- 场景使用 `Sequence` / `TransitionSeries` 组织。
-- 转场统一通过 Transition Registry。
-- 图片使用 `contain`，保持原始宽高比。
-- 默认 `motion=static`，避免持续 zoom / pan。
-- 渲染时使用 `calculateMetadata` 和实际 Timeline 末帧决定时长。
+- 使用当前项目已安装并通过 TypeScript 检查的 Remotion API。
+- 动画优先使用 `useCurrentFrame`、`interpolate`、`spring` 和 `Easing`。
+- 场景由 `Composition`、`Sequence`、`TransitionSeries` 组合。
+- 转场统一走 Transition Registry；动画统一走 Effect Registry。
+- 图片必须 contain、等比例、完整显示；默认 `motion=static`。
+- 禁止 `object-fit: cover`、crop、`scaleX`、`scaleY` 和永久放大。
+- 效果结束后应恢复原始场景，不留下持续的 transform、filter 或遮罩。
 
-## 4. 图片与渲染安全规则
+## 4. 当前效果实现
 
-禁止：
+效果代码位于 `remotion/src/effects/`：
 
-- `object-fit: cover`
-- crop / center-crop
-- `scaleX` / `scaleY`
-- 直接生成整个 Remotion 项目
-- 通过动画破坏图片完整显示
+- `CardFlipReveal`：CSS `rotateY` 卡片翻转。
+- `CameraPush`：短暂平移叠层，底层保持完整图片。
+- `GlitchReveal`：确定性的 RGB 偏移和切片。
+- `LightLeak`：只绘制光漏 overlay。
 
-Skill 的示例或建议必须经过当前项目的 TypeScript 检查、图片安全规则和实际渲染验证。
+通过 `remotion/src/effects/index.tsx` 的 `EffectRegistry` 注册。效果组件不得自行改变 ImageFrame 的 contain 几何。
 
-## 5. 代码修改边界
+## 5. 代码边界与验证
 
-未来由 Skill 或 Creative Agent 生成的效果组件，代码只能进入：
+Skill 参考产生的效果实现只能进入 `remotion/src/effects/`，并应同步更新 Registry、Schema 和测试。未经设计变更，不要改写 `ImageFrame`、Timeline 计算、Media Server 权限或 Composition 的整体结构。
 
-```text
-remotion/src/effects/
+验证命令：
+
+```bash
+cd remotion
+pnpm exec tsc --noEmit
+pnpm run build
+pnpm exec remotion bundle src/index.ts /tmp/video-assistant-remotion-bundle
 ```
 
-并应通过现有 Transition Registry 接入。未经明确设计评审，不应随意修改 `Composition.tsx`、Python Timeline Schema、图片 contain 逻辑或 Media Server 权限边界。
-
-如果新增效果需要改动 Registry 或数据 Schema，应同时补充 Python/TypeScript 测试；不能把文档示例直接复制为生产代码。
+实际效果仍需使用本地素材渲染，并用 `ffprobe` 检查视频尺寸、帧率、音频流和时长。

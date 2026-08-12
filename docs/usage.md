@@ -2,54 +2,32 @@
 
 ## 1. 项目介绍
 
-Video-Assistant 是一个本地图片目录到 MP4 的视频生成工具。它扫描本地图片，使用 Pillow 进行安全的等比例预处理，使用 librosa 分析本地 BGM 的 BPM、节拍和节拍强度，再由规则或 Director Agent 生成导演方案，最后交给 Remotion 渲染。
-
-它解决了手工图片视频制作中素材整理、卡点、停留时间和转场配置重复的问题。完整链路是：
+Video-Assistant 是一个本地图片转视频工具。它使用 Pillow 处理图片、使用 librosa 分析 BGM 节拍，由规则管线或 Director Agent 生成导演方案，再由 Remotion 输出 MP4。
 
 ```text
-图片分析 + 音乐分析
-        -> DirectorPlan / 规则时间轴
-        -> Storyboard
+图片素材 + 本地 BGM
+        -> 图片/节拍分析
+        -> DirectorPlan
+        -> Storyboard / AnimationPlan
         -> Remotion
         -> MP4
 ```
 
-项目默认保持 `motion=static`。图片使用 `contain` 等比例适配，不裁剪、不拉伸；BGM 由独立音频适配器循环或裁剪到视频时长。
+图片默认 `motion=static`，始终使用 contain 等比例适配：完整显示、不裁剪、不拉伸。视频时长由图片时间轴决定，BGM 由独立音频适配器循环或裁剪到最终时长。
 
 ## 2. 环境准备
 
-要求：
-
-- Python 3.11 或更高版本
-- `uv`
-- Node.js
-- `pnpm`
-- `ffmpeg` 和 `ffprobe`
-
-安装 Python 依赖：
+需要 Python 3.11+、`uv`、Node.js、`pnpm`、`ffmpeg` 和 `ffprobe`。
 
 ```bash
 uv sync
-```
-
-安装 Remotion 依赖：
-
-```bash
-cd remotion
-pnpm install
-cd ..
-```
-
-检查：
-
-```bash
+cd remotion && pnpm install && cd ..
 uv run pytest -q
-cd remotion && pnpm exec tsc --noEmit && pnpm run build
 ```
 
 ## 3. 配置 LLM
 
-复制示例配置并编辑本地 `.env`：
+项目使用 OpenAI Compatible 接口，配置写入项目根目录 `.env`（不要提交）：
 
 ```env
 LLM_PROVIDER=openai-compatible
@@ -61,17 +39,13 @@ REMOTION_MODEL=claude-sonnet-4-20250514
 CHAT_MODEL=claude-sonnet-4-20250514
 ```
 
-项目使用 `openai` Python SDK 的 Chat Completions 接口。Claude、GPT、DeepSeek、Kimi 或本地 Ollama 只要提供 OpenAI Compatible 接口，就可以通过修改 `OPENAI_BASE_URL` 和模型名称切换。缺少 API Key，或明确设置 `LLM_PROVIDER=mock` 时，系统使用本地 Mock Provider，不发起网络请求。
-
-测试当前配置：
+Claude、GPT、DeepSeek、Kimi 或 Ollama 只要兼容该接口即可切换。缺少 API Key 或设置 `LLM_PROVIDER=mock` 时使用 Mock Provider。
 
 ```bash
 uv run python -m content_creator.llm_test
 ```
 
-## 4. 快速开始
-
-准备图片目录和本地音频后运行：
+## 4. 普通视频生成
 
 ```bash
 uv run python -m content_creator.main \
@@ -80,66 +54,67 @@ uv run python -m content_creator.main \
   --output ./output
 ```
 
-常用参数：
+主要参数：`--images` 图片目录，`--audio` 本地音频，`--output` 输出根目录，`--width`/`--height` 画布尺寸，`--fps` 帧率，`--preview` 预览渲染，`--style` 风格预设，`--director` 或 `--no-director` 控制 Director Agent，`--agent-mode` 启用 LangGraph 工作流。
 
-- `--images`：输入图片目录，支持项目已声明的 JPG/JPEG/PNG/WEBP 格式。
-- `--audio`：本地 BGM 文件。
-- `--output`：输出根目录，默认 `./output`。
-- `--width`、`--height`：视频尺寸，默认 1920x1080。
-- `--fps`：帧率，默认 30。
-- `--preview`：以较低缩放比例进行预览渲染。
-- `--director` / `--no-director`：显式启用或禁用 Director Agent；不指定时，只有检测到可用真实 Provider 才自动启用。
-- `--agent-mode`：运行现有 LangGraph 工作流。
-- `--style`：选择已有风格预设，例如 `cinematic`、`dynamic`、`minimal`。
-
-生成结果位于：
+输出项目目录：
 
 ```text
 output/projects/<project_id>/
+├── session.json
 ├── materials/
 ├── audio/
+├── director_plan.json
 ├── render_data.json
-├── director_plan.json       # 启用 Director 后生成
 └── render/final.mp4
 ```
 
-## 5. Director Agent 使用
+## 5. Director Agent
 
-Director Agent 只负责导演决策，不直接修改 Remotion，也不生成代码。输入包括 `ImageAsset` 列表、`BeatAnalysis` 和视频风格；输出为经过 Pydantic 校验的 `DirectorPlan`。
+Director Agent 接收 `ImageAsset`、`BeatAnalysis` 和风格，输出经 Pydantic 校验的 `DirectorPlan`。它只决定图片顺序、停留帧数、转场、情绪和可选 `animation_intent`，不生成 TSX、React、CSS 或 ffmpeg 命令。LLM 失败时回退到本地规则方案。
 
-它负责：
+## 6. 交互式 Director Workspace
 
-- 根据图片数量和 BGM 节拍规划停留时间。
-- 按节拍强度选择转场意图和转场速度。
-- 规划场景情绪、转场强度及未来可扩展的动画意图。
-- 保持图片顺序、`motion=static` 和图片安全约束。
-
-非法 JSON、未知转场、代码片段或网络调用失败都会回退到确定性的规则方案。
-
-## 6. LLM 导演交互
-
-先生成一个项目，然后启动交互式导演：
+新建工作区：
 
 ```bash
-uv run python -m content_creator.director_chat
+uv run python -m content_creator.director_chat \
+  --images ./input/images \
+  --audio ./input/bgm.wav \
+  --output ./output \
+  --width 1080 --height 1920 --style cinematic
 ```
 
-也可以指定项目：
+恢复已有工作区：
 
 ```bash
 uv run python -m content_creator.director_chat \
   --project ./output/projects/<project_id>
 ```
 
-支持命令：`generate` 重新生成计划，`render` 渲染当前计划，`quit`/`exit` 退出。普通输入会作为当前计划的增量修改，不会重新生成全部方案。例如：
+两种启动方式不能同时使用。工作区创建时会保存绝对路径、图片分析、BGM 分析和 `session.json`，下游不会猜测 `Path("audio")` 或 `Path("images")`。
 
-```text
-Director> 第一张照片从背后翻转进入
-Director> 转场更快一点
-Director> 高潮部分更炸裂
-Director> render
+命令：`plan`、`show`、`show json`、`preview`、`render`、`save`、`help`、`quit` / `exit`。
+
+普通输入会修改当前计划，例如“第一张从背面翻转进入”“第三张停留时间增加50%”。修改通过 `DirectorIntent` 和现有 Schema 校验，只尽量改动用户指定的场景。
+
+## 7. Remotion Creative Agent
+
+Creative Agent 将 `DirectorPlan.timeline[].animation_intent` 转为实现中立的 `AnimationPlan`，再由 Render Agent 写入 `render_data.json` 的 `timeline[].animation`。当前支持：
+
+- `3d_card_flip` -> `card_flip_reveal` / `CardFlipReveal`
+- `camera_push` -> `camera_push` / `CameraPush`
+- `glitch`、`glitch_reveal` -> `glitch_reveal` / `GlitchReveal`
+- `light_leak` -> `light_leak` / `LightLeak`
+
+未知意图保留在 DirectorPlan，并使用 `FadeFallback` 安全预览。效果不改变图片 contain 几何，也不使用 `cover`、裁剪、`scaleX` 或 `scaleY`。
+
+## 8. 渲染检查
+
+```bash
+cd remotion
+pnpm exec tsc --noEmit
+pnpm run build
+pnpm exec remotion bundle src/index.ts /tmp/video-assistant-remotion-bundle
 ```
 
-对话输出的是 `DirectorIntent`，例如 `3d_flip_in`、方向、速度和情绪；它不是 TSX。当前 Remotion 渲染仍遵守已实现的组件和转场注册表。
-
-会话保存在项目目录的 `director_session.json`，当前计划保存在 `director_plan.json`。
+可用 `ffprobe` 检查输出尺寸、帧率、音频流和时长。
