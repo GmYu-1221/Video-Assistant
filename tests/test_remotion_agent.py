@@ -23,6 +23,11 @@ def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
     assert "Cinematic Motion Guidance" in prompt["remotion_motion_guidelines"]
     assert "Visual Event Architecture" in prompt["project_visual_event_rules"]
     assert "Transition Ownership Rule" in prompt["project_visual_event_rules"]
+    assert "camera_push" in prompt["project_visual_event_rules"]
+    assert "card_flip_transition" in prompt["project_visual_event_rules"]
+    rules = "\n".join(prompt["rules"])
+    assert "camera_push effect at frames 0-60 plus card_flip_transition" in rules
+    assert "card_flip_reveal is entrance-only" in rules
     serialized = json.dumps(prompt)
     assert "remotion-engineering" not in serialized
 

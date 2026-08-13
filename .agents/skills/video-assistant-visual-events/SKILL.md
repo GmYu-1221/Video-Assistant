@@ -30,6 +30,10 @@ A transition owns the target image reveal. When a transition targets an asset, d
 not create an entrance, fade in, `creative_reveal`, or `particle_flip_reveal` for
 that target. Do not layer independent reveals over a transition.
 
+`camera_push` is a sustained source-scene effect and may overlap a transition when
+the Director asks to push into a cut. `card_flip_reveal` is entrance-only for one
+image; `card_flip_transition` is transition-only for two images.
+
 ## Effect Development Rule
 
 Adding a visual event requires a Python schema, capability registry entry,

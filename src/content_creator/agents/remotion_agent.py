@@ -91,6 +91,10 @@ _ANIMATION_EFFECT_CAPABILITIES = {
     },
 }
 _TRANSITION_EFFECT_CAPABILITIES = {
+    TransitionEffectType.card_flip_transition: {
+        "description": "The outgoing image flips in 3D into the next image.",
+        "params": {"rotation_axis": {"type": "enum", "values": ["X", "Y"]}, "perspective": {"type": "number", "minimum": 300, "maximum": 2000}},
+    },
     TransitionEffectType.glass_shatter_transition: {
         "description": "The outgoing image fractures into cinematic glass-like fragments while the incoming image is revealed behind it.",
         "params": {
@@ -112,6 +116,7 @@ _VISUAL_EFFECT_CAPABILITIES = {
     **{effect.value: {**capability, "phase": ["transition"]} for effect, capability in _TRANSITION_EFFECT_CAPABILITIES.items()},
 }
 _TRANSITION_DURATION_RANGES = {
+    "card_flip_transition": (18, 60, 30),
     "glass_shatter_transition": (30, 90, 45),
     "shake_transition": (12, 45, 18),
     "particle_dissolve_transition": (24, 90, 36),
@@ -463,10 +468,13 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
             "Return only one JSON object with plans; no Markdown or explanation.",
             "Use only registered visual effect types and documented params.",
             "All frame positions are local to the owning scene.",
+            "One scene may contain multiple visual_events when their responsibilities are compatible.",
             "A transition event belongs to the source scene and must set target_asset_id.",
             "A transition event owns the reveal of its target asset. Never create entrance, reveal, fade in, creative_reveal, particle_flip_reveal, or drop_reveal for a target asset covered by a transition.",
             "Transitions are cross-scene visual events; entrance animations are single-scene events. If both are requested, keep the transition and remove the target entrance.",
             "Example: '图一玻璃破碎，图二从碎片后出现' returns only a glass_shatter_transition event with source_asset_id image-001 and target_asset_id image-002.",
+            "camera_push is a compatible sustained effect and may overlap a transition when the Director requests camera movement before or through the cut. Example: '图一缓慢推进，然后翻转到图二' returns camera_push effect at frames 0-60 plus card_flip_transition at frames 30-60; do not replace this valid combination with a fallback.",
+            "card_flip_reveal is entrance-only for one image appearing. card_flip_transition is transition-only for two images changing; use card_flip_transition for '图一图二翻转转场'.",
             "Do not return component names, TSX, React, CSS, or legacy animation/transition fields.",
         ],
     }, ensure_ascii=False)
@@ -541,10 +549,25 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress
             if scene is None:
                 raise ValueError(f"Remotion Agent returned unknown scene_id: {item.scene_id}")
             validated.append(item.model_copy(update={"visual_events": [_validate_visual_event(event, scene, next_map.get(item.scene_id)) for event in item.visual_events]}))
-        # A transition owns the target reveal. Remove conflicting entrance events
-        # from the target scene after all scene-local events are validated.
+        # A transition owns source/target reveal. Camera push is deliberately a
+        # compatible sustained effect; competing entrance/reveal events are not.
         incoming = {event.target_asset_id: event for item in validated for event in item.visual_events if event.phase == "transition" and event.target_asset_id}
-        validated = [item.model_copy(update={"visual_events": [event for event in item.visual_events if not (event.phase == "entrance" and item.scene_id in incoming)]}) for item in validated]
+        outgoing = {item.scene_id: [event for event in item.visual_events if event.phase == "transition"] for item in validated}
+        cleaned = []
+        for item in validated:
+            transitions = outgoing.get(item.scene_id, [])
+            kept = []
+            for event in item.visual_events:
+                if event.phase == "transition":
+                    kept.append(event)
+                    continue
+                if item.scene_id in incoming:
+                    continue
+                overlaps = any(event.start_frame < transition.start_frame + transition.duration_frames and transition.start_frame < event.start_frame + event.duration_frames for transition in transitions)
+                if event.type == "camera_push" or not overlaps:
+                    kept.append(event)
+            cleaned.append(item.model_copy(update={"visual_events": kept}))
+        validated = cleaned
         logger.info("[Remotion Agent] generated RemotionCreativePlan")
         return RemotionCreativePlan(plans=validated)
     except (OSError, TimeoutError, ConnectionError):

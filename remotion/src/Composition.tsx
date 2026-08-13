@@ -36,7 +36,7 @@ export const Slideshow: React.FC<RemotionProps> = (props) => {
           duration_frames: Math.min(item.transition.duration_frames, item.duration_frames, nextItem.duration_frames),
           background_color: asset?.backgroundColor,
         };
-        const safeTransitionEffect = transitionEvent && (transitionEvent.type === 'glass_shatter_transition' || transitionEvent.type === 'shake_transition') ? {
+        const safeTransitionEffect = transitionEvent && (transitionEvent.type === 'card_flip_transition' || transitionEvent.type === 'glass_shatter_transition' || transitionEvent.type === 'shake_transition') ? {
           from_asset_id: item.asset_id,
           to_asset_id: transitionEvent.target_asset_id ?? nextItem.asset_id,
           type: transitionEvent.type,

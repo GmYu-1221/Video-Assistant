@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_serializer
 
 
 class TransitionEffectType(str, Enum):
+    card_flip_transition = "card_flip_transition"
     glass_shatter_transition = "glass_shatter_transition"
     shake_transition = "shake_transition"
 
