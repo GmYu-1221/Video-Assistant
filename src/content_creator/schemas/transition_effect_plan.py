@@ -17,6 +17,7 @@ class TransitionEffectType(str, Enum):
     pixel_blur_transition = "pixel_blur_transition"
     bokeh_blur_transition = "bokeh_blur_transition"
     water_ripple_transition = "water_ripple_transition"
+    zoom_through_transition = "zoom_through_transition"
 
 
 class BlurTransitionEffectType(str, Enum):

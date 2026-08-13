@@ -4,7 +4,7 @@ import type {TransitionPresentationComponentProps} from '@remotion/transitions';
 export type BlurTransitionVariant = 'gaussian_blur_transition' | 'directional_blur_transition' | 'pixel_blur_transition' | 'bokeh_blur_transition' | 'water_ripple_transition';
 export type BlurTransitionProps = {
   blur_type?: 'gaussian' | 'directional' | 'pixelate' | 'bokeh' | 'mist' | 'water_ripple';
-  direction?: 'horizontal' | 'vertical' | 'radial' | 'left' | 'right' | 'up' | 'down';
+  direction?: 'horizontal' | 'vertical' | 'radial' | 'left' | 'right' | 'up' | 'down' | 'center';
   intensity?: number;
   softness?: number;
   motion_blur?: boolean;

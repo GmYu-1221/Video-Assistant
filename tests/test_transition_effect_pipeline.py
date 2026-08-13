@@ -98,6 +98,18 @@ def test_blur_transition_registry_contains_all_concrete_effects():
     assert "opacity: 0.2" not in presentation
 
 
+def test_zoom_through_transition_is_registered_with_a_frame_driven_presentation():
+    registry = Path("remotion/src/transitions/TransitionEffectRenderer.tsx").read_text(encoding="utf-8")
+    presentation = Path("remotion/src/transitions/zoom/ZoomThroughTransition.tsx").read_text(encoding="utf-8")
+    composition = Path("remotion/src/Composition.tsx").read_text(encoding="utf-8")
+    assert "zoom_through_transition" in registry
+    assert "ZoomThroughTransition" in registry
+    assert "zoom_through_transition" in composition
+    assert "presentationProgress" in presentation
+    assert "scale(" in presentation
+    assert "camera_push" not in presentation
+
+
 @pytest.mark.parametrize("response", [
     '{"type":"glass_shatter_transition","duration_frames":45,"params":{"fragment_count":64},"description":"glass fragments"}',
     '```json\n{"type":"glass_shatter_transition","duration_frames":45,"params":{"fragment_count":64},"description":"glass fragments"}\n```',

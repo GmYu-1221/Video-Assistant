@@ -188,6 +188,21 @@ class ShortBlurTransitionLLM(BlurTransitionLLM):
         }]}]})
 
 
+class ZoomThroughLLM:
+    model_name = "remotion-test"
+
+    def complete_json(self, _prompt: str) -> str:
+        return json.dumps({"plans": [{"scene_id": "image-001", "visual_events": [{
+            "type": "zoom_through_transition",
+            "phase": "transition",
+            "start_frame": 42,
+            "duration_frames": 18,
+            "source_asset_id": "image-001",
+            "target_asset_id": "image-002",
+            "params": {"intensity": 0.8, "direction": "center"},
+        }]}]})
+
+
 def _blur_transition_plan(intent: str) -> DirectorPlan:
     return DirectorPlan.model_validate({"timeline": [
         {"asset_id": "image-001", "duration_frames": 60, "reason": "first", "transition_intent": {"description": intent}},
@@ -235,6 +250,22 @@ def test_blur_transitions_accept_short_positive_durations(effect_type):
     event = result.plans[0].visual_events[0]
     assert event.type == effect_type
     assert event.duration_frames == 6
+
+
+def test_explicit_pass_through_intent_keeps_zoom_through_transition():
+    result = create_remotion_creative_plan(
+        _blur_transition_plan("镜头穿过当前图片进入下一幕"),
+        provider=ZoomThroughLLM(),
+    )
+    event = result.plans[0].visual_events[0]
+    assert event.type == "zoom_through_transition"
+    assert event.params == {"intensity": 0.8, "direction": "center"}
+
+
+@pytest.mark.parametrize("intent", ["镜头缓慢推进", "简单放大图片", "静态展示画面"])
+def test_zoom_through_does_not_trigger_for_camera_push_or_simple_zoom(intent):
+    result = create_remotion_creative_plan(_blur_transition_plan(intent), provider=ZoomThroughLLM())
+    assert all(event.type != "zoom_through_transition" for item in result.plans for event in item.visual_events)
 
 
 def test_digital_pixel_intent_keeps_pixel_blur_transition():

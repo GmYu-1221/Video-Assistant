@@ -1,7 +1,7 @@
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
-/***/ 8586
+/***/ 7541
 (__unused_webpack_module, __unused_webpack___webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -2689,6 +2689,21 @@ const push = () => presentation(({ children, presentationProgress, presentationD
 
 const whip = () => presentation(({ children, presentationProgress, presentationDirection }) => /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: { transform: `translateX(${presentationDirection === "entering" ? 100 - presentationProgress * 100 : -presentationProgress * 100}%)`, filter: `blur(${Math.sin(presentationProgress * Math.PI) * 7}px)` }, children }));
 
+;// ./src/transitions/presentations/stretch_whip.tsx
+
+
+
+
+const stretchWhip = () => presentation(({ children, presentationProgress, presentationDirection }) => {
+  const eased = Math.sin(presentationProgress * Math.PI);
+  const entering = presentationDirection === "entering";
+  const scaleX = entering ? 0.6 + presentationProgress * 0.4 : 1 + eased * 0.35;
+  const translateX = entering ? (1 - presentationProgress) * 100 : -presentationProgress * 100;
+  const blur = eased * 15;
+  if (presentationProgress >= 1) return /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { children });
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: { transform: `translateX(${translateX}%) scaleX(${scaleX})`, filter: `blur(${blur}px)`, transformOrigin: entering ? "left center" : "right center" }, children });
+});
+
 ;// ./src/transitions/presentations/digital_wipe.tsx
 
 
@@ -2786,23 +2801,177 @@ const TransitionMetadataRegistry = {
   black_flash: custom(0.8, 4),
   white_flash: custom(0.9, 3),
   push: custom(0.5, 6, false, true),
-  whip: custom(0.8, 5, false, true),
+  whip: { ...custom(0.8, 5, false, true), allowDistortion: true },
+  stretch_whip: { ...custom(0.9, 6, false, true), allowDistortion: true },
   digital_wipe: custom(0.6, 6, true),
   iris: custom(0.5, 8, true),
   clock_wipe: custom(0.6, 8, true),
   blinds: custom(0.6, 8, true),
   pixel_reveal: custom(0.7, 6),
-  glitch: custom(0.9, 5, false, true),
+  glitch: { ...custom(0.9, 5, false, true), allowDistortion: true },
   light_leak: custom(0.7, 5)
 };
 const fallback = { implementation: "fallback", complexity: 0.2, defaultDurationFrames: 6, supportedDirections: ["from-left", "from-right"], usesMask: false, usesTransform: false };
-for (const legacy of ["dissolve", "slide_up", "slide_down", "wipe_up", "wipe_down", "zoom_in", "zoom_out", "zoom_crossfade", "push_left", "push_right", "push_up", "push_down", "circle", "rectangle", "diagonal", "diagonal_reverse", "radial", "flip_x", "flip_y", "rotate", "cube_left", "cube_right", "blur", "blur_zoom", "flash", "rgb_split", "scanline", "zoom_cut", "spin"]) TransitionMetadataRegistry[legacy] = fallback;
+for (const legacy of ["dissolve", "slide_up", "slide_down", "wipe_up", "wipe_down", "zoom_in", "zoom_out", "zoom_crossfade", "push_left", "push_right", "push_up", "push_down", "circle", "rectangle", "diagonal", "diagonal_reverse", "radial", "flip_x", "flip_y", "rotate", "cube_left", "cube_right", "blur", "blur_zoom", "flash", "rgb_split", "scanline", "zoom_cut", "spin", "liquid"]) TransitionMetadataRegistry[legacy] = fallback;
 const isRealTransition = (type) => {
   var _a;
   return ["native", "custom"].includes(((_a = TransitionMetadataRegistry[type]) == null ? void 0 : _a.implementation) ?? "fallback");
 };
 
+;// ./src/transitions/presentations/glass-shatter.tsx
+
+
+
+const originFor = (origin) => {
+  if (origin === "left") return { x: 0, y: 0.5 };
+  if (origin === "right") return { x: 1, y: 0.5 };
+  if (origin === "top") return { x: 0.5, y: 0 };
+  if (origin === "bottom") return { x: 0.5, y: 1 };
+  return { x: 0.5, y: 0.5 };
+};
+const GlassShatter = ({ children, presentationProgress, presentationDirection, passedProps }) => {
+  const count = Math.max(12, Math.min(96, Math.round(passedProps.fragment_count ?? 48)));
+  const columns = Math.max(4, Math.ceil(Math.sqrt(count * 16 / 9)));
+  const rows = Math.max(3, Math.ceil(count / columns));
+  const origin = originFor(passedProps.impact_origin);
+  const progress = (0,esm/* interpolate */.GW)(presentationProgress, [0, 1], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  if (presentationDirection === "entering") {
+    return /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: { opacity: (0,esm/* interpolate */.GW)(progress, [0, 0.32, 1], [0, 0.72, 1], { extrapolateRight: "clamp" }) }, children });
+  }
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: { overflow: "hidden" }, children: Array.from({ length: count }, (_, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const centerX = (column + 0.5) / columns;
+    const centerY = (row + 0.5) / rows;
+    const dx = centerX - origin.x;
+    const dy = centerY - origin.y;
+    const distance = Math.min(1, Math.hypot(dx, dy) * 1.45);
+    const local = (0,esm/* interpolate */.GW)(progress, [distance * 0.38, 0.38 + distance * 0.36, 1], [0, 0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+    const travel = 70 + index % 7 * 19;
+    const rotation = (index % 2 ? 1 : -1) * (95 + index % 5 * 22) * local;
+    const clipX = `${column / columns * 100}%`;
+    const clipY = `${row / rows * 100}%`;
+    const clipRight = `${100 - (column + 1) / columns * 100}%`;
+    const clipBottom = `${100 - (row + 1) / rows * 100}%`;
+    return /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: {
+      clipPath: `inset(${clipY} ${clipRight} ${clipBottom} ${clipX})`,
+      opacity: 1 - local,
+      transform: `translate(${dx * travel * local}px, ${dy * travel * local + local * local * 85}px) rotate(${rotation}deg) scale(${1 - local * 0.18})`,
+      transformOrigin: `${centerX * 100}% ${centerY * 100}%`,
+      filter: passedProps.motion_blur ? `blur(${local * 2.2}px)` : void 0
+    }, children }, index);
+  }) });
+};
+
+;// ./src/transitions/presentations/shake.tsx
+
+
+
+const ShakeTransition = ({ children, presentationDirection, presentationProgress, passedProps }) => {
+  const intensity = Math.max(0, Math.min(1, passedProps.intensity ?? 0.7));
+  const decay = presentationDirection === "exiting" ? 1 - presentationProgress : presentationProgress;
+  const offset = Math.sin(presentationProgress * 54) * intensity * decay * 22;
+  const opacity = presentationDirection === "exiting" ? (0,esm/* interpolate */.GW)(presentationProgress, [0, 1], [1, 0], { extrapolateRight: "clamp" }) : (0,esm/* interpolate */.GW)(presentationProgress, [0, 0.4, 1], [0, 0.8, 1], { extrapolateRight: "clamp" });
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: { opacity, transform: `translate(${offset}px, ${-offset * 0.35}px)`, filter: passedProps.motion_blur ? `blur(${decay * intensity * 2}px)` : void 0 }, children });
+};
+
+;// ./src/transitions/blur/BlurTransition.tsx
+
+
+
+const BlurTransition = ({ children, presentationDirection, presentationProgress, passedProps, variant }) => {
+  const { fps } = (0,esm/* useVideoConfig */.Bk)();
+  const intensity = Math.max(0, Math.min(1, passedProps.intensity ?? 0.7));
+  const softness = Math.max(0, Math.min(1, passedProps.softness ?? 0.6));
+  const local = presentationDirection === "exiting" ? presentationProgress : 1 - presentationProgress;
+  const peak = Math.sin(presentationProgress * Math.PI);
+  const settle = (0,esm/* spring */.oz)({ frame: Math.round(presentationProgress * 18), fps, config: { damping: 200, stiffness: 100 } });
+  const blurPx = (0,esm/* interpolate */.GW)(peak, [0, 1], [0, 8 + intensity * 22], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const direction = passedProps.direction ?? "horizontal";
+  const directionalX = direction === "left" ? -1 : direction === "right" ? 1 : direction === "horizontal" ? 1 : 0;
+  const directionalY = direction === "up" ? -1 : direction === "down" ? 1 : direction === "vertical" ? 1 : 0;
+  const translate = variant === "directional_blur_transition" ? `translate(${directionalX * peak * intensity * 3}%, ${directionalY * peak * intensity * 3}%)` : variant === "water_ripple_transition" ? `scale(${1 + peak * intensity * 0.025})` : "none";
+  const pixelate = variant === "pixel_blur_transition" ? Math.max(0.08, 1 - peak * intensity * 0.82) : 1;
+  const bokehOpacity = variant === "bokeh_blur_transition" ? peak * (0.16 + intensity * 0.26) : 0;
+  const ripple = variant === "water_ripple_transition" ? `radial-gradient(circle at 50% 50%, transparent ${Math.max(0, peak * 55 - 8)}%, rgba(255,255,255,${0.18 * peak}) ${peak * 55}%, transparent ${peak * 55 + 10}%)` : void 0;
+  const filter = variant === "pixel_blur_transition" ? `blur(${blurPx * 0.25}px) contrast(${1 + peak * intensity * 0.2})` : `blur(${blurPx * (passedProps.motion_blur ? 1.2 : 1)}px)`;
+  return /* @__PURE__ */ (0,jsx_runtime.jsxs)(esm/* AbsoluteFill */.H1, { style: { overflow: "hidden" }, children: [
+    /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: { transform: translate, filter, opacity: (0,esm/* interpolate */.GW)(local, [0, 1], [0.98, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }), clipPath: variant === "pixel_blur_transition" ? `inset(0 round ${Math.round((1 - pixelate) * 24)}px)` : void 0 }, children }),
+    variant === "pixel_blur_transition" && /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: { pointerEvents: "none", opacity: peak * intensity * 0.18, backgroundImage: "linear-gradient(90deg, rgba(255,255,255,.22) 1px, transparent 1px), linear-gradient(rgba(255,255,255,.22) 1px, transparent 1px)", backgroundSize: `${Math.max(4, Math.round(28 * pixelate))}px ${Math.max(4, Math.round(28 * pixelate))}px`, mixBlendMode: "overlay" } }),
+    variant === "bokeh_blur_transition" && /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: { pointerEvents: "none", opacity: bokehOpacity * settle, background: "radial-gradient(circle at 24% 32%, rgba(255,235,190,.9) 0 4%, transparent 13%), radial-gradient(circle at 72% 62%, rgba(180,220,255,.8) 0 5%, transparent 16%), radial-gradient(circle at 52% 46%, rgba(255,255,255,.7) 0 3%, transparent 11%)", filter: `blur(${10 + softness * 18}px)`, mixBlendMode: "screen" } }),
+    ripple && /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: { pointerEvents: "none", background: ripple, mixBlendMode: "screen", opacity: peak * (0.5 + softness * 0.5) } })
+  ] });
+};
+
+;// ./src/transitions/zoom/ZoomThroughTransition.tsx
+
+
+
+const transformOrigins = {
+  center: "50% 50%",
+  left: "0% 50%",
+  right: "100% 50%",
+  top: "50% 0%",
+  bottom: "50% 100%",
+  horizontal: "50% 50%",
+  vertical: "50% 50%",
+  radial: "50% 50%",
+  up: "50% 50%",
+  down: "50% 50%"
+};
+const ZoomThroughTransition = ({ children, presentationDirection, presentationProgress, passedProps }) => {
+  const intensity = Math.max(0, Math.min(1, passedProps.intensity ?? 0.75));
+  const direction = passedProps.direction ?? "center";
+  const transformOrigin = transformOrigins[direction];
+  const exiting = presentationDirection === "exiting";
+  const scale = exiting ? (0,esm/* interpolate */.GW)(presentationProgress, [0, 1], [1, 1.45 + intensity * 1.15], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) : (0,esm/* interpolate */.GW)(presentationProgress, [0, 1], [1.12 + intensity * 0.18, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const opacity = exiting ? (0,esm/* interpolate */.GW)(presentationProgress, [0.62, 1], [1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) : (0,esm/* interpolate */.GW)(presentationProgress, [0, 0.42, 1], [0, 0.88, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: { overflow: "hidden" }, children: /* @__PURE__ */ (0,jsx_runtime.jsx)(esm/* AbsoluteFill */.H1, { style: { transform: `scale(${scale})`, transformOrigin, opacity, willChange: "transform, opacity" }, children }) });
+};
+
+;// ./src/transitions/TransitionEffectRenderer.tsx
+
+
+
+
+
+
+
+const glassShatterTransition = (effect, key) => /* @__PURE__ */ (0,jsx_runtime.jsx)(
+  TransitionSeries.Transition,
+  {
+    timing: linearTiming({ durationInFrames: effect.duration_frames }),
+    presentation: { component: GlassShatter, props: effect.params }
+  },
+  key
+);
+const shakeTransition = (effect, key) => /* @__PURE__ */ (0,jsx_runtime.jsx)(
+  TransitionSeries.Transition,
+  {
+    timing: linearTiming({ durationInFrames: effect.duration_frames }),
+    presentation: { component: ShakeTransition, props: effect.params }
+  },
+  key
+);
+const cardFlipTransition = (effect, key) => /* @__PURE__ */ (0,jsx_runtime.jsx)(TransitionSeries.Transition, { timing: linearTiming({ durationInFrames: effect.duration_frames }), presentation: { component: (({ children, presentationProgress }) => /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { perspective: Number(effect.params.perspective ?? 900), width: "100%", height: "100%", transform: `rotateY(${(1 - presentationProgress) * 180}deg)`, transformOrigin: "center" }, children })), props: {} } }, key);
+const blurTransition = (variant) => (effect, key) => /* @__PURE__ */ (0,jsx_runtime.jsx)(TransitionSeries.Transition, { timing: linearTiming({ durationInFrames: effect.duration_frames }), presentation: { component: (props) => /* @__PURE__ */ (0,jsx_runtime.jsx)(BlurTransition, { ...props, variant }), props: effect.params } }, key);
+const zoomThroughTransition = (effect, key) => /* @__PURE__ */ (0,jsx_runtime.jsx)(TransitionSeries.Transition, { timing: linearTiming({ durationInFrames: effect.duration_frames }), presentation: { component: ZoomThroughTransition, props: effect.params } }, key);
+const TransitionEffectRegistry = {
+  card_flip_transition: cardFlipTransition,
+  glass_shatter_transition: glassShatterTransition,
+  shake_transition: shakeTransition,
+  gaussian_blur_transition: blurTransition("gaussian_blur_transition"),
+  directional_blur_transition: blurTransition("directional_blur_transition"),
+  pixel_blur_transition: blurTransition("pixel_blur_transition"),
+  bokeh_blur_transition: blurTransition("bokeh_blur_transition"),
+  water_ripple_transition: blurTransition("water_ripple_transition"),
+  zoom_through_transition: zoomThroughTransition
+};
+const TransitionEffectRenderer = (effect, key) => TransitionEffectRegistry[effect.type](effect, key);
+
 ;// ./src/transitions/index.tsx
+
+
 
 
 
@@ -2841,6 +3010,7 @@ const TransitionRegistry = {
   white_flash: (c, k) => transitions_element(k, c, whiteFlash()),
   push: (c, k) => transitions_element(k, c, push()),
   whip: (c, k) => transitions_element(k, c, whip()),
+  stretch_whip: (c, k) => transitions_element(k, c, stretchWhip()),
   digital_wipe: (c, k) => transitions_element(k, c, digitalWipe()),
   iris: (c, k) => transitions_element(k, c, iris()),
   clock_wipe: (c, k) => transitions_element(k, c, clockWipe()),
@@ -2857,7 +3027,11 @@ const TransitionRegistry = {
   flip: (c, k) => transitions_element(k, c, flip({ direction: direction(c) })),
   zoom_blur: (c, k) => transitions_element(k, c, zoomBlur({ rotation: 0.15 }))
 };
-const TransitionFactory = (transition, key) => (TransitionRegistry[transition.type] ?? TransitionRegistry.fade)(transition, key);
+const TransitionFactory = (transition, key) => {
+  const distortionTypes = /* @__PURE__ */ new Set(["stretch_whip", "liquid", "glitch", "whip"]);
+  const safe = distortionTypes.has(transition.type) && transition.allow_distortion === false ? { ...transition, type: "fade" } : transition;
+  return (TransitionRegistry[safe.type] ?? TransitionRegistry.fade)(safe, key);
+};
 
 
 ;// ./src/effects/CameraPush.tsx
@@ -2866,14 +3040,14 @@ const TransitionFactory = (transition, key) => (TransitionRegistry[transition.ty
 
 const CameraPush = ({ animation, children }) => {
   const frame = (0,esm/* useCurrentFrame */.UC)();
+  const elapsed = frame - ((animation == null ? void 0 : animation.start_frame) ?? 0);
   const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 18);
-  if (frame >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
-  const amount = Number((animation == null ? void 0 : animation.props.translatePercent) ?? 4);
-  const translateX = (0,esm/* interpolate */.GW)(frame, [0, duration], [amount, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  return /* @__PURE__ */ (0,jsx_runtime.jsxs)("div", { style: { position: "absolute", inset: 0 }, children: [
-    children,
-    /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `translateX(${translateX}%)`, opacity: 0.2, pointerEvents: "none" }, children })
-  ] });
+  if (elapsed >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const amount = Number((animation == null ? void 0 : animation.params.translatePercent) ?? 4);
+  const translateX = (0,esm/* interpolate */.GW)(elapsed, [0, duration], [amount, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const motionBlur = (animation == null ? void 0 : animation.params.motion_blur) === true;
+  const blur = motionBlur ? Math.abs(translateX) * 0.35 : 0;
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `translateX(${translateX}%)`, filter: blur ? `blur(${blur}px)` : void 0 }, children });
 };
 
 ;// ./src/effects/CardFlipReveal.tsx
@@ -2882,12 +3056,12 @@ const CameraPush = ({ animation, children }) => {
 
 const CardFlipReveal = ({ animation, children }) => {
   const frame = (0,esm/* useCurrentFrame */.UC)();
+  const elapsed = frame - ((animation == null ? void 0 : animation.start_frame) ?? 0);
   const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 18);
-  if (frame >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
-  const rotateY = (0,esm/* interpolate */.GW)(frame, [0, duration], [180, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  const opacity = (0,esm/* interpolate */.GW)(frame, [0, Math.min(3, duration)], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  const perspective = Number((animation == null ? void 0 : animation.props.perspective) ?? 800);
-  return /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, perspective, opacity }, children: /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `rotateY(${rotateY}deg)`, transformStyle: "preserve-3d", backfaceVisibility: "hidden" }, children }) });
+  if (elapsed >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const rotateY = (0,esm/* interpolate */.GW)(elapsed, [0, duration], [180, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const perspective = Number((animation == null ? void 0 : animation.params.perspective) ?? 800);
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, perspective }, children: /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `rotateY(${rotateY}deg)`, transformStyle: "preserve-3d", backfaceVisibility: "visible" }, children }) });
 };
 
 ;// ./src/effects/GlitchReveal.tsx
@@ -2896,10 +3070,11 @@ const CardFlipReveal = ({ animation, children }) => {
 
 const GlitchReveal = ({ animation, children }) => {
   const frame = (0,esm/* useCurrentFrame */.UC)();
+  const elapsed = frame - ((animation == null ? void 0 : animation.start_frame) ?? 0);
   const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 5);
-  if (frame >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
-  const offset = (0,esm/* interpolate */.GW)(frame, [0, duration], [Number((animation == null ? void 0 : animation.props.rgbOffset) ?? 8), 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  const slice = `${30 + frame % 3 * 12}% 0 ${35 - frame % 3 * 7}% 0`;
+  if (elapsed >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const offset = (0,esm/* interpolate */.GW)(elapsed, [0, duration], [Number((animation == null ? void 0 : animation.params.rgbOffset) ?? 8), 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const slice = `${30 + elapsed % 3 * 12}% 0 ${35 - elapsed % 3 * 7}% 0`;
   return /* @__PURE__ */ (0,jsx_runtime.jsxs)("div", { style: { position: "absolute", inset: 0 }, children: [
     /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `translateX(${offset}px)`, opacity: offset ? 0.35 : 0, filter: "sepia(1) saturate(6) hue-rotate(315deg)", mixBlendMode: "screen" }, children }),
     /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `translateX(${-offset}px)`, opacity: offset ? 0.3 : 0, filter: "sepia(1) saturate(7) hue-rotate(165deg)", mixBlendMode: "screen" }, children }),
@@ -2914,17 +3089,105 @@ const GlitchReveal = ({ animation, children }) => {
 
 const LightLeak = ({ animation, children }) => {
   const frame = (0,esm/* useCurrentFrame */.UC)();
+  const elapsed = frame - ((animation == null ? void 0 : animation.start_frame) ?? 0);
   const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 5);
-  if (frame >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
-  const progress = (0,esm/* interpolate */.GW)(frame, [0, duration], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  const intensity = Number((animation == null ? void 0 : animation.props.intensity) ?? 0.75);
+  if (elapsed >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const progress = (0,esm/* interpolate */.GW)(elapsed, [0, duration], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const intensity = Number((animation == null ? void 0 : animation.params.intensity) ?? 0.75);
   return /* @__PURE__ */ (0,jsx_runtime.jsxs)("div", { style: { position: "absolute", inset: 0 }, children: [
     children,
     /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(circle at 20% 55%, rgba(255,170,60,0.9), transparent 64%)", mixBlendMode: "screen", opacity: Math.sin(progress * Math.PI) * intensity } })
   ] });
 };
 
+;// ./src/effects/StretchReveal.tsx
+
+
+
+const StretchReveal = ({ animation, children }) => {
+  const frame = (0,esm/* useCurrentFrame */.UC)();
+  const elapsed = frame - ((animation == null ? void 0 : animation.start_frame) ?? 0);
+  const { fps } = (0,esm/* useVideoConfig */.Bk)();
+  const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 18);
+  if (elapsed >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const progress = (0,esm/* spring */.oz)({ frame: elapsed, fps, config: { damping: 18, stiffness: 140 }, durationInFrames: duration });
+  const strength = Number((animation == null ? void 0 : animation.params.strength) ?? 0.8);
+  const stretch = 1 + strength * (1 - progress);
+  const y = (0,esm/* interpolate */.GW)(progress, [0, 1], [8, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const blur = (0,esm/* interpolate */.GW)(progress, [0, 1], [Number((animation == null ? void 0 : animation.params.blurPx) ?? 12), 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `translateY(${y}%) scale(${stretch})`, filter: `blur(${blur}px)`, transformOrigin: "center bottom" }, children });
+};
+
+;// ./src/effects/DropRevealElastic.tsx
+
+
+
+const DropRevealElastic = ({ animation, children }) => {
+  var _a;
+  const frame = (0,esm/* useCurrentFrame */.UC)();
+  const elapsed = frame - ((animation == null ? void 0 : animation.start_frame) ?? 0);
+  const { fps } = (0,esm/* useVideoConfig */.Bk)();
+  const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 20);
+  const direction = (_a = animation == null ? void 0 : animation.params) == null ? void 0 : _a.direction;
+  if (elapsed >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const progress = (0,esm/* spring */.oz)({ frame: elapsed, fps, config: { damping: 12, stiffness: 150 }, durationInFrames: duration });
+  const offset = (0,esm/* interpolate */.GW)(progress, [0, 1], [110, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const translateX = direction === "left" ? -offset : direction === "right" ? offset : 0;
+  const translateY = direction === "bottom" ? offset : direction === "left" || direction === "right" ? 0 : -offset;
+  const scaleY = (0,esm/* interpolate */.GW)(progress, [0, 0.82, 1], [1.18, 0.9, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const blur = (0,esm/* interpolate */.GW)(progress, [0, 1], [12, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `translate(${translateX}%, ${translateY}%) scaleY(${scaleY})`, filter: `blur(${blur}px)`, transformOrigin: "center bottom" }, children });
+};
+
+;// ./src/effects/ParticleFlipReveal.tsx
+
+
+
+const ParticleFlipReveal = ({ animation, children }) => {
+  const frame = (0,esm/* useCurrentFrame */.UC)();
+  const elapsed = frame - ((animation == null ? void 0 : animation.start_frame) ?? 0);
+  const { fps } = (0,esm/* useVideoConfig */.Bk)();
+  const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 20);
+  const params = (animation == null ? void 0 : animation.params) ?? {};
+  if (elapsed >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const progress = (0,esm/* spring */.oz)({ frame: elapsed, fps, config: { damping: 16, stiffness: 145 }, durationInFrames: duration });
+  const axis = params.rotation_axis === "X" ? "X" : "Y";
+  const rotation = (0,esm/* interpolate */.GW)(progress, [0, 1], [150, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const blur = (0,esm/* interpolate */.GW)(progress, [0, 1], [params.motion_blur === false ? 0 : 10, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const particleVeil = (0,esm/* interpolate */.GW)(progress, [0, 0.75, 1], [1, 0.25, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const density = Math.max(24, Number(params.particle_density ?? 120));
+  const spacing = Math.max(4, Math.round(192 / Math.sqrt(density)));
+  return /* @__PURE__ */ (0,jsx_runtime.jsxs)("div", { style: { position: "absolute", inset: 0, perspective: Number(params.perspective ?? 800) }, children: [
+    /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `rotate${axis}(${rotation}deg)`, filter: `blur(${blur}px)`, transformStyle: "preserve-3d" }, children }),
+    /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, pointerEvents: "none", opacity: particleVeil, backgroundImage: "radial-gradient(circle, rgba(255,255,255,.8) 0 1px, transparent 1.5px)", backgroundSize: `${spacing}px ${spacing}px`, mixBlendMode: "screen" } })
+  ] });
+};
+
+;// ./src/effects/CreativeReveal.tsx
+
+
+
+const CreativeReveal = ({ animation, children }) => {
+  const frame = (0,esm/* useCurrentFrame */.UC)();
+  const elapsed = frame - ((animation == null ? void 0 : animation.start_frame) ?? 0);
+  const { fps } = (0,esm/* useVideoConfig */.Bk)();
+  const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 18);
+  const params = (animation == null ? void 0 : animation.params) ?? {};
+  if (elapsed >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const progress = (0,esm/* spring */.oz)({ frame: elapsed, fps, config: { damping: 18, stiffness: 140 }, durationInFrames: duration });
+  const energy = Math.min(1, Math.max(0, Number(params.energy ?? 0.5)));
+  const translateY = params.direction === "up" ? (0,esm/* interpolate */.GW)(progress, [0, 1], [20 + energy * 20, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) : 0;
+  const opacity = (0,esm/* interpolate */.GW)(progress, [0, 1], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const blur = (0,esm/* interpolate */.GW)(progress, [0, 1], [Number(params.blurPx ?? 10), 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const maskSize = (0,esm/* interpolate */.GW)(progress, [0, 1], [0, 160], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, opacity, translate: `0 ${translateY}%`, filter: `blur(${blur}px)`, maskImage: params.mask === false ? void 0 : `radial-gradient(circle, black ${maskSize}%, transparent ${maskSize + 20}%)`, WebkitMaskImage: params.mask === false ? void 0 : `radial-gradient(circle, black ${maskSize}%, transparent ${maskSize + 20}%)` }, children });
+};
+
 ;// ./src/effects/index.tsx
+
+
+
+
 
 
 
@@ -2935,15 +3198,65 @@ const EffectRegistry = {
   card_flip_reveal: CardFlipReveal,
   camera_push: CameraPush,
   glitch_reveal: GlitchReveal,
-  light_leak: LightLeak
+  light_leak: LightLeak,
+  stretch_reveal: StretchReveal,
+  drop_reveal_elastic: DropRevealElastic,
+  particle_flip_reveal: ParticleFlipReveal,
+  creative_reveal: CreativeReveal
 };
 const EffectRenderer = ({ animation, children }) => {
-  if (!animation || animation.implementation === "fallback" || animation.effect === "none") return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
-  const Component = EffectRegistry[animation.effect];
+  if (!animation || animation.type === "none") return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const Component = EffectRegistry[animation.type];
+  if (!Component) return /* @__PURE__ */ (0,jsx_runtime.jsx)(CreativeReveal, { animation, children });
   return /* @__PURE__ */ (0,jsx_runtime.jsx)(Component, { animation, children });
 };
 
+;// ./src/visual/VisualEffectRenderer.tsx
+
+
+
+
+
+
+const VisualEffectRegistry = {
+  ...EffectRegistry,
+  glass_shatter_transition: "glass_shatter_transition",
+  shake_transition: "shake_transition",
+  gaussian_blur_transition: "gaussian_blur_transition",
+  directional_blur_transition: "directional_blur_transition",
+  pixel_blur_transition: "pixel_blur_transition",
+  bokeh_blur_transition: "bokeh_blur_transition",
+  water_ripple_transition: "water_ripple_transition",
+  zoom_through_transition: "zoom_through_transition"
+};
+const sceneEvent = (event, children) => {
+  const Component = EffectRegistry[event.type];
+  if (!Component) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const animation = { asset_id: "", type: event.type, component: event.type, implementation: "new", duration_frames: event.duration_frames, start_frame: event.start_frame, params: event.params, fallback: "none" };
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)(Component, { animation, children });
+};
+const EntranceEvent = ({ event, children }) => {
+  const frame = (0,esm/* useCurrentFrame */.UC)();
+  const endFrame = event.start_frame + event.duration_frames;
+  if (frame < event.start_frame || frame >= endFrame) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  return sceneEvent(event, children);
+};
+const VisualEffectRenderer = (event, key, children) => {
+  if (event.phase === "transition") {
+    if (!["card_flip_transition", "glass_shatter_transition", "shake_transition", "gaussian_blur_transition", "directional_blur_transition", "pixel_blur_transition", "bokeh_blur_transition", "water_ripple_transition", "zoom_through_transition"].includes(event.type)) {
+      throw new Error(`Unknown visual transition effect: ${event.type}`);
+    }
+    return TransitionEffectRenderer({ from_asset_id: event.source_asset_id ?? "", to_asset_id: event.target_asset_id ?? "", type: event.type, duration_frames: event.duration_frames, params: event.params }, key);
+  }
+  if (event.phase === "entrance") {
+    return /* @__PURE__ */ (0,jsx_runtime.jsx)(react.Fragment, { children: /* @__PURE__ */ (0,jsx_runtime.jsx)(EntranceEvent, { event, children }) }, key);
+  }
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)(react.Fragment, { children: sceneEvent(event, children) }, key);
+};
+
 ;// ./src/Composition.tsx
+
+
 
 
 
@@ -2957,10 +3270,17 @@ const Slideshow = (props) => {
   const map = new Map(props.images.map((x) => [x.id, x]));
   return /* @__PURE__ */ (0,jsx_runtime.jsxs)(esm/* AbsoluteFill */.H1, { style: { backgroundColor: "black" }, children: [
     /* @__PURE__ */ (0,jsx_runtime.jsx)(TransitionSeries, { children: props.timeline.flatMap((item, index) => {
+      var _a, _b, _c;
       const asset = map.get(item.asset_id);
       const isLast = index === props.timeline.length - 1;
-      const transitionFrames = isLast ? 0 : item.transition.duration_frames;
-      const sequence = /* @__PURE__ */ (0,jsx_runtime.jsx)(TransitionSeries.Sequence, { durationInFrames: item.duration_frames + transitionFrames, children: /* @__PURE__ */ (0,jsx_runtime.jsx)(EffectRenderer, { animation: item.animation, children: /* @__PURE__ */ (0,jsx_runtime.jsx)(ImageFrame, { src: `${base}/${(asset == null ? void 0 : asset.relative_path) ?? ""}`, imageWidth: (asset == null ? void 0 : asset.width) ?? props.width, imageHeight: (asset == null ? void 0 : asset.height) ?? props.height, motion: (asset == null ? void 0 : asset.motion) ?? "static", entrance: asset == null ? void 0 : asset.entrance }) }) }, `sequence-${item.asset_id}`);
+      const priority = { transition: 0, entrance: 1, effect: 2, exit: 3, camera: 4 };
+      const events = [...item.visual_events ?? []].sort((a, b) => priority[a.phase] - priority[b.phase] || a.start_frame - b.start_frame);
+      const transitionEvent = events.find((event) => event.phase === "transition");
+      const transitionFrames = isLast ? 0 : (transitionEvent == null ? void 0 : transitionEvent.duration_frames) ?? ((_a = item.transition_effect) == null ? void 0 : _a.duration_frames) ?? item.transition.duration_frames;
+      const incomingTransition = (_c = (_b = props.timeline[index - 1]) == null ? void 0 : _b.visual_events) == null ? void 0 : _c.find((event) => event.phase === "transition" && event.target_asset_id === item.asset_id);
+      const sceneEvents = events.filter((event) => event.phase !== "transition" && !(incomingTransition && event.phase === "entrance"));
+      const sceneContent = sceneEvents.reduce((content, event, eventIndex) => VisualEffectRenderer(event, `visual-${item.asset_id}-${eventIndex}`, content), /* @__PURE__ */ (0,jsx_runtime.jsx)(ImageFrame, { src: `${base}/${(asset == null ? void 0 : asset.relative_path) ?? ""}`, imageWidth: (asset == null ? void 0 : asset.width) ?? props.width, imageHeight: (asset == null ? void 0 : asset.height) ?? props.height, motion: (asset == null ? void 0 : asset.motion) ?? "static", entrance: asset == null ? void 0 : asset.entrance }));
+      const sequence = /* @__PURE__ */ (0,jsx_runtime.jsx)(TransitionSeries.Sequence, { durationInFrames: item.duration_frames + transitionFrames, children: events.length ? sceneContent : /* @__PURE__ */ (0,jsx_runtime.jsx)(EffectRenderer, { animation: item.animation, children: /* @__PURE__ */ (0,jsx_runtime.jsx)(ImageFrame, { src: `${base}/${(asset == null ? void 0 : asset.relative_path) ?? ""}`, imageWidth: (asset == null ? void 0 : asset.width) ?? props.width, imageHeight: (asset == null ? void 0 : asset.height) ?? props.height, motion: (asset == null ? void 0 : asset.motion) ?? "static", entrance: asset == null ? void 0 : asset.entrance }) }) }, `sequence-${item.asset_id}`);
       if (isLast) return [sequence];
       const nextItem = props.timeline[index + 1];
       const safeTransition = {
@@ -2968,7 +3288,17 @@ const Slideshow = (props) => {
         duration_frames: Math.min(item.transition.duration_frames, item.duration_frames, nextItem.duration_frames),
         background_color: asset == null ? void 0 : asset.backgroundColor
       };
-      return [sequence, TransitionFactory(safeTransition, `transition-${item.asset_id}`)];
+      const safeTransitionEffect = transitionEvent && ["card_flip_transition", "glass_shatter_transition", "shake_transition", "gaussian_blur_transition", "directional_blur_transition", "pixel_blur_transition", "bokeh_blur_transition", "water_ripple_transition", "zoom_through_transition"].includes(transitionEvent.type) ? {
+        from_asset_id: item.asset_id,
+        to_asset_id: transitionEvent.target_asset_id ?? nextItem.asset_id,
+        type: transitionEvent.type,
+        duration_frames: transitionEvent.duration_frames,
+        params: transitionEvent.params
+      } : item.transition_effect && {
+        ...item.transition_effect,
+        duration_frames: Math.min(item.transition_effect.duration_frames, item.duration_frames, nextItem.duration_frames)
+      };
+      return [sequence, safeTransitionEffect ? TransitionEffectRenderer(safeTransitionEffect, `transition-effect-${item.asset_id}`) : TransitionFactory(safeTransition, `transition-${item.asset_id}`)];
     }) }),
     /* @__PURE__ */ (0,jsx_runtime.jsx)(AudioTrack, { src: `${base}/${props.audio.path}` })
   ] });
@@ -4336,12 +4666,13 @@ if (typeof window !== "undefined") {
 /* harmony export */   fP: () => (/* binding */ Audio),
 /* harmony export */   gd: () => (/* binding */ Sequence),
 /* harmony export */   jC: () => (/* binding */ HtmlInCanvas),
+/* harmony export */   oz: () => (/* binding */ spring),
 /* harmony export */   ti: () => (/* binding */ getInputProps),
 /* harmony export */   uk: () => (/* binding */ MediaPlaybackError),
 /* harmony export */   xv: () => (/* binding */ VERSION),
 /* harmony export */   yT: () => (/* binding */ random)
 /* harmony export */ });
-/* unused harmony exports usePixelDensity, useCurrentScale, useBufferState, spring, prefetch, measureSpring, isHtmlInCanvasSupported, getStaticFiles, createEffect, cancelRender, assertValidInterpolatePosterizeOption, assertValidInterpolateEasingOption, absoluteFillSchema, Video, Still, Solid, Series, OffthreadVideo, Loop, Img, IFrame, Html5Video, Html5Audio, Freeze, FolderContext, Folder, Experimental, Config, CanvasImage, Artifact, AnimatedImage */
+/* unused harmony exports usePixelDensity, useCurrentScale, useBufferState, prefetch, measureSpring, isHtmlInCanvasSupported, getStaticFiles, createEffect, cancelRender, assertValidInterpolatePosterizeOption, assertValidInterpolateEasingOption, absoluteFillSchema, Video, Still, Solid, Series, OffthreadVideo, Loop, Img, IFrame, Html5Video, Html5Audio, Freeze, FolderContext, Folder, Experimental, Config, CanvasImage, Artifact, AnimatedImage */
 /* unused harmony import specifier */ var React37;
 /* unused harmony import specifier */ var useContext36;
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(758);
@@ -20069,7 +20400,7 @@ var NoReactInternals = {
 /******/ 	// Load entry module and return exports
 /******/ 	// This entry module is referenced by other modules so it can't be inlined
 /******/ 	__webpack_require__(2675);
-/******/ 	__webpack_require__(8586);
+/******/ 	__webpack_require__(7541);
 /******/ 	__webpack_require__(7858);
 /******/ 	var __webpack_exports__ = __webpack_require__(1313);
 /******/ 	

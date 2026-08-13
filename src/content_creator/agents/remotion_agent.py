@@ -31,6 +31,7 @@ _SKILL_NAMES = (
     "remotion-motion-design",
     "stretch-motion-design",
     "blur-transition-design",
+    "zoom-motion-design",
     "remotion-best-practices",
     "remotion-docs",
     "remotion-markup",
@@ -100,6 +101,10 @@ _TRANSITION_EFFECT_CAPABILITIES = {
         "description": "The outgoing image flips in 3D into the next image.",
         "params": {"rotation_axis": {"type": "enum", "values": ["X", "Y"]}, "perspective": {"type": "number", "minimum": 300, "maximum": 2000}},
     },
+    TransitionEffectType.zoom_through_transition: {
+        "description": "The camera rapidly passes through the outgoing image and the next image emerges after the pass-through. This is a cross-image transition, not a camera push or simple zoom.",
+        "params": {"intensity": {"type": "number", "minimum": 0, "maximum": 1}, "direction": {"type": "enum", "values": ["center", "left", "right", "top", "bottom"]}},
+    },
     TransitionEffectType.glass_shatter_transition: {
         "description": "The outgoing image fractures into cinematic glass-like fragments while the incoming image is revealed behind it.",
         "params": {
@@ -153,6 +158,7 @@ _VISUAL_EFFECT_CAPABILITIES = {
 }
 _TRANSITION_DURATION_RANGES = {
     "card_flip_transition": (18, 60, 30),
+    "zoom_through_transition": (12, 45, 18),
     "glass_shatter_transition": (30, 90, 45),
     "shake_transition": (12, 45, 18),
     "gaussian_blur_transition": (1, 60, 30),
@@ -167,6 +173,7 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str], None]
 _SECRET = re.compile(r"(?i)(?:authorization\s*:\s*(?:bearer\s+)?|bearer\s+|api[_-]?key\s*[:=]\s*|token\s*[:=]\s*|password\s*[:=]\s*)[^\s,;]+")
 _CAMERA_PUSH_INTENT = re.compile(r"(?:缓慢推进|镜头推进|push\s*in|zoom\s*in|camera\s+movement|ken\s*burns)", re.IGNORECASE)
+_ZOOM_THROUGH_INTENT = re.compile(r"(?:穿过(?:画面|图片|镜头)?|穿越(?:画面|图片|镜头)?|推进穿过|放大穿越|zoom\s*(?:through|past)|push\s*through|pass\s+through)", re.IGNORECASE)
 _BLUR_TRANSITION_TYPES = frozenset(_BLUR_TRANSITION_CAPABILITY["output_types"])
 _BLUR_TRANSITION_INTENT = re.compile(r"(?:模糊转场|模糊|失焦|雾化|朦胧|亮点|光斑|水滴|波纹|梦幻|回忆|柔和过渡|数字|像素|数据|blur|defocus|mist|bokeh|water|ripple|dream|memory|pixel|digital|data|soft\s+transition)", re.IGNORECASE)
 _GLASS_SHATTER_INTENT = re.compile(r"(?:玻璃|碎裂|破碎|碎片|爆裂|glass|shatter|fragment)", re.IGNORECASE)
@@ -252,6 +259,7 @@ def _transition_prompt(transition_intent: object, from_item, to_item) -> str:
             "Blur is transition-only. Never return blur_reveal, blur_effect, or blur_motion: none are registered types.",
             "Do not choose glass_shatter_transition or particle_flip_reveal for blur_transition intent. Do not infer a blur transition from cinematic alone; the Director must explicitly request blur, defocus, mist, bokeh, water, dream, memory, or soft transition language.",
             "Use glass_shatter_transition only for explicit glass, shatter, fracture, fragment, or explosion language. Never use it as the default for unknown, cinematic, dramatic, strong, premium, or impact transitions; use shake_transition for an otherwise unspecified strong transition.",
+            "Use zoom_through_transition only for explicit camera passing through the current image into the next scene: 穿过画面, 穿越图片, 推进穿过, 放大穿越, zoom through, or push through. It is a cross-image transition, never camera_push, simple zoom in, or static image movement.",
             "Example: transition_intent '第二张图片抖动切出' returns {\"type\":\"shake_transition\",\"duration_frames\":18,\"params\":{\"intensity\":0.7,\"motion_blur\":true}}.",
             "Do not return a legacy TransitionConfig type, TSX, React, CSS, or component names.",
             "The transition presentation uses frame-driven transforms, opacity, filters, masks, and fragment layering.",
@@ -540,6 +548,7 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
             "For '图片模糊出现', use an entrance capability when it describes one image appearing, and a concrete blur transition only when two images are being replaced.",
             "Never use glass_shatter_transition or particle_flip_reveal for explicit blur-transition intent. Do not infer blur_transition from cinematic alone; the Director must explicitly request blur, defocus, mist, bokeh, water, dream, memory, or a soft transition.",
             "Use glass_shatter_transition only for explicit glass, shatter, fracture, fragment, or explosion language. Never use it for unknown, cinematic, dramatic, strong, premium, or impact transitions; use shake_transition for an otherwise unspecified strong transition.",
+            "Use zoom_through_transition only for explicit camera passing through the current image into the next scene: 穿过画面, 穿越图片, 推进穿过, 放大穿越, zoom through, or push through. It is a cross-image transition, never camera_push, simple zoom in, or static image movement.",
             "Generate camera_push only when the Director explicitly requests 缓慢推进, 镜头推进, push in, zoom in, camera movement, or Ken Burns. Never infer it from cinematic, dramatic, smooth, premium, entrance, or transition.",
             "camera_push conflicts with a transition by default. Keep camera_push plus a transition only when the Director explicitly requests both camera movement and the transition. Example: '图一缓慢推进，然后翻转到图二' returns camera_push effect at frames 0-60 plus card_flip_transition at frames 30-60.",
             "card_flip_reveal is entrance-only for one image appearing. card_flip_transition is transition-only for two images changing; use card_flip_transition for '图一图二翻转转场'.",
@@ -601,6 +610,15 @@ def _explicitly_requests_camera_push(scene: DirectorTimelineItem) -> bool:
         return False
     text = " ".join(filter(None, [intent.description, intent.movement, intent.camera, intent.timing, *intent.effects]))
     return bool(_CAMERA_PUSH_INTENT.search(text))
+
+
+def _explicitly_requests_zoom_through_transition(scene: DirectorTimelineItem) -> bool:
+    """Zoom through requires explicit cross-scene pass-through language."""
+    intent = scene.transition_intent
+    if intent is None:
+        return False
+    text = " ".join(filter(None, [intent.description, intent.movement, intent.camera, intent.timing, *intent.effects]))
+    return bool(_ZOOM_THROUGH_INTENT.search(text))
 
 
 def _explicitly_requests_blur_transition(scene: DirectorTimelineItem) -> bool:
@@ -667,6 +685,8 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress
             for event in item.visual_events:
                 if event.phase == "transition":
                     if event.type in _BLUR_TRANSITION_TYPES and not _explicitly_requests_blur_transition(scene):
+                        continue
+                    if event.type == "zoom_through_transition" and not _explicitly_requests_zoom_through_transition(scene):
                         continue
                     if event.type == "glass_shatter_transition" and not _explicitly_requests_glass_shatter(scene):
                         duration = min(18, scene.duration_frames)

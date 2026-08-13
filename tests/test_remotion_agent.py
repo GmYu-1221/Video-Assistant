@@ -11,8 +11,12 @@ def _use_fallback(monkeypatch):
 
 def test_remotion_agent_reads_official_skill_documents():
     documents = load_skill_documents()
-    assert len(documents) == 8
+    assert len(documents) == 9
     assert all(Path(document).name == "SKILL.md" for document in documents)
+    zoom_skill = next(Path(document) for document in documents if Path(document).parent.name == "zoom-motion-design")
+    content = zoom_skill.read_text(encoding="utf-8")
+    assert content.startswith("---\nname: zoom-motion-design\n")
+    assert "description:" in content.split("---", 2)[1]
 
 
 def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
@@ -27,11 +31,18 @@ def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
     assert "card_flip_transition" in prompt["project_visual_event_rules"]
     assert "stretch-motion-design" in prompt["remotion_reference_guidelines"]
     assert "blur-transition-design" in prompt["remotion_reference_guidelines"]
+    assert "zoom-motion-design" in prompt["remotion_reference_guidelines"]
     blur_skill = prompt["remotion_reference_guidelines"]["blur-transition-design"]
     assert "# Blur Transition Design" in blur_skill
     assert "gaussian_blur_transition" in blur_skill
     assert "water_ripple_transition" in blur_skill
     assert "Do not generate blur transition from \"cinematic\" alone." in blur_skill
+    zoom_skill = prompt["remotion_reference_guidelines"]["zoom-motion-design"]
+    assert "# Zoom Through Motion Design" in zoom_skill
+    assert "zoom_through_transition" in zoom_skill
+    assert "source_asset_id" in zoom_skill
+    assert "target_asset_id" in zoom_skill
+    assert "zoom_blur_transition" in zoom_skill
     assert "stretch_reveal" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
     assert "stretch_transition" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
     assert "丝滑拉伸" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
@@ -47,6 +58,7 @@ def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
     assert "blur_reveal, blur_effect, or blur_motion" in rules
     assert "unknown, cinematic, dramatic, strong, premium, or impact transitions" in rules
     assert "card_flip_reveal is entrance-only" in rules
+    assert "Use zoom_through_transition only for explicit camera passing through" in rules
     serialized = json.dumps(prompt)
     assert "remotion-engineering" not in serialized
 

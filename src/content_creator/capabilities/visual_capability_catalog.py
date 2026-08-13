@@ -23,6 +23,7 @@ DIRECTOR_VISUAL_CAPABILITIES: dict[str, list[dict[str, Any]]] = {
         {"name": "glass_shatter_transition", "description": "真实玻璃破碎、裂纹扩散、碎片飞散的视觉转场。", "examples": ["玻璃破碎", "裂纹扩散", "碎片炸开"]},
         {"name": "shake_transition", "description": "快速震动、冲击感、力量感转场。", "examples": ["强烈震动", "冲击切换", "镜头震颤"]},
         {"name": "card_flip_transition", "description": "三维页面翻转、卡片旋转切换。", "examples": ["页面翻转", "卡片翻面", "3D翻转"]},
+        {"name": "zoom_through_transition", "description": "镜头快速穿越当前画面，进入下一张图片的电影感转场。不是单镜头推进。", "examples": ["镜头穿过画面进入下一幕", "快速放大穿越到下一张", "穿越图片切换"], "avoid_when": ["简单放大", "单镜头推进", "静态图片运动"]},
         {"name": "gaussian_blur_transition", "description": "失焦、柔焦、梦境、回忆感过渡。", "examples": ["画面逐渐模糊", "回忆效果", "梦幻过渡"], "avoid_when": ["强烈冲击", "爆炸", "快速切换"]},
         {"name": "directional_blur_transition", "description": "高速运动方向造成的速度模糊。", "examples": ["横向扫过", "极速切换", "速度感"], "avoid_when": ["柔和回忆", "静态展示"]},
         {"name": "pixel_blur_transition", "description": "数字像素化模糊效果。", "examples": ["数字故障", "像素消散"]},
