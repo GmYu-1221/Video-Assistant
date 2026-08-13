@@ -169,6 +169,7 @@ _SECRET = re.compile(r"(?i)(?:authorization\s*:\s*(?:bearer\s+)?|bearer\s+|api[_
 _CAMERA_PUSH_INTENT = re.compile(r"(?:缓慢推进|镜头推进|push\s*in|zoom\s*in|camera\s+movement|ken\s*burns)", re.IGNORECASE)
 _BLUR_TRANSITION_TYPES = frozenset(_BLUR_TRANSITION_CAPABILITY["output_types"])
 _BLUR_TRANSITION_INTENT = re.compile(r"(?:模糊转场|模糊|失焦|雾化|朦胧|亮点|水滴|波纹|梦幻|回忆|柔和过渡|blur|defocus|mist|bokeh|water|ripple|dream|memory|soft\s+transition)", re.IGNORECASE)
+_GLASS_SHATTER_INTENT = re.compile(r"(?:玻璃|碎裂|破碎|碎片|爆裂|glass|shatter|fragment)", re.IGNORECASE)
 
 
 class InvalidAnimationResponse(ValueError):
@@ -248,6 +249,7 @@ def _transition_prompt(transition_intent: object, from_item, to_item) -> str:
             "blur_transition is a family label only. Return one concrete blur transition type, never blur_transition itself.",
             "Map blur intent to the matching concrete type: loss of focus/mist/soft memory -> gaussian_blur_transition; fast horizontal or vertical blur -> directional_blur_transition; digital blocks -> pixel_blur_transition; light spots/romance -> bokeh_blur_transition; water drops/ripples -> water_ripple_transition.",
             "Do not choose glass_shatter_transition or particle_flip_reveal for blur_transition intent. Do not infer a blur transition from cinematic alone; the Director must explicitly request blur, defocus, mist, bokeh, water, dream, memory, or soft transition language.",
+            "Use glass_shatter_transition only for explicit glass, shatter, fracture, fragment, or explosion language. Never use it as the default for unknown, cinematic, dramatic, strong, premium, or impact transitions; use shake_transition for an otherwise unspecified strong transition.",
             "Example: transition_intent '第二张图片抖动切出' returns {\"type\":\"shake_transition\",\"duration_frames\":18,\"params\":{\"intensity\":0.7,\"motion_blur\":true}}.",
             "Do not return a legacy TransitionConfig type, TSX, React, CSS, or component names.",
             "The transition presentation uses frame-driven transforms, opacity, filters, masks, and fragment layering.",
@@ -357,12 +359,13 @@ def _validate_animation_params(effect: AnimationEffectType, params: dict) -> dic
 def _fallback_transition_effect(from_item, to_item, implementation: str = "fallback") -> TransitionEffectPlanItem:
     intent = from_item.transition_intent
     assert intent is not None
+    is_glass = _explicitly_requests_glass_shatter(from_item)
     return TransitionEffectPlanItem(
         from_asset_id=from_item.asset_id,
         to_asset_id=to_item.asset_id,
-        type=TransitionEffectType.glass_shatter_transition,
+        type=TransitionEffectType.glass_shatter_transition if is_glass else TransitionEffectType.shake_transition,
         duration_frames=min(18, from_item.duration_frames, to_item.duration_frames),
-        params={"fragment_count": 48, "impact_origin": "center", "motion_blur": True},
+        params={"fragment_count": 48, "impact_origin": "center", "motion_blur": True} if is_glass else {"intensity": 0.45, "motion_blur": False},
         implementation=implementation,
         design={"transition_intent": intent.model_dump()},
     )
@@ -379,6 +382,8 @@ def _parse_llm_transition_effect(raw: str, from_item, to_item) -> TransitionEffe
         raise ValueError("Remotion Agent returned invalid transition duration_frames")
     if not isinstance(params, dict):
         raise ValueError("Remotion Agent returned invalid transition params")
+    if effect == TransitionEffectType.glass_shatter_transition and not _explicitly_requests_glass_shatter(from_item):
+        raise ValueError("Remotion Agent selected glass shatter without explicit glass intent")
     clean_params = _validate_transition_params(effect, params)
     return TransitionEffectPlanItem(
         from_asset_id=from_item.asset_id,
@@ -528,6 +533,7 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
             "blur_transition is a family label only. For explicit 模糊转场, 失焦, 雾化, 朦胧, 亮点, 水滴, 梦幻, 回忆, or 柔和过渡 intent, return one concrete blur type: gaussian_blur_transition, directional_blur_transition, pixel_blur_transition, bokeh_blur_transition, or water_ripple_transition. Never return blur_transition itself.",
             "Use gaussian_blur_transition for defocus, mist, soft memory, or gentle change; directional_blur_transition for fast horizontal or vertical blur; pixel_blur_transition for digital blocks; bokeh_blur_transition for light spots or romance; water_ripple_transition for water drops or ripples.",
             "Never use glass_shatter_transition or particle_flip_reveal for explicit blur-transition intent. Do not infer blur_transition from cinematic alone; the Director must explicitly request blur, defocus, mist, bokeh, water, dream, memory, or a soft transition.",
+            "Use glass_shatter_transition only for explicit glass, shatter, fracture, fragment, or explosion language. Never use it for unknown, cinematic, dramatic, strong, premium, or impact transitions; use shake_transition for an otherwise unspecified strong transition.",
             "Generate camera_push only when the Director explicitly requests 缓慢推进, 镜头推进, push in, zoom in, camera movement, or Ken Burns. Never infer it from cinematic, dramatic, smooth, premium, entrance, or transition.",
             "camera_push conflicts with a transition by default. Keep camera_push plus a transition only when the Director explicitly requests both camera movement and the transition. Example: '图一缓慢推进，然后翻转到图二' returns camera_push effect at frames 0-60 plus card_flip_transition at frames 30-60.",
             "card_flip_reveal is entrance-only for one image appearing. card_flip_transition is transition-only for two images changing; use card_flip_transition for '图一图二翻转转场'.",
@@ -543,8 +549,9 @@ def _fallback_creative_plan(plan: DirectorPlan) -> RemotionCreativePlan:
         if scene.creative_intent:
             events.append(VisualEvent(type="creative_reveal", phase="entrance", start_frame=0, duration_frames=min(18, scene.duration_frames), params={}))
         if scene.transition_intent and index + 1 < len(plan.timeline):
-            fallback_duration = min(30, scene.duration_frames, plan.timeline[index + 1].duration_frames)
-            events.append(VisualEvent(type="glass_shatter_transition", phase="transition", start_frame=max(0, scene.duration_frames - fallback_duration), duration_frames=fallback_duration, source_asset_id=scene.asset_id, target_asset_id=plan.timeline[index + 1].asset_id, params={"fragment_count": 48, "impact_origin": "center", "motion_blur": True}))
+            fallback_duration = min(30 if _explicitly_requests_glass_shatter(scene) else 18, scene.duration_frames, plan.timeline[index + 1].duration_frames)
+            is_glass = _explicitly_requests_glass_shatter(scene)
+            events.append(VisualEvent(type="glass_shatter_transition" if is_glass else "shake_transition", phase="transition", start_frame=max(0, scene.duration_frames - fallback_duration), duration_frames=fallback_duration, source_asset_id=scene.asset_id, target_asset_id=plan.timeline[index + 1].asset_id, params={"fragment_count": 48, "impact_origin": "center", "motion_blur": True} if is_glass else {"intensity": 0.45, "motion_blur": False}))
         items.append(RemotionCreativePlanItem(scene_id=scene.asset_id, visual_events=events))
     transition_targets = {event.target_asset_id for item in items for event in item.visual_events if event.phase == "transition"}
     return RemotionCreativePlan(plans=[item.model_copy(update={"visual_events": [event for event in item.visual_events if not (event.phase == "entrance" and item.scene_id in transition_targets)]}) for item in items])
@@ -599,6 +606,15 @@ def _explicitly_requests_blur_transition(scene: DirectorTimelineItem) -> bool:
     return bool(_BLUR_TRANSITION_INTENT.search(text))
 
 
+def _explicitly_requests_glass_shatter(scene: DirectorTimelineItem) -> bool:
+    """Glass fragments are reserved for explicit glass or fracture direction."""
+    intent = scene.transition_intent
+    if intent is None:
+        return False
+    text = " ".join(filter(None, [intent.description, intent.movement, intent.camera, intent.timing, *intent.effects]))
+    return bool(_GLASS_SHATTER_INTENT.search(text))
+
+
 def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress: ProgressCallback | None = None) -> RemotionCreativePlan:
     """Single LLM entry point for all scene and transition visual decisions."""
     provider = provider or get_agent_provider("remotion")
@@ -635,6 +651,10 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress
             for event in item.visual_events:
                 if event.phase == "transition":
                     if event.type in _BLUR_TRANSITION_TYPES and not _explicitly_requests_blur_transition(scene):
+                        continue
+                    if event.type == "glass_shatter_transition" and not _explicitly_requests_glass_shatter(scene):
+                        duration = min(18, scene.duration_frames)
+                        kept.append(event.model_copy(update={"type": "shake_transition", "start_frame": max(0, scene.duration_frames - duration), "duration_frames": duration, "params": {"intensity": 0.45, "motion_blur": False}}))
                         continue
                     kept.append(event)
                     continue

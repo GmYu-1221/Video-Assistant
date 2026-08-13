@@ -97,3 +97,5 @@ Use for:
 - Blur is a transition, not an entrance animation.
 - Do not combine blur transition with competing reveal effects.
 - Transition owns target image reveal.
+- For an unspecified strong transition, prefer restrained `shake_transition`;
+  do not substitute glass shatter without explicit glass or fragment language.

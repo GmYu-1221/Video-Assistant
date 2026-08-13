@@ -34,6 +34,14 @@ that target. Do not layer independent reveals over a transition.
 the Director asks to push into a cut. `card_flip_reveal` is entrance-only for one
 image; `card_flip_transition` is transition-only for two images.
 
+## Glass Shatter Selection
+
+Use `glass_shatter_transition` only when the direction explicitly describes
+glass, shattering, fractures, fragments, or an explosion. Do not use it as the
+default for an unknown, cinematic, dramatic, strong, premium, or impact cut.
+When a strong transition has no specific visual language, prefer the lower-risk
+`shake_transition` with restrained intensity and no motion blur.
+
 ## Effect Development Rule
 
 Adding a visual event requires a Python schema, capability registry entry,

@@ -184,3 +184,14 @@ def test_fast_horizontal_blur_intent_keeps_directional_blur_transition():
 def test_cinematic_display_does_not_keep_inferred_blur_transition():
     result = create_remotion_creative_plan(_blur_transition_plan("电影感展示图片"), provider=BlurTransitionLLM("gaussian_blur_transition"))
     assert result.plans[0].visual_events == []
+
+
+def test_unknown_strong_transition_downgrades_unified_glass_shatter():
+    result = create_remotion_creative_plan(
+        _blur_transition_plan("未知强烈转场"),
+        provider=BlurTransitionLLM("glass_shatter_transition"),
+    )
+    event = result.plans[0].visual_events[0]
+    assert event.type == "shake_transition"
+    assert event.duration_frames == 18
+    assert event.params == {"intensity": 0.45, "motion_blur": False}

@@ -160,8 +160,34 @@ def test_invalid_transition_response_uses_safe_fallback(monkeypatch, response):
 
     transition = create_transition_effect_plan(plan).transitions[0]
 
+    assert transition.type.value == "shake_transition"
+    assert transition.params == {"intensity": 0.45, "motion_blur": False}
+    assert transition.implementation == "fallback"
+
+
+def test_explicit_glass_intent_keeps_glass_fallback(monkeypatch):
+    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: RawTransitionLLM('{"duration_frames":18,"params":{}}'))
+    plan = DirectorPlan.model_validate({"timeline": [
+        {"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "玻璃破碎后切到下一张"}},
+        {"asset_id": "image-002", "duration_frames": 60},
+    ]})
+    transition = create_transition_effect_plan(plan).transitions[0]
     assert transition.type.value == "glass_shatter_transition"
     assert transition.implementation == "fallback"
+
+
+def test_unknown_strong_transition_does_not_keep_model_glass_shatter(monkeypatch):
+    monkeypatch.setattr(
+        "content_creator.agents.remotion_agent.get_agent_provider",
+        lambda _: RawTransitionLLM('{"type":"glass_shatter_transition","duration_frames":30,"params":{"fragment_count":48}}'),
+    )
+    plan = DirectorPlan.model_validate({"timeline": [
+        {"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "未知强烈转场"}},
+        {"asset_id": "image-002", "duration_frames": 60},
+    ]})
+    transition = create_transition_effect_plan(plan).transitions[0]
+    assert transition.type.value == "shake_transition"
+    assert transition.params == {"intensity": 0.45, "motion_blur": False}
 
 
 def test_transition_raw_response_log_is_labeled_and_redacted(monkeypatch, caplog):
