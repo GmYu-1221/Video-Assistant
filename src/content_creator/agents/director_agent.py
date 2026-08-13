@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from content_creator.prompts.director_prompt import director_prompt
+from content_creator.capabilities.visual_capability_catalog import DIRECTOR_VISUAL_CAPABILITIES
 from content_creator.schemas import (
     DirectorPlan,
     DirectorTimelineItem,
@@ -82,7 +83,7 @@ def create_director_plan(
     }
     try:
         raw = active_provider.complete(
-            director_prompt([asset.model_dump(mode="json") for asset in images], payload, style, load_remotion_skill_guidance())
+            director_prompt([asset.model_dump(mode="json") for asset in images], payload, style, load_remotion_skill_guidance(), DIRECTOR_VISUAL_CAPABILITIES)
         )
     except Exception:
         # Provider/network failures must never stop local video generation.

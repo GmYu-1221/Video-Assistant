@@ -1,7 +1,9 @@
 import json
 
+from content_creator.capabilities.visual_capability_catalog import DIRECTOR_VISUAL_CAPABILITIES
 
-def director_prompt(images: list[dict], beat_analysis: dict, style: str, remotion_guidance: str = "") -> str:
+
+def director_prompt(images: list[dict], beat_analysis: dict, style: str, remotion_guidance: str = "", capability_catalog: dict | None = None) -> str:
     """Ask an LLM for decisions only, never implementation code or frame positions."""
     instructions = {
         "task": "Create an image video director plan.",
@@ -29,9 +31,16 @@ def director_prompt(images: list[dict], beat_analysis: dict, style: str, remotio
             "Words such as 切换、下一张、两张之间、转场 describe transition_intent on the outgoing scene. Omit transition_intent for the final image.",
             "Describe visual movement, camera behavior, effect layers and timing in natural film language. Never output an implementation, component, TypeScript, CSS, or fixed animation type.",
             "Never select transition.type, an effect type, a Remotion component, or implementation parameters. The Remotion Creative Agent owns those decisions.",
+            "You are a film director, not a renderer. Use cinematic language.",
+            "The available_visual_capabilities field is an internal feasibility catalog. Do not output its name values.",
+            "Do not output component names, VisualEvent types, implementation parameters, or code.",
+            "Do not invent unsupported effects. Adapt unavailable requests to the closest supported visual language without rejecting the request.",
+            "Generic cinematic or dramatic wording does not automatically add a special effect.",
+            "Stretch language describes an entrance into the next shot; never invent stretch_transition.",
         ],
         "style": style,
         "remotion_capability_guidance": remotion_guidance,
+        "available_visual_capabilities": capability_catalog or DIRECTOR_VISUAL_CAPABILITIES,
         "images": images,
         "beat_analysis": beat_analysis,
     }

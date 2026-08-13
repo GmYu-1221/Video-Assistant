@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from content_creator.agents.director_agent import create_director_plan, load_remotion_skill_guidance, plan_to_storyboard
+from content_creator.capabilities.visual_capability_catalog import DIRECTOR_VISUAL_CAPABILITIES, log_intent_adaptation
 from content_creator.schemas import DirectorPlan, DirectorPlanPatch
 from content_creator.services.llm.router import get_agent_provider
 from content_creator.services.llm.validator import validate_director_plan_patch_json
@@ -35,6 +36,7 @@ def _chat_prompt(session: ProjectSession, message: str) -> str:
             "recent_history": session.conversation_history[-10:],
             "user_feedback": message,
             "remotion_capability_guidance": load_remotion_skill_guidance(),
+            "available_visual_capabilities": DIRECTOR_VISUAL_CAPABILITIES,
             "output_contract": {
                 "operations": [
                     {
@@ -81,6 +83,10 @@ def _chat_prompt(session: ProjectSession, message: str) -> str:
                 "For a duration request, set changes.duration_frames only. For a visual transition request, set changes.transition_intent on the outgoing scene. Describe it naturally; never name an effect type or component.",
                 "Keep static image motion policy unchanged. Do not write TSX, React, CSS, ffmpeg, crop, cover, scaleX, or scaleY.",
                 "Do not output transition.type or TransitionConfig. Preserve internal baseline transitions locally.",
+                "You are a film director, not a renderer. Use cinematic language, never component names or VisualEvent types.",
+                "Do not invent unsupported effects. Adapt unavailable requests to the closest supported visual language without rejecting the request.",
+                "Generic cinematic or dramatic wording does not automatically add a special effect.",
+                "Stretch language describes an entrance into the next shot; never invent stretch_transition.",
             ],
         },
         ensure_ascii=False,
@@ -141,6 +147,7 @@ def update_plan(session: ProjectSession, message: str, on_progress: ProgressCall
         response = "Director LLM 当前不可用，未修改计划。请配置 LLM 后重试。"
     else:
         try:
+            log_intent_adaptation(message)
             if on_progress:
                 on_progress("导演助手|正在理解创意需求...")
             complete_json = getattr(provider, "complete_json", provider.complete)
