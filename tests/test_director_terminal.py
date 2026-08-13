@@ -1,6 +1,8 @@
 from pathlib import Path
+from types import SimpleNamespace
 
-from content_creator.director_chat import create_prompt_session, dispatch_command, history_path
+from content_creator import director_chat
+from content_creator.director_chat import _render, create_prompt_session, dispatch_command, history_path
 from content_creator.sessions.project_session import ProjectSession
 
 
@@ -40,3 +42,27 @@ def test_unicode_text_is_passed_to_director_agent(tmp_path, monkeypatch):
     monkeypatch.setattr(ProjectSession, "save", lambda self: None)
     dispatch_command(session, "第一张照片从背面翻转进入")
     assert captured == ["第一张照片从背面翻转进入"]
+
+
+def test_director_render_uses_quiet_remotion_output(tmp_path, monkeypatch):
+    target = tmp_path / "preview.mp4"
+    session = SimpleNamespace(
+        current_plan=object(),
+        current_storyboard=object(),
+        project=object(),
+        preview_path=str(target),
+        final_video_path=str(tmp_path / "final.mp4"),
+        dirty=True,
+        save=lambda: None,
+    )
+    captured = {}
+    monkeypatch.setattr(director_chat, "create_remotion_creative_plan", lambda *args, **kwargs: object())
+    monkeypatch.setattr(director_chat, "compile_render_plan", lambda project, *args: project)
+
+    def fake_render(*args, **kwargs):
+        captured.update(kwargs)
+        return target
+
+    monkeypatch.setattr(director_chat, "render_project", fake_render)
+    assert _render(session, preview=True) == target
+    assert captured["quiet"] is True

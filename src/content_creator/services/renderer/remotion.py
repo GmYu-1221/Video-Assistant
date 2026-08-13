@@ -8,7 +8,14 @@ from typing import Callable
 ProgressCallback = Callable[[str], None]
 
 
-def render_project(project: VideoProject, remotion_dir: str | Path, output_path: str | Path, preview: bool = False, on_progress: ProgressCallback | None = None) -> Path:
+def render_project(
+    project: VideoProject,
+    remotion_dir: str | Path,
+    output_path: str | Path,
+    preview: bool = False,
+    on_progress: ProgressCallback | None = None,
+    quiet: bool = False,
+) -> Path:
     if on_progress:
         on_progress("渲染器|正在准备预览..." if preview else "渲染器|正式渲染开始...")
     server = MediaServer(project.output.project_dir)
@@ -28,7 +35,13 @@ def render_project(project: VideoProject, remotion_dir: str | Path, output_path:
             command += ["--scale", "0.5"]
         elif on_progress:
             on_progress("渲染器|正在渲染并编码视频...")
-        completed = subprocess.run(command, cwd=Path(remotion_dir), check=False)
+        completed = subprocess.run(
+            command,
+            cwd=Path(remotion_dir),
+            check=False,
+            capture_output=quiet,
+            text=quiet,
+        )
         if completed.returncode != 0:
             raise RuntimeError(f"Remotion render failed with exit code {completed.returncode}")
         if not target.is_file() or target.stat().st_size == 0:
