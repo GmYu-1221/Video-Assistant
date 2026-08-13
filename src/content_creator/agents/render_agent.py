@@ -4,6 +4,7 @@ from pathlib import Path
 from content_creator.schemas import AnimationEffect, AnimationEffectType, DirectorPlan, DirectorTimelineItem, TimelineItem, RemotionCreativePlan, VisualEvent, VideoProject, TransitionEffectPlanItem, TransitionEffectType
 from content_creator.agents.remotion_agent import create_remotion_creative_plan
 from content_creator.services.music import adapt_audio_to_duration
+from content_creator.services.visual_spec_adapter import project_to_visual_spec
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,8 @@ def compile_render_plan(project: VideoProject, storyboard, creative_plan: Remoti
     if not source_audio.is_file() or source_audio.parent != audio_dir:
         raise RuntimeError(f"Project source audio does not exist inside audio directory: {source_audio}")
     adapt_audio_to_duration(source_audio, cursor / project.fps, audio_path)
-    updated = project.model_copy(update={"timeline": timeline, "audio": project.audio.model_copy(update={"path":"audio/bgm_adapted.wav", "duration": cursor / project.fps, "sample_rate":44100})})
+    base_project = project.model_copy(update={"timeline": timeline, "audio": project.audio.model_copy(update={"path":"audio/bgm_adapted.wav", "duration": cursor / project.fps, "sample_rate":44100})})
+    updated = base_project.model_copy(update={"visual_spec": project_to_visual_spec(base_project)})
     payload = updated.model_dump(mode="json")
     payload["output"] = {"project_dir":".", "render_data":"render_data.json", "final_video":"render/final.mp4"}
     Path(updated.output.render_data).resolve().write_text(json.dumps(payload, indent=2), encoding="utf-8")

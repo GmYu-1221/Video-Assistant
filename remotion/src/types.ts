@@ -19,3 +19,11 @@ export interface TimelineItem { asset_id: string; start_frame: number; end_frame
 export interface VideoOutput { project_dir: string; render_data: string; final_video: string; }
 export interface VideoProject { project_id: string; fps: number; width: number; height: number; images: ImageAsset[]; audio: AudioConfig; timeline: TimelineItem[]; output: VideoOutput; media_base_url?: string; }
 export type RemotionProps = VideoProject & Record<string, unknown>;
+export type VisualSpecKeyframe = {frame: number; value: number; easing?: string};
+export type VisualSpecTrack = {target?: string | null; property: string; keyframes: VisualSpecKeyframe[]};
+export type VisualSpecRegion = {x: number; y: number; width: number; height: number; overflow?: 'visible' | 'hidden'};
+export type VisualSpecLayer = {id: string; type: 'image' | 'text' | 'solid' | 'overlay'; region: string; source?: {asset_id?: string; content?: string}; style?: Record<string, unknown>; tracks?: VisualSpecTrack[]};
+export type VisualSpecScene = {id: string; start_frame: number; duration_frames: number; layers: VisualSpecLayer[]};
+export type VisualSpecTransition = {id: string; from_scene: string; to_scene: string; start_frame: number; duration_frames: number; preset?: string | null; params?: Record<string, number | string>; tracks?: VisualSpecTrack[]};
+export type VisualSpec = {version: '2.0'; composition: {width: number; height: number; fps: number; duration_frames: number; background?: string}; layout: {preset: string; regions: Record<string, VisualSpecRegion>}; persistent_layers?: VisualSpecLayer[]; scenes: VisualSpecScene[]; transitions?: VisualSpecTransition[]};
+export interface RemotionPropsWithVisualSpec extends RemotionProps {visual_spec?: VisualSpec}

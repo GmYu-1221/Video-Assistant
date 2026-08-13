@@ -5,6 +5,7 @@ from .color import RGBColor
 from .animation_plan import AnimationEffect
 from .transition_effect_plan import TransitionEffectPlanItem
 from .remotion_creative_plan import VisualEvent
+from .visual_spec import VisualSpec
 
 
 class EntranceConfig(BaseModel):
@@ -59,3 +60,4 @@ class VideoProject(BaseModel):
     audio: AudioConfig
     timeline: list[TimelineItem] = Field(min_length=1)
     output: VideoOutput
+    visual_spec: VisualSpec | None = None

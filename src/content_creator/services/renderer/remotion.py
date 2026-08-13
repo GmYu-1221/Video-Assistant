@@ -28,7 +28,8 @@ def render_project(
     try:
         if on_progress:
             on_progress("渲染器|正在打包 Remotion 项目...")
-        command = ["pnpm", "exec", "remotion", "render", "src/index.ts", "Slideshow", str(target), "--props", str(props_path)]
+        composition = "VisualSpec" if props.get("visual_spec") else "Slideshow"
+        command = ["pnpm", "exec", "remotion", "render", "src/index.ts", composition, str(target), "--props", str(props_path)]
         if preview:
             if on_progress:
                 on_progress("渲染器|正在渲染预览帧...")

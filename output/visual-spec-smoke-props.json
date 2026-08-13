@@ -1,0 +1,30 @@
+{
+  "project_id": "visual-spec-smoke",
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "images": [
+    {"id": "image-001", "filename": "001_2.jpg", "relative_path": "materials/processed/001_2.jpg", "width": 1920, "height": 1080, "fit": "contain", "backgroundColor": {"r": 0, "g": 0, "b": 0}, "duration_frames": 60, "motion": "static", "entrance": {"type": "none", "durationInFrames": 1}},
+    {"id": "image-002", "filename": "000_1.jpg", "relative_path": "materials/processed/000_1.jpg", "width": 1920, "height": 1080, "fit": "contain", "backgroundColor": {"r": 0, "g": 0, "b": 0}, "duration_frames": 60, "motion": "static", "entrance": {"type": "none", "durationInFrames": 1}}
+  ],
+  "audio": {"path": "audio/bgm_adapted.wav", "duration": 4, "sample_rate": 44100, "bpm": 120},
+  "timeline": [],
+  "output": {"project_dir": ".", "render_data": "render_data.json", "final_video": "render/visual-spec-smoke.mp4"},
+  "media_base_url": "http://127.0.0.1:8765",
+  "visual_spec": {
+    "version": "2.0",
+    "composition": {"width": 1080, "height": 1920, "fps": 30, "duration_frames": 120, "background": "#050505"},
+    "layout": {"preset": "center_stage", "regions": {"header": {"x": 0, "y": 120, "width": 1080, "height": 220}, "stage": {"x": 0, "y": 450, "width": 1080, "height": 610, "overflow": "hidden"}}},
+    "persistent_layers": [{"id": "headline", "type": "text", "region": "header", "source": {"content": "Visual Spec\nFlash Zoom Blur"}, "style": {"color": "#dce74a", "font_size": 48, "font_weight": 600, "align": "center"}}],
+    "scenes": [
+      {"id": "scene-0", "start_frame": 0, "duration_frames": 60, "layers": [{"id": "scene-0-image", "type": "image", "region": "stage", "source": {"asset_id": "image-001"}, "style": {"background": "#fff"}}]},
+      {"id": "scene-1", "start_frame": 60, "duration_frames": 60, "layers": [{"id": "scene-1-image", "type": "image", "region": "stage", "source": {"asset_id": "image-002"}, "style": {"background": "#fff"}}]}
+    ],
+    "transitions": [{"id": "t", "from_scene": "scene-0", "to_scene": "scene-1", "start_frame": 49, "duration_frames": 11, "preset": "flash_zoom_blur", "params": {"flash_peak": 0.95}, "tracks": [
+      {"target": "scene-1-image", "property": "opacity", "keyframes": [{"frame": 0, "value": 0.35}, {"frame": 8, "value": 1, "easing": "easeOutCubic"}]},
+      {"target": "scene-1-image", "property": "transform.scale", "keyframes": [{"frame": 0, "value": 1.14}, {"frame": 8, "value": 1, "easing": "easeOutCubic"}]},
+      {"target": "scene-1-image", "property": "filter.blur", "keyframes": [{"frame": 0, "value": 24}, {"frame": 8, "value": 0, "easing": "easeOutCubic"}]},
+      {"target": "transition-overlay", "property": "overlay.opacity", "keyframes": [{"frame": 0, "value": 0}, {"frame": 3, "value": 0.95}, {"frame": 11, "value": 0}]}
+    ]}]
+  }
+}
