@@ -1,6 +1,8 @@
 import json
 import logging
 
+import pytest
+
 from content_creator.agents.remotion_agent import create_remotion_creative_plan
 from content_creator.schemas import DirectorPlan
 
@@ -173,6 +175,19 @@ class HorizontalDirectionalBlurLLM(BlurTransitionLLM):
         }]}]})
 
 
+class ShortBlurTransitionLLM(BlurTransitionLLM):
+    def complete_json(self, _prompt: str) -> str:
+        return json.dumps({"plans": [{"scene_id": "image-001", "visual_events": [{
+            "type": self.effect_type,
+            "phase": "transition",
+            "start_frame": 54,
+            "duration_frames": 6,
+            "source_asset_id": "image-001",
+            "target_asset_id": "image-002",
+            "params": {"intensity": 0.7, "softness": 0.6, "motion_blur": False},
+        }]}]})
+
+
 def _blur_transition_plan(intent: str) -> DirectorPlan:
     return DirectorPlan.model_validate({"timeline": [
         {"asset_id": "image-001", "duration_frames": 60, "reason": "first", "transition_intent": {"description": intent}},
@@ -203,6 +218,23 @@ def test_directional_blur_accepts_renderer_supported_axis_direction():
     event = result.plans[0].visual_events[0]
     assert event.type == "directional_blur_transition"
     assert event.params["direction"] == "horizontal"
+
+
+@pytest.mark.parametrize("effect_type", [
+    "gaussian_blur_transition",
+    "directional_blur_transition",
+    "pixel_blur_transition",
+    "bokeh_blur_transition",
+    "water_ripple_transition",
+])
+def test_blur_transitions_accept_short_positive_durations(effect_type):
+    result = create_remotion_creative_plan(
+        _blur_transition_plan("快速模糊转场"),
+        provider=ShortBlurTransitionLLM(effect_type),
+    )
+    event = result.plans[0].visual_events[0]
+    assert event.type == effect_type
+    assert event.duration_frames == 6
 
 
 def test_digital_pixel_intent_keeps_pixel_blur_transition():
