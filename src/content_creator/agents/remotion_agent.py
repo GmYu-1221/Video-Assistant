@@ -588,26 +588,29 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
 
 
 def _visual_spec_decision_prompt(plan: DirectorPlan) -> str:
-    """Expose only safe composition choices, never renderer implementation."""
+    """仅向模型暴露受控的视觉决策，不暴露渲染器实现。"""
     boundaries = [
         {"from_asset_id": item.asset_id, "to_asset_id": plan.timeline[index + 1].asset_id,
          "transition_intent": item.transition_intent.model_dump(mode="json") if item.transition_intent else None}
         for index, item in enumerate(plan.timeline[:-1])
     ]
     return json.dumps({
-        "role": "Visual Spec Decision Agent",
-        "task": "Choose a registered layout and one registered transition preset for each requested scene boundary.",
-        "available_layouts": ["center_stage", "fullscreen"],
+        "role": "视觉规格决策 Agent",
+        "task": "从已注册能力中选择一个画面布局，并为需要处理的相邻场景边界选择一个转场预设。",
+        "可用布局": {"center_stage": "上下区域可固定文字，中间图片舞台切换", "fullscreen": "图片占满整个画面"},
         "available_transition_presets": {
-            "clean_cut": {}, "crossfade": {}, "white_flash": {"flash_peak": "0..1"},
-            "flash_zoom_blur": {"flash_peak": "0..1", "incoming_scale": "0.5..3", "blur_px": "0..80", "settle_frames": "positive integer"},
+            "clean_cut": "直接切换，无过渡",
+            "crossfade": "交叉淡入淡出",
+            "white_flash": {"说明": "白色闪光覆盖", "flash_peak": "0 到 1"},
+            "flash_zoom_blur": {"说明": "短促白闪后，新图由放大和模糊状态恢复清晰", "flash_peak": "0 到 1", "incoming_scale": "0.5 到 3", "blur_px": "0 到 80", "settle_frames": "正整数"},
         },
-        "boundaries": boundaries,
-        "output_contract": {"layout_preset": "registered layout", "transitions": [{"from_asset_id": "boundary source", "to_asset_id": "boundary target", "preset": "registered preset", "params": "only documented numeric params"}]},
+        "待决策的相邻场景边界": boundaries,
+        "输出格式": {"layout_preset": "已注册的英文布局枚举", "transitions": [{"from_asset_id": "输入中给出的起始素材 ID", "to_asset_id": "输入中给出的目标素材 ID", "preset": "已注册的英文预设枚举", "params": "仅可填写该预设文档列出的数值参数"}]},
         "rules": [
-            "Return only JSON. Do not return TSX, CSS, React, code, tracks, regions, layer definitions, or unregistered names.",
-            "Use flash_zoom_blur for a short white flash with the incoming image resolving from blur and scale.",
-            "Only name adjacent boundaries supplied in the input. Omit an entry to use the local default.",
+            "只返回一个 JSON 对象，不要输出 Markdown、解释或额外文字。",
+            "不得输出 TSX、CSS、React、代码、动画轨道、区域定义、图层定义或未注册名称。",
+            "当意图是短促白闪，且新图片从模糊放大状态恢复清晰时，使用 flash_zoom_blur。",
+            "只能填写输入给出的相邻场景边界。省略某个边界时，本地渲染器会使用默认效果。",
         ],
     }, ensure_ascii=False)
 

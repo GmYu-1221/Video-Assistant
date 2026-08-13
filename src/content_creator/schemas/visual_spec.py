@@ -49,7 +49,7 @@ class VisualSpecTransitionDecision(BaseModel):
 
 
 class VisualSpecDecision(BaseModel):
-    """The intentionally small LLM-owned part of a Visual Spec."""
+    """仅由 LLM 决定的、小而受控的视觉规格部分。"""
     layout_preset: LayoutPreset = LayoutPreset.center_stage
     transitions: list[VisualSpecTransitionDecision] = Field(default_factory=list)
 
