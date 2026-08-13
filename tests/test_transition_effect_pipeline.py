@@ -88,6 +88,16 @@ def test_composition_uses_independent_transition_effect_registry():
     assert "rotate" in presentation
 
 
+def test_blur_transition_registry_contains_all_concrete_effects():
+    registry = Path("remotion/src/transitions/TransitionEffectRenderer.tsx").read_text(encoding="utf-8")
+    presentation = Path("remotion/src/transitions/blur/BlurTransition.tsx").read_text(encoding="utf-8")
+    for effect in ["gaussian_blur_transition", "directional_blur_transition", "pixel_blur_transition", "bokeh_blur_transition", "water_ripple_transition"]:
+        assert effect in registry
+    assert "useVideoConfig" in presentation
+    assert "spring(" in presentation
+    assert "opacity: 0.2" not in presentation
+
+
 @pytest.mark.parametrize("response", [
     '{"type":"glass_shatter_transition","duration_frames":45,"params":{"fragment_count":64},"description":"glass fragments"}',
     '```json\n{"type":"glass_shatter_transition","duration_frames":45,"params":{"fragment_count":64},"description":"glass fragments"}\n```',

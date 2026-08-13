@@ -12,6 +12,22 @@ class TransitionEffectType(str, Enum):
     card_flip_transition = "card_flip_transition"
     glass_shatter_transition = "glass_shatter_transition"
     shake_transition = "shake_transition"
+    gaussian_blur_transition = "gaussian_blur_transition"
+    directional_blur_transition = "directional_blur_transition"
+    pixel_blur_transition = "pixel_blur_transition"
+    bokeh_blur_transition = "bokeh_blur_transition"
+    water_ripple_transition = "water_ripple_transition"
+
+
+class BlurTransitionEffectType(str, Enum):
+    """Registered blur-transition variants emitted as TransitionEffectType values."""
+
+    blur_transition = "blur_transition"
+    gaussian_blur_transition = "gaussian_blur_transition"
+    directional_blur_transition = "directional_blur_transition"
+    pixel_blur_transition = "pixel_blur_transition"
+    bokeh_blur_transition = "bokeh_blur_transition"
+    water_ripple_transition = "water_ripple_transition"
 
 
 class TransitionEffectPlanItem(BaseModel):

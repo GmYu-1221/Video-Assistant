@@ -11,7 +11,7 @@ def _use_fallback(monkeypatch):
 
 def test_remotion_agent_reads_official_skill_documents():
     documents = load_skill_documents()
-    assert len(documents) == 7
+    assert len(documents) == 8
     assert all(Path(document).name == "SKILL.md" for document in documents)
 
 
@@ -26,6 +26,12 @@ def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
     assert "camera_push" in prompt["project_visual_event_rules"]
     assert "card_flip_transition" in prompt["project_visual_event_rules"]
     assert "stretch-motion-design" in prompt["remotion_reference_guidelines"]
+    assert "blur-transition-design" in prompt["remotion_reference_guidelines"]
+    blur_skill = prompt["remotion_reference_guidelines"]["blur-transition-design"]
+    assert "# Blur Transition Design" in blur_skill
+    assert "gaussian_blur_transition" in blur_skill
+    assert "water_ripple_transition" in blur_skill
+    assert "Do not generate blur transition from \"cinematic\" alone." in blur_skill
     assert "stretch_reveal" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
     assert "stretch_transition" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
     assert "丝滑拉伸" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]

@@ -139,3 +139,48 @@ def test_cinematic_display_does_not_keep_inferred_camera_push():
     }]})
     result = create_remotion_creative_plan(plan, provider=UnwantedCameraPushLLM())
     assert result.plans[0].visual_events == []
+
+
+class BlurTransitionLLM:
+    model_name = "remotion-test"
+
+    def __init__(self, effect_type: str) -> None:
+        self.effect_type = effect_type
+
+    def complete_json(self, _prompt: str) -> str:
+        return json.dumps({"plans": [{"scene_id": "image-001", "visual_events": [{
+            "type": self.effect_type,
+            "phase": "transition",
+            "start_frame": 30,
+            "duration_frames": 30,
+            "source_asset_id": "image-001",
+            "target_asset_id": "image-002",
+            "params": {"intensity": 0.7, "softness": 0.6, "motion_blur": False},
+        }]}]})
+
+
+def _blur_transition_plan(intent: str) -> DirectorPlan:
+    return DirectorPlan.model_validate({"timeline": [
+        {"asset_id": "image-001", "duration_frames": 60, "reason": "first", "transition_intent": {"description": intent}},
+        {"asset_id": "image-002", "duration_frames": 60, "reason": "second"},
+    ]})
+
+
+def test_defocus_intent_keeps_gaussian_blur_transition():
+    result = create_remotion_creative_plan(_blur_transition_plan("图一逐渐模糊，然后出现图二"), provider=BlurTransitionLLM("gaussian_blur_transition"))
+    assert [event.type for event in result.plans[0].visual_events] == ["gaussian_blur_transition"]
+
+
+def test_water_intent_keeps_water_ripple_transition():
+    result = create_remotion_creative_plan(_blur_transition_plan("图一像水面波纹一样过渡到图二"), provider=BlurTransitionLLM("water_ripple_transition"))
+    assert [event.type for event in result.plans[0].visual_events] == ["water_ripple_transition"]
+
+
+def test_fast_horizontal_blur_intent_keeps_directional_blur_transition():
+    result = create_remotion_creative_plan(_blur_transition_plan("快速横向模糊切换"), provider=BlurTransitionLLM("directional_blur_transition"))
+    assert [event.type for event in result.plans[0].visual_events] == ["directional_blur_transition"]
+
+
+def test_cinematic_display_does_not_keep_inferred_blur_transition():
+    result = create_remotion_creative_plan(_blur_transition_plan("电影感展示图片"), provider=BlurTransitionLLM("gaussian_blur_transition"))
+    assert result.plans[0].visual_events == []

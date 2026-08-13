@@ -30,6 +30,7 @@ _SKILL_NAMES = (
     "video-assistant-visual-events",
     "remotion-motion-design",
     "stretch-motion-design",
+    "blur-transition-design",
     "remotion-best-practices",
     "remotion-docs",
     "remotion-markup",
@@ -114,6 +115,37 @@ _TRANSITION_EFFECT_CAPABILITIES = {
             "motion_blur": {"type": "boolean", "description": "Enable blur during the shake."},
         },
     },
+    TransitionEffectType.gaussian_blur_transition: {
+        "description": "Smooth cinematic blur based transition. The outgoing image loses focus and the incoming image emerges.",
+        "params": {"blur_type": {"type": "enum", "values": ["gaussian"]}, "direction": {"type": "enum", "values": ["horizontal", "vertical", "radial"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
+    },
+    TransitionEffectType.directional_blur_transition: {
+        "description": "Fast directional velocity blur transition between two images.",
+        "params": {"blur_type": {"type": "enum", "values": ["directional"]}, "direction": {"type": "enum", "values": ["left", "right", "up", "down"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
+    },
+    TransitionEffectType.pixel_blur_transition: {
+        "description": "Image resolves through low-resolution pixel blocks into the next image.",
+        "params": {"blur_type": {"type": "enum", "values": ["pixelate"]}, "direction": {"type": "enum", "values": ["horizontal", "vertical", "radial"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
+    },
+    TransitionEffectType.bokeh_blur_transition: {
+        "description": "Cinematic bokeh light bloom expands as the next image appears.",
+        "params": {"blur_type": {"type": "enum", "values": ["bokeh", "mist"]}, "direction": {"type": "enum", "values": ["horizontal", "vertical", "radial"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
+    },
+    TransitionEffectType.water_ripple_transition: {
+        "description": "Water-drop ripple refraction transition from one image into the next.",
+        "params": {"blur_type": {"type": "enum", "values": ["water_ripple"]}, "direction": {"type": "enum", "values": ["radial"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
+    },
+}
+_BLUR_TRANSITION_CAPABILITY = {
+    "description": "Smooth cinematic blur based transition. The outgoing image loses focus and the incoming image emerges.",
+    "intent_mapping": ["模糊转场", "失焦", "雾化", "朦胧", "亮点", "水滴", "梦幻", "回忆", "柔和过渡"],
+    "output_types": [
+        "gaussian_blur_transition",
+        "directional_blur_transition",
+        "pixel_blur_transition",
+        "bokeh_blur_transition",
+        "water_ripple_transition",
+    ],
 }
 _VISUAL_EFFECT_CAPABILITIES = {
     **{effect.value: {**capability, "phase": ["entrance", "effect"]} for effect, capability in _ANIMATION_EFFECT_CAPABILITIES.items() if effect.value != "none"},
@@ -123,6 +155,11 @@ _TRANSITION_DURATION_RANGES = {
     "card_flip_transition": (18, 60, 30),
     "glass_shatter_transition": (30, 90, 45),
     "shake_transition": (12, 45, 18),
+    "gaussian_blur_transition": (18, 60, 30),
+    "directional_blur_transition": (12, 45, 18),
+    "pixel_blur_transition": (18, 60, 30),
+    "bokeh_blur_transition": (24, 75, 36),
+    "water_ripple_transition": (24, 75, 36),
     "particle_dissolve_transition": (24, 90, 36),
     "liquid_morph_transition": (36, 120, 48),
 }
@@ -130,6 +167,8 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str], None]
 _SECRET = re.compile(r"(?i)(?:authorization\s*:\s*(?:bearer\s+)?|bearer\s+|api[_-]?key\s*[:=]\s*|token\s*[:=]\s*|password\s*[:=]\s*)[^\s,;]+")
 _CAMERA_PUSH_INTENT = re.compile(r"(?:缓慢推进|镜头推进|push\s*in|zoom\s*in|camera\s+movement|ken\s*burns)", re.IGNORECASE)
+_BLUR_TRANSITION_TYPES = frozenset(_BLUR_TRANSITION_CAPABILITY["output_types"])
+_BLUR_TRANSITION_INTENT = re.compile(r"(?:模糊转场|模糊|失焦|雾化|朦胧|亮点|水滴|波纹|梦幻|回忆|柔和过渡|blur|defocus|mist|bokeh|water|ripple|dream|memory|soft\s+transition)", re.IGNORECASE)
 
 
 class InvalidAnimationResponse(ValueError):
@@ -195,6 +234,7 @@ def _transition_prompt(transition_intent: object, from_item, to_item) -> str:
         "from_scene": {"asset_id": from_item.asset_id, "duration_frames": from_item.duration_frames},
         "to_scene": {"asset_id": to_item.asset_id, "duration_frames": to_item.duration_frames},
         "transition_effect_capabilities": {effect.value: capability for effect, capability in _TRANSITION_EFFECT_CAPABILITIES.items()},
+        "blur_transition": _BLUR_TRANSITION_CAPABILITY,
         "remotion_skill_guidelines": documents,
         "output_contract": {
             "type": "one transition_effect_capabilities key",
@@ -205,6 +245,9 @@ def _transition_prompt(transition_intent: object, from_item, to_item) -> str:
             "Return only one JSON object with exactly type, duration_frames, and params. Do not return description, transition_description, implementation_plan, explanation, or Markdown.",
             "Choose a registered transition effect and use its documented parameters.",
             "Choose params only from the selected transition capability.",
+            "blur_transition is a family label only. Return one concrete blur transition type, never blur_transition itself.",
+            "Map blur intent to the matching concrete type: loss of focus/mist/soft memory -> gaussian_blur_transition; fast horizontal or vertical blur -> directional_blur_transition; digital blocks -> pixel_blur_transition; light spots/romance -> bokeh_blur_transition; water drops/ripples -> water_ripple_transition.",
+            "Do not choose glass_shatter_transition or particle_flip_reveal for blur_transition intent. Do not infer a blur transition from cinematic alone; the Director must explicitly request blur, defocus, mist, bokeh, water, dream, memory, or soft transition language.",
             "Example: transition_intent '第二张图片抖动切出' returns {\"type\":\"shake_transition\",\"duration_frames\":18,\"params\":{\"intensity\":0.7,\"motion_blur\":true}}.",
             "Do not return a legacy TransitionConfig type, TSX, React, CSS, or component names.",
             "The transition presentation uses frame-driven transforms, opacity, filters, masks, and fragment layering.",
@@ -462,6 +505,7 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
         "task": "Convert all Director visual intents into one executable unified visual event plan.",
         "scenes": scenes,
         "visual_effect_capabilities": _VISUAL_EFFECT_CAPABILITIES,
+        "blur_transition": _BLUR_TRANSITION_CAPABILITY,
         "project_visual_event_rules": documents["video-assistant-visual-events"],
         "remotion_motion_guidelines": documents["remotion-motion-design"],
         "remotion_reference_guidelines": {
@@ -481,6 +525,9 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
             "A transition event owns the reveal of its target asset. Never create entrance, reveal, fade in, creative_reveal, particle_flip_reveal, or drop_reveal for a target asset covered by a transition.",
             "Transitions are cross-scene visual events; entrance animations are single-scene events. If both are requested, keep the transition and remove the target entrance.",
             "Example: '图一玻璃破碎，图二从碎片后出现' returns only a glass_shatter_transition event with source_asset_id image-001 and target_asset_id image-002.",
+            "blur_transition is a family label only. For explicit 模糊转场, 失焦, 雾化, 朦胧, 亮点, 水滴, 梦幻, 回忆, or 柔和过渡 intent, return one concrete blur type: gaussian_blur_transition, directional_blur_transition, pixel_blur_transition, bokeh_blur_transition, or water_ripple_transition. Never return blur_transition itself.",
+            "Use gaussian_blur_transition for defocus, mist, soft memory, or gentle change; directional_blur_transition for fast horizontal or vertical blur; pixel_blur_transition for digital blocks; bokeh_blur_transition for light spots or romance; water_ripple_transition for water drops or ripples.",
+            "Never use glass_shatter_transition or particle_flip_reveal for explicit blur-transition intent. Do not infer blur_transition from cinematic alone; the Director must explicitly request blur, defocus, mist, bokeh, water, dream, memory, or a soft transition.",
             "Generate camera_push only when the Director explicitly requests 缓慢推进, 镜头推进, push in, zoom in, camera movement, or Ken Burns. Never infer it from cinematic, dramatic, smooth, premium, entrance, or transition.",
             "camera_push conflicts with a transition by default. Keep camera_push plus a transition only when the Director explicitly requests both camera movement and the transition. Example: '图一缓慢推进，然后翻转到图二' returns camera_push effect at frames 0-60 plus card_flip_transition at frames 30-60.",
             "card_flip_reveal is entrance-only for one image appearing. card_flip_transition is transition-only for two images changing; use card_flip_transition for '图一图二翻转转场'.",
@@ -543,6 +590,15 @@ def _explicitly_requests_camera_push(scene: DirectorTimelineItem) -> bool:
     return bool(_CAMERA_PUSH_INTENT.search(text))
 
 
+def _explicitly_requests_blur_transition(scene: DirectorTimelineItem) -> bool:
+    """Blur transitions require explicit boundary intent, never style alone."""
+    intent = scene.transition_intent
+    if intent is None:
+        return False
+    text = " ".join(filter(None, [intent.description, intent.movement, intent.camera, intent.timing, *intent.effects]))
+    return bool(_BLUR_TRANSITION_INTENT.search(text))
+
+
 def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress: ProgressCallback | None = None) -> RemotionCreativePlan:
     """Single LLM entry point for all scene and transition visual decisions."""
     provider = provider or get_agent_provider("remotion")
@@ -578,6 +634,8 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress
             kept = []
             for event in item.visual_events:
                 if event.phase == "transition":
+                    if event.type in _BLUR_TRANSITION_TYPES and not _explicitly_requests_blur_transition(scene):
+                        continue
                     kept.append(event)
                     continue
                 if item.scene_id in incoming:

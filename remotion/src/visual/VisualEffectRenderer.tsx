@@ -9,6 +9,11 @@ export const VisualEffectRegistry = {
   ...EffectRegistry,
   glass_shatter_transition: 'glass_shatter_transition',
   shake_transition: 'shake_transition',
+  gaussian_blur_transition: 'gaussian_blur_transition',
+  directional_blur_transition: 'directional_blur_transition',
+  pixel_blur_transition: 'pixel_blur_transition',
+  bokeh_blur_transition: 'bokeh_blur_transition',
+  water_ripple_transition: 'water_ripple_transition',
 } as const;
 
 const sceneEvent = (event: VisualEvent, children: React.ReactNode): ReactElement => {
@@ -29,10 +34,10 @@ const EntranceEvent: React.FC<{event: VisualEvent; children?: React.ReactNode}> 
 
 export const VisualEffectRenderer = (event: VisualEvent, key: string, children?: React.ReactNode): ReactElement => {
   if (event.phase === 'transition') {
-    if (event.type !== 'card_flip_transition' && event.type !== 'glass_shatter_transition' && event.type !== 'shake_transition') {
+    if (!['card_flip_transition', 'glass_shatter_transition', 'shake_transition', 'gaussian_blur_transition', 'directional_blur_transition', 'pixel_blur_transition', 'bokeh_blur_transition', 'water_ripple_transition'].includes(event.type)) {
       throw new Error(`Unknown visual transition effect: ${event.type}`);
     }
-    return TransitionEffectRenderer({from_asset_id: event.source_asset_id ?? '', to_asset_id: event.target_asset_id ?? '', type: event.type as 'card_flip_transition' | 'glass_shatter_transition' | 'shake_transition', duration_frames: event.duration_frames, params: event.params}, key);
+    return TransitionEffectRenderer({from_asset_id: event.source_asset_id ?? '', to_asset_id: event.target_asset_id ?? '', type: event.type as Parameters<typeof TransitionEffectRenderer>[0]['type'], duration_frames: event.duration_frames, params: event.params}, key);
   }
   if (event.phase === 'entrance') {
     return <React.Fragment key={key}><EntranceEvent event={event}>{children}</EntranceEvent></React.Fragment>;
