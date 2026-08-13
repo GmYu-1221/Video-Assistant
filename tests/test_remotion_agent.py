@@ -43,6 +43,8 @@ def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
     assert "Never infer it from cinematic, dramatic, smooth, premium, entrance, or transition" in rules
     assert "camera_push conflicts with a transition by default" in rules
     assert "Use glass_shatter_transition only for explicit glass" in rules
+    assert "Blur is a transition only" in rules
+    assert "blur_reveal, blur_effect, or blur_motion" in rules
     assert "unknown, cinematic, dramatic, strong, premium, or impact transitions" in rules
     assert "card_flip_reveal is entrance-only" in rules
     serialized = json.dumps(prompt)

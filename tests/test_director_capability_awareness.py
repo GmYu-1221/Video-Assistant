@@ -13,7 +13,10 @@ def test_catalog_contains_only_supported_director_capabilities():
     assert "stretch_transition" not in names
     assert "particle_explosion_transition" not in names
     assert "flash_burst_transition" not in names
-    assert all(set(item) == {"name", "description", "examples"} for items in DIRECTOR_VISUAL_CAPABILITIES.values() for item in items)
+    assert all({"name", "description", "examples"} <= set(item) for items in DIRECTOR_VISUAL_CAPABILITIES.values() for item in items)
+    blur_items = {item["name"]: item for item in DIRECTOR_VISUAL_CAPABILITIES["transition"] if "blur_transition" in item["name"] or item["name"] == "water_ripple_transition"}
+    assert blur_items["gaussian_blur_transition"]["avoid_when"] == ["强烈冲击", "爆炸", "快速切换"]
+    assert blur_items["directional_blur_transition"]["avoid_when"] == ["柔和回忆", "静态展示"]
 
 
 def test_director_prompt_injects_catalog_and_natural_language_rules():

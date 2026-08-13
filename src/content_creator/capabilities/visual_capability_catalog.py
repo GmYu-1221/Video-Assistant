@@ -23,11 +23,11 @@ DIRECTOR_VISUAL_CAPABILITIES: dict[str, list[dict[str, Any]]] = {
         {"name": "glass_shatter_transition", "description": "真实玻璃破碎、裂纹扩散、碎片飞散的视觉转场。", "examples": ["玻璃破碎", "裂纹扩散", "碎片炸开"]},
         {"name": "shake_transition", "description": "快速震动、冲击感、力量感转场。", "examples": ["强烈震动", "冲击切换", "镜头震颤"]},
         {"name": "card_flip_transition", "description": "三维页面翻转、卡片旋转切换。", "examples": ["页面翻转", "卡片翻面", "3D翻转"]},
-        {"name": "gaussian_blur_transition", "description": "失焦、柔焦、梦境、回忆感转场。", "examples": ["逐渐模糊", "失焦进入", "梦幻过渡"]},
-        {"name": "directional_blur_transition", "description": "高速方向运动造成的速度模糊转场。", "examples": ["横向速度切换", "快速扫过", "极速移动"]},
-        {"name": "pixel_blur_transition", "description": "数字化像素模糊效果。", "examples": ["数字化消散", "像素化过渡"]},
-        {"name": "bokeh_blur_transition", "description": "电影光斑、柔和散景效果。", "examples": ["光斑散开", "梦幻光晕"]},
-        {"name": "water_ripple_transition", "description": "水波、液体、波纹扩散。", "examples": ["水面波纹", "涟漪扩散"]},
+        {"name": "gaussian_blur_transition", "description": "失焦、柔焦、梦境、回忆感过渡。", "examples": ["画面逐渐模糊", "回忆效果", "梦幻过渡"], "avoid_when": ["强烈冲击", "爆炸", "快速切换"]},
+        {"name": "directional_blur_transition", "description": "高速运动方向造成的速度模糊。", "examples": ["横向扫过", "极速切换", "速度感"], "avoid_when": ["柔和回忆", "静态展示"]},
+        {"name": "pixel_blur_transition", "description": "数字像素化模糊效果。", "examples": ["数字故障", "像素消散"]},
+        {"name": "bokeh_blur_transition", "description": "电影光斑和散景效果。", "examples": ["光斑扩散", "梦幻镜头"]},
+        {"name": "water_ripple_transition", "description": "水波和液体波纹扩散。", "examples": ["水面波纹", "涟漪扩散"]},
     ],
 }
 

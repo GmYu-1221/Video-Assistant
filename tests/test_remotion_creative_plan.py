@@ -159,6 +159,19 @@ class BlurTransitionLLM:
         }]}]})
 
 
+class HorizontalDirectionalBlurLLM(BlurTransitionLLM):
+    def complete_json(self, _prompt: str) -> str:
+        return json.dumps({"plans": [{"scene_id": "image-001", "visual_events": [{
+            "type": "directional_blur_transition",
+            "phase": "transition",
+            "start_frame": 42,
+            "duration_frames": 18,
+            "source_asset_id": "image-001",
+            "target_asset_id": "image-002",
+            "params": {"blur_type": "directional", "direction": "horizontal", "intensity": 0.8, "softness": 0.5, "motion_blur": True},
+        }]}]})
+
+
 def _blur_transition_plan(intent: str) -> DirectorPlan:
     return DirectorPlan.model_validate({"timeline": [
         {"asset_id": "image-001", "duration_frames": 60, "reason": "first", "transition_intent": {"description": intent}},
@@ -179,6 +192,26 @@ def test_water_intent_keeps_water_ripple_transition():
 def test_fast_horizontal_blur_intent_keeps_directional_blur_transition():
     result = create_remotion_creative_plan(_blur_transition_plan("快速横向模糊切换"), provider=BlurTransitionLLM("directional_blur_transition"))
     assert [event.type for event in result.plans[0].visual_events] == ["directional_blur_transition"]
+
+
+def test_directional_blur_accepts_renderer_supported_axis_direction():
+    result = create_remotion_creative_plan(
+        _blur_transition_plan("快速模糊转场"),
+        provider=HorizontalDirectionalBlurLLM("directional_blur_transition"),
+    )
+    event = result.plans[0].visual_events[0]
+    assert event.type == "directional_blur_transition"
+    assert event.params["direction"] == "horizontal"
+
+
+def test_digital_pixel_intent_keeps_pixel_blur_transition():
+    result = create_remotion_creative_plan(_blur_transition_plan("数字像素故障切换"), provider=BlurTransitionLLM("pixel_blur_transition"))
+    assert [event.type for event in result.plans[0].visual_events] == ["pixel_blur_transition"]
+
+
+def test_cinematic_bokeh_intent_keeps_bokeh_blur_transition():
+    result = create_remotion_creative_plan(_blur_transition_plan("电影光斑梦幻过渡"), provider=BlurTransitionLLM("bokeh_blur_transition"))
+    assert [event.type for event in result.plans[0].visual_events] == ["bokeh_blur_transition"]
 
 
 def test_cinematic_display_does_not_keep_inferred_blur_transition():

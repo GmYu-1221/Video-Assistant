@@ -121,7 +121,7 @@ _TRANSITION_EFFECT_CAPABILITIES = {
     },
     TransitionEffectType.directional_blur_transition: {
         "description": "Fast directional velocity blur transition between two images.",
-        "params": {"blur_type": {"type": "enum", "values": ["directional"]}, "direction": {"type": "enum", "values": ["left", "right", "up", "down"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
+        "params": {"blur_type": {"type": "enum", "values": ["directional"]}, "direction": {"type": "enum", "values": ["horizontal", "vertical", "left", "right", "up", "down"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
     },
     TransitionEffectType.pixel_blur_transition: {
         "description": "Image resolves through low-resolution pixel blocks into the next image.",
@@ -168,7 +168,7 @@ ProgressCallback = Callable[[str], None]
 _SECRET = re.compile(r"(?i)(?:authorization\s*:\s*(?:bearer\s+)?|bearer\s+|api[_-]?key\s*[:=]\s*|token\s*[:=]\s*|password\s*[:=]\s*)[^\s,;]+")
 _CAMERA_PUSH_INTENT = re.compile(r"(?:缓慢推进|镜头推进|push\s*in|zoom\s*in|camera\s+movement|ken\s*burns)", re.IGNORECASE)
 _BLUR_TRANSITION_TYPES = frozenset(_BLUR_TRANSITION_CAPABILITY["output_types"])
-_BLUR_TRANSITION_INTENT = re.compile(r"(?:模糊转场|模糊|失焦|雾化|朦胧|亮点|水滴|波纹|梦幻|回忆|柔和过渡|blur|defocus|mist|bokeh|water|ripple|dream|memory|soft\s+transition)", re.IGNORECASE)
+_BLUR_TRANSITION_INTENT = re.compile(r"(?:模糊转场|模糊|失焦|雾化|朦胧|亮点|光斑|水滴|波纹|梦幻|回忆|柔和过渡|数字|像素|数据|blur|defocus|mist|bokeh|water|ripple|dream|memory|pixel|digital|data|soft\s+transition)", re.IGNORECASE)
 _GLASS_SHATTER_INTENT = re.compile(r"(?:玻璃|碎裂|破碎|碎片|爆裂|glass|shatter|fragment)", re.IGNORECASE)
 
 
@@ -248,6 +248,8 @@ def _transition_prompt(transition_intent: object, from_item, to_item) -> str:
             "Choose params only from the selected transition capability.",
             "blur_transition is a family label only. Return one concrete blur transition type, never blur_transition itself.",
             "Map blur intent to the matching concrete type: loss of focus/mist/soft memory -> gaussian_blur_transition; fast horizontal or vertical blur -> directional_blur_transition; digital blocks -> pixel_blur_transition; light spots/romance -> bokeh_blur_transition; water drops/ripples -> water_ripple_transition.",
+            "Blur selection: gaussian for 模糊、失焦、梦境、回忆; directional for 高速移动、横向扫过、速度冲击; pixel for 数字、像素、数据; bokeh for 光斑、电影感柔光; water ripple for 水、波纹、涟漪.",
+            "Blur is transition-only. Never return blur_reveal, blur_effect, or blur_motion: none are registered types.",
             "Do not choose glass_shatter_transition or particle_flip_reveal for blur_transition intent. Do not infer a blur transition from cinematic alone; the Director must explicitly request blur, defocus, mist, bokeh, water, dream, memory, or soft transition language.",
             "Use glass_shatter_transition only for explicit glass, shatter, fracture, fragment, or explosion language. Never use it as the default for unknown, cinematic, dramatic, strong, premium, or impact transitions; use shake_transition for an otherwise unspecified strong transition.",
             "Example: transition_intent '第二张图片抖动切出' returns {\"type\":\"shake_transition\",\"duration_frames\":18,\"params\":{\"intensity\":0.7,\"motion_blur\":true}}.",
@@ -440,13 +442,13 @@ def create_animation_plan(plan: DirectorPlan, mode: str | None = None, provider=
         except (OSError, TimeoutError, ConnectionError):
             logger.warning("[Remotion Agent] LLM unavailable, using fallback")
             animations.append(_fallback_animation(item))
-        except InvalidAnimationResponse:
-            logger.warning("[Remotion Agent] Invalid response, using safe fallback")
+        except InvalidAnimationResponse as exc:
+            logger.warning("[Remotion Agent] Invalid response, using safe fallback (%s)", exc)
             animations.append(_invalid_response_fallback(item))
         except UnknownAnimationEffect:
             raise
-        except ValueError:
-            logger.warning("[Remotion Agent] Invalid response, using safe fallback")
+        except ValueError as exc:
+            logger.warning("[Remotion Agent] Invalid response, using safe fallback (%s)", exc)
             animations.append(_invalid_response_fallback(item))
         else:
             logger.info("[Remotion Agent] generated AnimationPlan")
@@ -474,13 +476,13 @@ def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> Transiti
         except (OSError, TimeoutError, ConnectionError):
             logger.warning("[Remotion Agent] LLM unavailable, using fallback")
             transitions.append(_fallback_transition_effect(item, next_item))
-        except InvalidAnimationResponse:
-            logger.warning("[Remotion Agent] Invalid response, using safe fallback")
+        except InvalidAnimationResponse as exc:
+            logger.warning("[Remotion Agent] Invalid response, using safe fallback (%s)", exc)
             transitions.append(_fallback_transition_effect(item, next_item))
         except UnknownTransitionEffect:
             raise
-        except ValueError:
-            logger.warning("[Remotion Agent] Invalid response, using safe fallback")
+        except ValueError as exc:
+            logger.warning("[Remotion Agent] Invalid response, using safe fallback (%s)", exc)
             transitions.append(_fallback_transition_effect(item, next_item))
         else:
             logger.info("[Remotion Agent] generated TransitionEffectPlan")
@@ -532,6 +534,9 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
             "Example: '图一玻璃破碎，图二从碎片后出现' returns only a glass_shatter_transition event with source_asset_id image-001 and target_asset_id image-002.",
             "blur_transition is a family label only. For explicit 模糊转场, 失焦, 雾化, 朦胧, 亮点, 水滴, 梦幻, 回忆, or 柔和过渡 intent, return one concrete blur type: gaussian_blur_transition, directional_blur_transition, pixel_blur_transition, bokeh_blur_transition, or water_ripple_transition. Never return blur_transition itself.",
             "Use gaussian_blur_transition for defocus, mist, soft memory, or gentle change; directional_blur_transition for fast horizontal or vertical blur; pixel_blur_transition for digital blocks; bokeh_blur_transition for light spots or romance; water_ripple_transition for water drops or ripples.",
+            "Blur transition selection rules: gaussian blur is for 模糊、失焦、梦境、回忆; directional blur is for 高速移动、横向扫过、速度冲击; pixel blur is for 数字、像素、数据; bokeh is for 光斑、电影感柔光; water ripple is for 水、波纹、涟漪.",
+            "Blur is a transition only. Never output blur_reveal, blur_effect, or blur_motion; those are not registered types.",
+            "For '图片模糊出现', use an entrance capability when it describes one image appearing, and a concrete blur transition only when two images are being replaced.",
             "Never use glass_shatter_transition or particle_flip_reveal for explicit blur-transition intent. Do not infer blur_transition from cinematic alone; the Director must explicitly request blur, defocus, mist, bokeh, water, dream, memory, or a soft transition.",
             "Use glass_shatter_transition only for explicit glass, shatter, fracture, fragment, or explosion language. Never use it for unknown, cinematic, dramatic, strong, premium, or impact transitions; use shake_transition for an otherwise unspecified strong transition.",
             "Generate camera_push only when the Director explicitly requests 缓慢推进, 镜头推进, push in, zoom in, camera movement, or Ken Burns. Never infer it from cinematic, dramatic, smooth, premium, entrance, or transition.",
@@ -675,8 +680,8 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress
         logger.warning("[Remotion Agent] LLM unavailable, using fallback")
     except UnknownVisualEffect:
         raise
-    except (InvalidAnimationResponse, ValueError):
-        logger.warning("[Remotion Agent] Invalid response, using safe fallback")
+    except (InvalidAnimationResponse, ValueError) as exc:
+        logger.warning("[Remotion Agent] Invalid response, using safe fallback (%s)", exc)
     return _fallback_creative_plan(plan)
 
 
