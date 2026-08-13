@@ -10,7 +10,7 @@ from content_creator.services.music.beat_detector import BeatAnalysis
 from content_creator.services.timeline import build_timeline
 from content_creator.agents.director_agent import create_director_plan, plan_to_storyboard
 from content_creator.agents.render_agent import compile_render_plan
-from content_creator.agents.remotion_agent import create_remotion_creative_plan
+from content_creator.agents.remotion_agent import create_remotion_creative_plan, create_visual_spec_decision
 from content_creator.services.llm.router import get_agent_provider
 
 
@@ -53,11 +53,12 @@ def apply_director(project: VideoProject, analysis: BeatAnalysis, style: str) ->
     print("[Director] Plan validated")
     storyboard = plan_to_storyboard(plan, style)
     creative_plan = create_remotion_creative_plan(plan)
+    decision = create_visual_spec_decision(plan)
     try:
-        return compile_render_plan(project, storyboard, creative_plan)
+        return compile_render_plan(project, storyboard, creative_plan, visual_spec_decision=decision)
     except TypeError as exc:
         # Keep compatibility with callers/tests that inject the legacy 2-arg compiler.
-        if "positional argument" not in str(exc):
+        if "positional argument" not in str(exc) and "unexpected keyword argument" not in str(exc):
             raise
         return compile_render_plan(project, storyboard)
 

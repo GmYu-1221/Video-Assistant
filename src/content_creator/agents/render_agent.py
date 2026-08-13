@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from content_creator.schemas import AnimationEffect, AnimationEffectType, DirectorPlan, DirectorTimelineItem, TimelineItem, RemotionCreativePlan, VisualEvent, VideoProject, TransitionEffectPlanItem, TransitionEffectType
+from content_creator.schemas import AnimationEffect, AnimationEffectType, DirectorPlan, DirectorTimelineItem, TimelineItem, RemotionCreativePlan, VisualEvent, VideoProject, TransitionEffectPlanItem, TransitionEffectType, VisualSpecDecision
 from content_creator.agents.remotion_agent import create_remotion_creative_plan
 from content_creator.services.music import adapt_audio_to_duration
 from content_creator.services.visual_spec_adapter import project_to_visual_spec
@@ -55,7 +55,7 @@ def _normalize_transition_event(event: VisualEvent, scene, previous_high_impact:
         "params": params,
     })
 
-def compile_render_plan(project: VideoProject, storyboard, creative_plan: RemotionCreativePlan | None = None, animation_plan=None, transition_effect_plan=None) -> VideoProject:
+def compile_render_plan(project: VideoProject, storyboard, creative_plan: RemotionCreativePlan | None = None, animation_plan=None, transition_effect_plan=None, visual_spec_decision: VisualSpecDecision | None = None) -> VideoProject:
     cursor = 0
     timeline = []
     legacy_animation_by_asset = {}
@@ -135,7 +135,7 @@ def compile_render_plan(project: VideoProject, storyboard, creative_plan: Remoti
         raise RuntimeError(f"Project source audio does not exist inside audio directory: {source_audio}")
     adapt_audio_to_duration(source_audio, cursor / project.fps, audio_path)
     base_project = project.model_copy(update={"timeline": timeline, "audio": project.audio.model_copy(update={"path":"audio/bgm_adapted.wav", "duration": cursor / project.fps, "sample_rate":44100})})
-    updated = base_project.model_copy(update={"visual_spec": project_to_visual_spec(base_project)})
+    updated = base_project.model_copy(update={"visual_spec": project_to_visual_spec(base_project, decision=visual_spec_decision)})
     payload = updated.model_dump(mode="json")
     payload["output"] = {"project_dir":".", "render_data":"render_data.json", "final_video":"render/final.mp4"}
     Path(updated.output.render_data).resolve().write_text(json.dumps(payload, indent=2), encoding="utf-8")

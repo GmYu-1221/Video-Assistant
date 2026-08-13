@@ -2,6 +2,7 @@ import pytest
 
 from content_creator.schemas import CompositionSpec, LayoutPreset, LayoutSpec, LayerSource, LayerType, Region, SceneSpec, TransitionPreset, TransitionSpec, VisualLayer, VisualSpec
 from content_creator.services.visual_spec_compiler import expand_transition_preset
+from content_creator.services.visual_spec_validator import validate_visual_spec
 
 
 def test_center_stage_spec_is_valid():
@@ -21,3 +22,9 @@ def test_flash_zoom_blur_expands_to_four_synchronized_tracks():
 def test_scene_track_cannot_exceed_scene_duration():
     with pytest.raises(ValueError, match="exceeds scene duration"):
         SceneSpec(id="scene", start_frame=0, duration_frames=10, layers=[VisualLayer(id="image", type=LayerType.image, region="stage", tracks=[{"property": "filter.blur", "keyframes": [{"frame": 0, "value": 20}, {"frame": 11, "value": 0}]}])])
+
+
+def test_validator_rejects_transition_between_non_adjacent_scenes():
+    spec = VisualSpec.model_validate({"composition": {"width": 100, "height": 100, "fps": 30, "duration_frames": 30}, "layout": {"preset": "fullscreen", "regions": {"main": {"x": 0, "y": 0, "width": 100, "height": 100}}}, "scenes": [{"id": "a", "start_frame": 0, "duration_frames": 10, "layers": [{"id": "a-image", "type": "image", "region": "main"}]}, {"id": "b", "start_frame": 10, "duration_frames": 10, "layers": [{"id": "b-image", "type": "image", "region": "main"}]}, {"id": "c", "start_frame": 20, "duration_frames": 10, "layers": [{"id": "c-image", "type": "image", "region": "main"}]}], "transitions": [{"id": "t", "from_scene": "a", "to_scene": "c", "start_frame": 9, "duration_frames": 1}]})
+    with pytest.raises(ValueError, match="adjacent"):
+        validate_visual_spec(spec)

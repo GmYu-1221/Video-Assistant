@@ -15,6 +15,8 @@ def expand_transition_preset(transition: TransitionSpec, incoming_layer_id: str)
     if transition.preset is None or transition.tracks:
         return transition
     duration = transition.duration_frames
+    if duration < 2 and transition.preset in {TransitionPreset.white_flash, TransitionPreset.flash_zoom_blur}:
+        return transition.model_copy(update={"preset": TransitionPreset.clean_cut, "tracks": []})
     params = transition.params
     if transition.preset == TransitionPreset.clean_cut:
         tracks = []

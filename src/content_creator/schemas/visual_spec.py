@@ -41,6 +41,19 @@ class TransitionPreset(str, Enum):
     flash_zoom_blur = "flash_zoom_blur"
 
 
+class VisualSpecTransitionDecision(BaseModel):
+    from_asset_id: str = Field(min_length=1)
+    to_asset_id: str = Field(min_length=1)
+    preset: TransitionPreset
+    params: dict[str, float | str] = Field(default_factory=dict)
+
+
+class VisualSpecDecision(BaseModel):
+    """The intentionally small LLM-owned part of a Visual Spec."""
+    layout_preset: LayoutPreset = LayoutPreset.center_stage
+    transitions: list[VisualSpecTransitionDecision] = Field(default_factory=list)
+
+
 PROPERTY_LIMITS: dict[AnimatableProperty, tuple[float, float]] = {
     AnimatableProperty.opacity: (0, 1),
     AnimatableProperty.scale: (0.5, 3),

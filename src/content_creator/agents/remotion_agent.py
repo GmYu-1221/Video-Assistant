@@ -21,6 +21,7 @@ from content_creator.schemas import (
     RemotionCreativePlan,
     RemotionCreativePlanItem,
     VisualEvent,
+    VisualSpecDecision,
 )
 from content_creator.services.llm.router import get_agent_provider
 
@@ -586,6 +587,49 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
     }, ensure_ascii=False)
 
 
+def _visual_spec_decision_prompt(plan: DirectorPlan) -> str:
+    """Expose only safe composition choices, never renderer implementation."""
+    boundaries = [
+        {"from_asset_id": item.asset_id, "to_asset_id": plan.timeline[index + 1].asset_id,
+         "transition_intent": item.transition_intent.model_dump(mode="json") if item.transition_intent else None}
+        for index, item in enumerate(plan.timeline[:-1])
+    ]
+    return json.dumps({
+        "role": "Visual Spec Decision Agent",
+        "task": "Choose a registered layout and one registered transition preset for each requested scene boundary.",
+        "available_layouts": ["center_stage", "fullscreen"],
+        "available_transition_presets": {
+            "clean_cut": {}, "crossfade": {}, "white_flash": {"flash_peak": "0..1"},
+            "flash_zoom_blur": {"flash_peak": "0..1", "incoming_scale": "0.5..3", "blur_px": "0..80", "settle_frames": "positive integer"},
+        },
+        "boundaries": boundaries,
+        "output_contract": {"layout_preset": "registered layout", "transitions": [{"from_asset_id": "boundary source", "to_asset_id": "boundary target", "preset": "registered preset", "params": "only documented numeric params"}]},
+        "rules": [
+            "Return only JSON. Do not return TSX, CSS, React, code, tracks, regions, layer definitions, or unregistered names.",
+            "Use flash_zoom_blur for a short white flash with the incoming image resolving from blur and scale.",
+            "Only name adjacent boundaries supplied in the input. Omit an entry to use the local default.",
+        ],
+    }, ensure_ascii=False)
+
+
+def create_visual_spec_decision(plan: DirectorPlan, provider=None) -> VisualSpecDecision:
+    """Ask for the small LLM-owned decision layer; preserve deterministic fallback."""
+    provider = provider or get_agent_provider("remotion")
+    fallback = VisualSpecDecision()
+    if provider.model_name == "mock":
+        return fallback
+    try:
+        complete_json = getattr(provider, "complete_json", None) or provider.complete
+        decision = VisualSpecDecision.model_validate(extract_json_object(complete_json(_visual_spec_decision_prompt(plan))))
+        expected = {(item.asset_id, plan.timeline[index + 1].asset_id) for index, item in enumerate(plan.timeline[:-1])}
+        if any((entry.from_asset_id, entry.to_asset_id) not in expected for entry in decision.transitions):
+            raise ValueError("Visual Spec decision references a non-adjacent scene boundary")
+        return decision
+    except Exception as exc:
+        logger.warning("[Visual Spec Agent] Invalid or unavailable decision, using local defaults (%s)", type(exc).__name__)
+        return fallback
+
+
 def _fallback_creative_plan(plan: DirectorPlan) -> RemotionCreativePlan:
     items: list[RemotionCreativePlanItem] = []
     for index, scene in enumerate(plan.timeline):
@@ -749,12 +793,12 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress
             return _fallback_creative_plan(plan)
         logger.info("[Remotion Agent] generated RemotionCreativePlan")
         return RemotionCreativePlan(plans=validated)
-    except (OSError, TimeoutError, ConnectionError):
-        logger.warning("[Remotion Agent] LLM unavailable, using fallback")
     except UnknownVisualEffect:
         raise
-    except (InvalidAnimationResponse, ValueError) as exc:
-        logger.warning("[Remotion Agent] Invalid response, using safe fallback (%s)", exc)
+    except Exception as exc:
+        # Providers may surface transport failures as SDK-specific exceptions
+        # rather than OSError/ConnectionError. Rendering must stay local-first.
+        logger.warning("[Remotion Agent] LLM unavailable, using fallback (%s)", type(exc).__name__)
     return _fallback_creative_plan(plan)
 
 
