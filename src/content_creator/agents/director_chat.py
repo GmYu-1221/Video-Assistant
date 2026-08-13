@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from typing import Callable
 
 from content_creator.agents.director_agent import create_director_plan, load_remotion_skill_guidance, plan_to_storyboard
 from content_creator.schemas import DirectorPlan, DirectorPlanPatch
@@ -15,6 +16,7 @@ from content_creator.sessions.project_session import ProjectSession
 
 
 logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[str], None]
 _SECRET = re.compile(r"(?i)(?:authorization\s*:\s*(?:bearer\s+)?|bearer\s+|api[_-]?key\s*[:=]\s*)[^\s,;]+")
 
 
@@ -115,20 +117,22 @@ def merge_director_plan_patch(plan: DirectorPlan, patch: DirectorPlanPatch) -> D
     return plan.model_copy(update={"timeline": [replacements[item.asset_id] for item in plan.timeline]})
 
 
-def generate_plan(session: ProjectSession, user_request: str = "") -> tuple[ProjectSession, str]:
+def generate_plan(session: ProjectSession, user_request: str = "", on_progress: ProgressCallback | None = None) -> tuple[ProjectSession, str]:
+    if on_progress:
+        on_progress("导演助手|正在生成导演方案...")
     session.current_plan = create_director_plan(session.project.images, session.beat_analysis.to_analysis(), session.style)
     session.current_storyboard = plan_to_storyboard(session.current_plan, session.style)
     session.dirty = True
     text = "DirectorPlan 已生成并通过校验。"
     if user_request:
-        session, feedback = update_plan(session, user_request)
+        session, feedback = update_plan(session, user_request, on_progress=on_progress)
         text = f"{text}\n{feedback}"
     return session, text
 
 
-def update_plan(session: ProjectSession, message: str) -> tuple[ProjectSession, str]:
+def update_plan(session: ProjectSession, message: str, on_progress: ProgressCallback | None = None) -> tuple[ProjectSession, str]:
     if session.current_plan is None:
-        return generate_plan(session, message)
+        return generate_plan(session, message, on_progress=on_progress)
 
     previous = session.current_plan
     provider = get_agent_provider("chat")
@@ -137,8 +141,12 @@ def update_plan(session: ProjectSession, message: str) -> tuple[ProjectSession, 
         response = "Director LLM 当前不可用，未修改计划。请配置 LLM 后重试。"
     else:
         try:
+            if on_progress:
+                on_progress("导演助手|正在理解创意需求...")
             complete_json = getattr(provider, "complete_json", provider.complete)
             raw = complete_json(_chat_prompt(session, message))
+            if on_progress:
+                on_progress("导演计划|正在解析导演修改...")
             logger.debug("Director Chat raw response: %s", _sanitize_response_for_log(raw))
             patch = validate_director_plan_patch_json(raw, [asset.id for asset in session.project.images])
             updated = merge_director_plan_patch(previous, patch)
@@ -149,6 +157,8 @@ def update_plan(session: ProjectSession, message: str) -> tuple[ProjectSession, 
             response = "Director LLM 请求失败，未修改计划。请检查模型配置后重试。"
 
     session.current_plan = updated
+    if on_progress:
+        on_progress("导演计划|正在更新镜头方案...")
     session.current_storyboard = plan_to_storyboard(updated, session.style)
     session.dirty = updated != previous
     session.conversation_history.extend([

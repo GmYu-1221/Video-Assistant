@@ -14,17 +14,20 @@ from content_creator.agents.render_agent import compile_render_plan
 from content_creator.services.llm.router import get_agent_provider
 from content_creator.services.renderer import render_project
 from content_creator.sessions import ProjectSession, create_project_session, load_project_session
+from typing import Callable
+
+ProgressCallback = Callable[[str], None]
 
 
-def _render(session: ProjectSession, preview: bool) -> Path:
+def _render(session: ProjectSession, preview: bool, on_progress: ProgressCallback | None = None) -> Path:
     if session.current_plan is None:
-        session, _ = generate_plan(session)
+        session, _ = generate_plan(session, on_progress=on_progress)
     assert session.current_storyboard is not None
-    creative_plan = create_remotion_creative_plan(session.current_plan)
+    creative_plan = create_remotion_creative_plan(session.current_plan, on_progress=on_progress)
     session.project = compile_render_plan(session.project, session.current_storyboard, creative_plan)
     repo_root = Path(__file__).resolve().parents[2]
     target = Path(session.preview_path if preview else session.final_video_path).resolve()
-    result = render_project(session.project, repo_root / "remotion", target, preview=preview)
+    result = render_project(session.project, repo_root / "remotion", target, preview=preview, on_progress=on_progress)
     if preview:
         session.preview_path = str(result)
     else:
@@ -50,6 +53,11 @@ def _help() -> None:
     print("plan: 生成或重新生成 DirectorPlan\nshow: 查看当前方案；show json 输出 JSON\npreview: 用当前方案低分辨率预览渲染\nrender: 按原始尺寸渲染 final.mp4\nsave: 保存 session.json 和 director_plan.json\nquit: 保存并退出")
 
 
+def _cli_progress(message: str) -> None:
+    stage, action = message.split("|", 1)
+    print(f"\n{stage}\n{action}", flush=True)
+
+
 def history_path(session: ProjectSession) -> Path:
     """Return the per-project prompt history file."""
     path = Path(session.project_dir).resolve() / ".director_history"
@@ -71,20 +79,30 @@ def dispatch_command(session: ProjectSession, text: str) -> tuple[ProjectSession
     if text == "help":
         _help()
     elif text == "plan":
-        session, response = generate_plan(session)
+        session, response = generate_plan(session, on_progress=_cli_progress)
         session.save(); print(response)
     elif text in {"show", "show json"}:
         print(format_plan(session, as_json=text == "show json"))
     elif text == "save":
         session.save(); print("当前计划已保存。")
     elif text == "preview":
-        print(f"Preview: {_render(session, preview=True)}")
+        result = _render(session, preview=True, on_progress=_cli_progress)
+        print(f"\n✅ 完成\n预览路径：{result}")
     elif text == "render":
-        print(f"Rendered: {_render(session, preview=False)}")
+        result = _render(session, preview=False, on_progress=_cli_progress)
+        print(f"\n✅ 完成\n渲染路径：{result}")
     elif text:
-        session, response = update_plan(session, text)
+        _cli_progress("导演助手|正在理解创意需求...")
+        try:
+            session, response = update_plan(session, text, on_progress=_cli_progress)
+        except TypeError as exc:
+            # Preserve compatibility with integrations that monkeypatch the
+            # historical two-argument command helper.
+            if "on_progress" not in str(exc):
+                raise
+            session, response = update_plan(session, text)
         session.save()
-        print(f"{response}\n当前计划已保存。输入 show 查看完整方案，输入 preview 生成预览。")
+        print(f"\n✅ 完成\n{response}\n当前计划已保存。输入 show 查看完整方案，输入 preview 生成预览。")
     return session, True
 
 

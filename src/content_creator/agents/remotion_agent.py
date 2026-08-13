@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from typing import Callable
 
 from content_creator.schemas import (
     AnimationEffect,
@@ -117,6 +118,7 @@ _TRANSITION_DURATION_RANGES = {
     "liquid_morph_transition": (36, 120, 48),
 }
 logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[str], None]
 _SECRET = re.compile(r"(?i)(?:authorization\s*:\s*(?:bearer\s+)?|bearer\s+|api[_-]?key\s*[:=]\s*|token\s*[:=]\s*|password\s*[:=]\s*)[^\s,;]+")
 
 
@@ -515,15 +517,19 @@ def _validate_visual_event(event: VisualEvent, scene: DirectorTimelineItem, next
     return event
 
 
-def create_remotion_creative_plan(plan: DirectorPlan, provider=None) -> RemotionCreativePlan:
+def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress: ProgressCallback | None = None) -> RemotionCreativePlan:
     """Single LLM entry point for all scene and transition visual decisions."""
     provider = provider or get_agent_provider("remotion")
     if provider.model_name == "mock":
         logger.warning("[Remotion Agent] LLM unavailable, using fallback")
         return _fallback_creative_plan(plan)
     try:
+        if on_progress:
+            on_progress("Remotion 创意引擎|正在设计视觉效果...")
         complete_json = getattr(provider, "complete_json", None) or provider.complete
         raw = complete_json(_creative_plan_prompt(plan))
+        if on_progress:
+            on_progress("视觉事件|正在解析并验证视觉计划...")
         logger.debug("[Remotion Agent RAW RESPONSE] %s", _safe_raw_response_log(raw))
         payload = extract_json_object(raw)
         parsed = RemotionCreativePlan.model_validate(payload)
