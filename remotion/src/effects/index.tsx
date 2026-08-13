@@ -5,6 +5,7 @@ import {CardFlipReveal} from './CardFlipReveal';
 import {GlitchReveal} from './GlitchReveal';
 import {LightLeak} from './LightLeak';
 import {StretchReveal} from './StretchReveal';
+import {ElasticBlurReveal} from './ElasticBlurReveal';
 import {DropRevealElastic} from './DropRevealElastic';
 import {ParticleFlipReveal} from './ParticleFlipReveal';
 import {CreativeReveal} from './CreativeReveal';
@@ -15,6 +16,7 @@ export const EffectRegistry = {
   glitch_reveal: GlitchReveal,
   light_leak: LightLeak,
   stretch_reveal: StretchReveal,
+  elastic_blur_reveal: ElasticBlurReveal,
   drop_reveal_elastic: DropRevealElastic,
   particle_flip_reveal: ParticleFlipReveal,
   creative_reveal: CreativeReveal,

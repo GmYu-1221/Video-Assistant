@@ -1,6 +1,6 @@
 ---
 name: stretch-motion-design
-description: Design silk-smooth stretch reveals and stretch transitions for the Video-Assistant Remotion Creative Agent. Use for Chinese direction such as 丝滑拉伸, 液态拉伸, 橡胶弹性, 柔性展开, 果冻感, 拉开进入, or 弹性展开.
+description: Design silk-smooth stretch reveals for the Video-Assistant Remotion Creative Agent. Use for Chinese direction such as 丝滑拉伸, 液态拉伸, 橡胶弹性, 柔性展开, 果冻感, 拉开进入, or 弹性展开.
 ---
 
 # Stretch Motion Design
@@ -24,33 +24,12 @@ frame. It is an entrance-only effect.
 - In a single-image entrance context, map `拉开进入` and `弹性展开` to
   `stretch_reveal`.
 
-## `stretch_transition`
-
-Use for a scene boundary where image A stretches and deforms before image B is
-revealed. It is transition-only and belongs to the source scene.
-
-- Required phase: `phase=transition`
-- Set `source_asset_id` to image A and `target_asset_id` to image B.
-- Use this parameter shape when the registered capability accepts it:
-
-```json
-{
-  "intensity": 0.7,
-  "axis": "horizontal",
-  "spring": 0.65,
-  "blur": 8,
-  "easing": "easeOut"
-}
-```
-
-- `intensity` controls deformation strength; `axis` selects the dominant
-  stretch direction; `spring` controls elastic settling; `blur` is motion blur
-  during the fastest deformation; `easing` controls the non-spring portion.
-- Map `拉开进入` and `弹性展开` to `stretch_transition` when they describe
-  image A opening or pulling into image B.
-
 ## Ownership Rule
 
-A `stretch_transition` owns the target image reveal. Forbidden: a transition
-and target entrance simultaneously at the same boundary. When both are
-requested, keep the `stretch_transition` and remove the target entrance.
+`stretch_reveal` owns only the entrance of its own image. It is not a
+cross-scene transition and must not be given source or target asset IDs.
+
+There is no registered `stretch_transition`. For a scene boundary, choose a
+registered transition capability whose visual language matches the direction;
+never invent a stretch transition or layer an unregistered transition over an
+entrance.

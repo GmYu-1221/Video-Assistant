@@ -35,6 +35,17 @@ def test_entrance_event_is_static_after_its_lifecycle():
     assert "if (elapsed >= duration) return <>{children}</>;" in stretch
 
 
+def test_elastic_blur_reveal_is_registered_and_static_after_its_lifecycle():
+    registry = (REPO_ROOT / "remotion/src/effects/index.tsx").read_text(encoding="utf-8")
+    effect = (REPO_ROOT / "remotion/src/effects/ElasticBlurReveal.tsx").read_text(encoding="utf-8")
+    assert "elastic_blur_reveal: ElasticBlurReveal" in registry
+    assert "spring(" in effect
+    assert "scaleX(" in effect
+    assert "scaleY(" in effect
+    assert "filter: `blur(${blur}px)`" in effect
+    assert "if (elapsed < 0 || elapsed >= duration) return <>{children}</>;" in effect
+
+
 def test_camera_push_has_no_default_transparent_duplicate():
     effect = (REPO_ROOT / "remotion/src/effects/CameraPush.tsx").read_text(encoding="utf-8")
     assert "opacity: 0.2" not in effect

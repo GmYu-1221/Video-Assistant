@@ -25,7 +25,7 @@ export const Slideshow: React.FC<RemotionProps> = (props) => {
         // The incoming transition already controls this scene's reveal during
         // the overlap, so an entrance wrapper would create a competing reveal.
         const sceneEvents = events.filter((event) => event.phase !== 'transition' && !(incomingTransition && event.phase === 'entrance'));
-        const sceneContent = sceneEvents.reduce<React.ReactNode>((content, event, eventIndex) => VisualEffectRenderer(event, `visual-${item.asset_id}-${eventIndex}`, content), <ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} imageWidth={asset?.width ?? props.width} imageHeight={asset?.height ?? props.height} motion={asset?.motion ?? 'static'} entrance={asset?.entrance} />);
+        const sceneContent = sceneEvents.reduce<React.ReactNode>((content, event, eventIndex) => VisualEffectRenderer(event, `visual-${item.asset_id}-${eventIndex}`, content), <ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} imageWidth={asset?.width ?? props.width} imageHeight={asset?.height ?? props.height} motion={asset?.motion ?? 'static'} entrance={incomingTransition ? undefined : asset?.entrance} />);
         const sequence = <TransitionSeries.Sequence key={`sequence-${item.asset_id}`} durationInFrames={item.duration_frames + transitionFrames}>
           {events.length ? sceneContent : <EffectRenderer animation={item.animation}><ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} imageWidth={asset?.width ?? props.width} imageHeight={asset?.height ?? props.height} motion={asset?.motion ?? 'static'} entrance={asset?.entrance} /></EffectRenderer>}
         </TransitionSeries.Sequence>;

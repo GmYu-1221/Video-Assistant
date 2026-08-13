@@ -30,6 +30,7 @@ _SKILL_NAMES = (
     "video-assistant-visual-events",
     "remotion-motion-design",
     "stretch-motion-design",
+    "elastic-blur-motion-design",
     "blur-transition-design",
     "zoom-motion-design",
     "remotion-best-practices",
@@ -43,6 +44,7 @@ _EFFECT_COMPONENTS = {
     AnimationEffectType.glitch_reveal: "GlitchReveal",
     AnimationEffectType.light_leak: "LightLeak",
     AnimationEffectType.stretch_reveal: "StretchReveal",
+    AnimationEffectType.elastic_blur_reveal: "ElasticBlurReveal",
     AnimationEffectType.drop_reveal_elastic: "DropRevealElastic",
     AnimationEffectType.particle_flip_reveal: "ParticleFlipReveal",
     AnimationEffectType.creative_reveal: "CreativeReveal",
@@ -71,6 +73,14 @@ _ANIMATION_EFFECT_CAPABILITIES = {
         "description": "Image stretches briefly as it resolves into the frame.",
         "params": {"intensity": {"type": "number", "minimum": 0, "maximum": 1}},
     },
+    AnimationEffectType.elastic_blur_reveal: {
+        "description": "Image enters with weighted horizontal stretch, vertical compression, slight blur, and an elastic settle to a fully static image.",
+        "params": {
+            "intensity": {"type": "number", "minimum": 0, "maximum": 1},
+            "blur_px": {"type": "number", "minimum": 0, "maximum": 24},
+            "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+    },
     AnimationEffectType.drop_reveal_elastic: {
         "description": "Image drops into the frame from a direction and settles with elastic spring motion.",
         "params": {
@@ -95,6 +105,17 @@ _ANIMATION_EFFECT_CAPABILITIES = {
             "mask": {"type": "boolean"},
         },
     },
+}
+_ANIMATION_EFFECT_PHASES = {
+    AnimationEffectType.card_flip_reveal: ["entrance"],
+    AnimationEffectType.camera_push: ["camera"],
+    AnimationEffectType.glitch_reveal: ["entrance"],
+    AnimationEffectType.light_leak: ["effect"],
+    AnimationEffectType.stretch_reveal: ["entrance"],
+    AnimationEffectType.elastic_blur_reveal: ["entrance"],
+    AnimationEffectType.drop_reveal_elastic: ["entrance"],
+    AnimationEffectType.particle_flip_reveal: ["entrance"],
+    AnimationEffectType.creative_reveal: ["entrance"],
 }
 _TRANSITION_EFFECT_CAPABILITIES = {
     TransitionEffectType.card_flip_transition: {
@@ -153,7 +174,11 @@ _BLUR_TRANSITION_CAPABILITY = {
     ],
 }
 _VISUAL_EFFECT_CAPABILITIES = {
-    **{effect.value: {**capability, "phase": ["entrance", "effect"]} for effect, capability in _ANIMATION_EFFECT_CAPABILITIES.items() if effect.value != "none"},
+    **{
+        effect.value: {**capability, "phase": _ANIMATION_EFFECT_PHASES[effect]}
+        for effect, capability in _ANIMATION_EFFECT_CAPABILITIES.items()
+        if effect.value != "none"
+    },
     **{effect.value: {**capability, "phase": ["transition"]} for effect, capability in _TRANSITION_EFFECT_CAPABILITIES.items()},
 }
 _TRANSITION_DURATION_RANGES = {
@@ -226,6 +251,7 @@ def _remotion_prompt(creative_intent: object, scene_duration: int) -> str:
             "Choose an available effect; do not return none or a fade fallback.",
             "Choose params only from the selected effect capability.",
             "Example: creative_intent '从上面掉下来入场' returns {\"type\":\"drop_reveal_elastic\",\"duration_frames\":24,\"params\":{\"direction\":\"top\"}}.",
+            "Use elastic_blur_reveal for explicit weighted elastic entrance with light lens blur. It is entrance-only, lasts 18-36 frames, and must settle fully static. Never create elastic_blur_transition or stretch_transition.",
             "Use frame-driven useCurrentFrame, interpolate, spring, transform, opacity, filter, or mask semantics when choosing params.",
             "Do not return asset_id, component names, code, TSX, CSS, crop, cover, scaleX, or scaleY.",
         ],
@@ -335,6 +361,8 @@ def _parse_llm_animation(raw: str, item) -> AnimationEffect:
         raise UnknownAnimationEffect("Remotion Agent cannot select none or an unregistered effect")
     if not isinstance(duration_frames, int) or isinstance(duration_frames, bool) or not 0 < duration_frames <= item.duration_frames:
         raise ValueError("Remotion Agent returned invalid duration_frames")
+    if effect == AnimationEffectType.elastic_blur_reveal and not 18 <= duration_frames <= 36:
+        raise ValueError("Remotion Agent returned invalid elastic_blur_reveal duration_frames")
     if not isinstance(params, dict):
         raise ValueError("Remotion Agent returned invalid params")
     clean_params = _validate_animation_params(effect, params)
@@ -536,6 +564,7 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
             "Entrance events are short, self-contained arrivals: default to 10-30 frames (18 frames when no timing is specified). Never use the full scene duration unless the Director explicitly requests continuous motion.",
             "After an entrance event ends, the image must hold static: scale 1, rotate 0, translate 0, opacity 1. An entrance effect must not influence the remaining scene frames.",
             "Example: '图片丝滑拉伸进入' returns a stretch_reveal entrance event with duration_frames 18; after frame 18, emit no entrance motion.",
+            "Use elastic_blur_reveal only for an image entering with weight, elastic rebound, and light lens blur. It is phase entrance, duration 18-36 frames, and must end at scale 1, rotate 0, translate 0, opacity 1, blur 0. Never output elastic_blur_transition or stretch_transition.",
             "A transition event belongs to the source scene and must set target_asset_id.",
             "A transition event owns the reveal of its target asset. Never create entrance, reveal, fade in, creative_reveal, particle_flip_reveal, or drop_reveal for a target asset covered by a transition.",
             "Transitions are cross-scene visual events; entrance animations are single-scene events. If both are requested, keep the transition and remove the target entrance.",
@@ -575,13 +604,21 @@ def _fallback_creative_plan(plan: DirectorPlan) -> RemotionCreativePlan:
 def _validate_visual_event(event: VisualEvent, scene: DirectorTimelineItem, next_asset_id: str | None) -> VisualEvent:
     if event.type not in _VISUAL_EFFECT_CAPABILITIES:
         raise UnknownVisualEffect(f"Remotion Agent selected an unavailable visual effect: {event.type}")
+    capability = _VISUAL_EFFECT_CAPABILITIES[event.type]
+    allowed_phases = capability["phase"]
+    if event.phase not in allowed_phases:
+        raise ValueError(f"Invalid phase for {event.type}: expected {', '.join(allowed_phases)}")
     if event.start_frame + event.duration_frames > scene.duration_frames:
         raise ValueError(f"Visual event exceeds scene duration: {event.type}")
     if event.phase == "transition":
         expected_min, expected_max, _recommended = _TRANSITION_DURATION_RANGES.get(event.type, (1, scene.duration_frames, 1))
         if event.duration_frames < expected_min or event.duration_frames > min(expected_max, scene.duration_frames):
             raise ValueError(f"Invalid duration for {event.type}: expected {expected_min}-{min(expected_max, scene.duration_frames)} frames")
-    capability = _VISUAL_EFFECT_CAPABILITIES[event.type]
+    if event.type == AnimationEffectType.elastic_blur_reveal.value:
+        if event.phase != "entrance":
+            raise ValueError("elastic_blur_reveal must use entrance phase")
+        if not 18 <= event.duration_frames <= min(36, scene.duration_frames):
+            raise ValueError(f"Invalid duration for elastic_blur_reveal: expected 18-{min(36, scene.duration_frames)} frames")
     clean_params = dict(event.params)
     for name, value in list(clean_params.items()):
         spec = capability.get("params", {}).get(name)

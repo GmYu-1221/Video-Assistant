@@ -9,8 +9,10 @@ never be introduced as primary execution fields.
 `entrance` controls one image entering its scene. Registered examples include
 `drop_reveal_elastic` and `card_flip_reveal`.
 
-`effect` controls a sustained single-scene treatment. Registered examples include
-`camera_push` and `light_leak`.
+`camera` controls sustained camera motion such as `camera_push`.
+
+`effect` controls another sustained single-scene treatment. A registered example
+is `light_leak`.
 
 `transition` controls the boundary between two images. Every transition event must
 include both `source_asset_id` and `target_asset_id`.
@@ -31,8 +33,9 @@ not create an entrance, fade in, `creative_reveal`, or `particle_flip_reveal` fo
 that target. Do not layer independent reveals over a transition.
 
 `camera_push` is a sustained source-scene effect and may overlap a transition when
-the Director asks to push into a cut. `card_flip_reveal` is entrance-only for one
-image; `card_flip_transition` is transition-only for two images.
+the Director asks to push into a cut; its phase is `camera`. `elastic_blur_reveal`
+and `card_flip_reveal` are entrance-only for one image; `card_flip_transition` is
+transition-only for two images.
 
 ## Glass Shatter Selection
 

@@ -62,7 +62,7 @@ class TransitionConflictLLM(UnifiedLLM):
         self.calls += 1
         return json.dumps({"plans": [{"scene_id": "image-001", "visual_events": [
             {"type": "card_flip_transition", "phase": "transition", "start_frame": 30, "duration_frames": 30, "source_asset_id": "image-001", "target_asset_id": "image-002", "params": {"rotation_axis": "Y", "perspective": 900}},
-            {"type": "camera_push", "phase": "effect", "start_frame": 0, "duration_frames": 60, "params": {"intensity": 0.3}},
+            {"type": "camera_push", "phase": "camera", "start_frame": 0, "duration_frames": 60, "params": {"intensity": 0.3}},
             {"type": "creative_reveal", "phase": "entrance", "start_frame": 35, "duration_frames": 12, "params": {}},
         ]}]})
 
@@ -124,12 +124,62 @@ def test_silk_stretch_entrance_uses_an_18_frame_visual_event(monkeypatch):
     assert all(candidate.type != "camera_push" for candidate in result.plans[0].visual_events)
 
 
+class ElasticBlurRevealLLM:
+    model_name = "remotion-test"
+
+    def complete_json(self, _prompt: str) -> str:
+        return json.dumps({"plans": [{"scene_id": "image-001", "visual_events": [{
+            "type": "elastic_blur_reveal",
+            "phase": "entrance",
+            "start_frame": 0,
+            "duration_frames": 24,
+            "params": {"intensity": 0.7, "blur_px": 8, "opacity": 0.82},
+        }]}]})
+
+
+def test_weighted_elastic_blur_entrance_keeps_elastic_blur_reveal():
+    plan = DirectorPlan.model_validate({"timeline": [{
+        "asset_id": "image-001", "duration_frames": 60, "reason": "opening",
+        "creative_intent": {"description": "图片像有重量一样弹入，带轻微镜头虚化"},
+    }]})
+    result = create_remotion_creative_plan(plan, provider=ElasticBlurRevealLLM())
+    event = result.plans[0].visual_events[0]
+    assert event.type == "elastic_blur_reveal"
+    assert event.phase == "entrance"
+    assert event.duration_frames == 24
+
+
+class InvalidElasticBlurPhaseLLM:
+    model_name = "remotion-test"
+
+    def complete_json(self, _prompt: str) -> str:
+        return json.dumps({"plans": [{"scene_id": "image-001", "visual_events": [{
+            "type": "elastic_blur_reveal",
+            "phase": "effect",
+            "start_frame": 0,
+            "duration_frames": 24,
+            "params": {"intensity": 0.7, "blur_px": 8, "opacity": 0.82},
+        }]}]})
+
+
+def test_elastic_blur_effect_phase_is_dropped_before_safe_fallback(caplog):
+    plan = DirectorPlan.model_validate({"timeline": [{
+        "asset_id": "image-001", "duration_frames": 60, "reason": "opening",
+        "creative_intent": {"description": "图片像有重量一样弹入，带轻微镜头虚化"},
+    }]})
+    with caplog.at_level(logging.WARNING):
+        result = create_remotion_creative_plan(plan, provider=InvalidElasticBlurPhaseLLM())
+    assert [event.type for event in result.plans[0].visual_events] == ["creative_reveal"]
+    assert "Dropped event:\ntype: elastic_blur_reveal" in caplog.text
+    assert "Invalid phase for elastic_blur_reveal: expected entrance" in caplog.text
+
+
 class UnwantedCameraPushLLM:
     model_name = "remotion-test"
 
     def complete_json(self, _prompt: str) -> str:
         return json.dumps({"plans": [{"scene_id": "image-001", "visual_events": [
-            {"type": "camera_push", "phase": "effect", "start_frame": 0, "duration_frames": 60, "params": {"intensity": 0.3}},
+            {"type": "camera_push", "phase": "camera", "start_frame": 0, "duration_frames": 60, "params": {"intensity": 0.3}},
         ]}]})
 
 

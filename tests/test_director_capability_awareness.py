@@ -9,7 +9,7 @@ from content_creator.prompts.director_prompt import director_prompt
 
 def test_catalog_contains_only_supported_director_capabilities():
     names = {item["name"] for items in DIRECTOR_VISUAL_CAPABILITIES.values() for item in items}
-    assert {"stretch_reveal", "glass_shatter_transition", "shake_transition", "gaussian_blur_transition", "zoom_through_transition"} <= names
+    assert {"stretch_reveal", "elastic_blur_reveal", "glass_shatter_transition", "shake_transition", "gaussian_blur_transition", "zoom_through_transition"} <= names
     assert "stretch_transition" not in names
     assert "particle_explosion_transition" not in names
     assert "flash_burst_transition" not in names

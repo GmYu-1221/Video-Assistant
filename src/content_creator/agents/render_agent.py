@@ -7,6 +7,53 @@ from content_creator.services.music import adapt_audio_to_duration
 
 logger = logging.getLogger(__name__)
 
+_HIGH_IMPACT_TRANSITIONS = frozenset({
+    "glass_shatter_transition",
+    "zoom_through_transition",
+    "shake_transition",
+})
+
+
+def _transition_has_explicit_blur(scene) -> bool:
+    intent = getattr(scene, "transition_intent", None)
+    if intent is None:
+        return False
+    text = " ".join(filter(None, [intent.description, *(intent.effects or [])]))
+    return any(token in text.lower() for token in ("blur", "模糊", "虚化", "速度模糊", "motion blur"))
+
+
+def _normalize_transition_event(event: VisualEvent, scene, previous_high_impact: bool) -> VisualEvent:
+    """Keep creative transition choices executable and visually restrained."""
+    duration = min(event.duration_frames, scene.duration_frames)
+    params = dict(event.params)
+    if event.type == "glass_shatter_transition":
+        duration = min(duration, 30)
+        if not _transition_has_explicit_blur(scene):
+            params["motion_blur"] = False
+        if "fragment_count" in params:
+            params["fragment_count"] = max(12, min(72, int(params["fragment_count"])))
+    elif event.type == "zoom_through_transition":
+        duration = min(duration, 24)
+        if "intensity" in params:
+            params["intensity"] = max(0.0, min(0.7, float(params["intensity"])))
+    elif event.type == "shake_transition":
+        duration = min(duration, 18)
+        if "intensity" in params:
+            params["intensity"] = max(0.0, min(0.6, float(params["intensity"])))
+        if not _transition_has_explicit_blur(scene):
+            params["motion_blur"] = False
+    if previous_high_impact and event.type in _HIGH_IMPACT_TRANSITIONS:
+        duration = min(duration, 18)
+        if event.type == "zoom_through_transition" and "intensity" in params:
+            params["intensity"] = min(params["intensity"], 0.6)
+        if event.type == "shake_transition" and "intensity" in params:
+            params["intensity"] = min(params["intensity"], 0.45)
+    return event.model_copy(update={
+        "start_frame": max(0, scene.duration_frames - duration),
+        "duration_frames": duration,
+        "params": params,
+    })
+
 def compile_render_plan(project: VideoProject, storyboard, creative_plan: RemotionCreativePlan | None = None, animation_plan=None, transition_effect_plan=None) -> VideoProject:
     cursor = 0
     timeline = []
@@ -41,9 +88,18 @@ def compile_render_plan(project: VideoProject, storyboard, creative_plan: Remoti
         legacy_transition_by_source = {x.from_asset_id: x for x in generated_transitions.transitions}
         creative_plan = RemotionCreativePlan(plans=[])
     events_by_scene = {item.scene_id: item.visual_events for item in creative_plan.plans}
+    previous_high_impact = False
     for scene in storyboard.scenes:
         end = cursor + scene.duration_frames
-        events = events_by_scene.get(scene.asset_id, [])
+        raw_events = events_by_scene.get(scene.asset_id, [])
+        events = []
+        for event in raw_events:
+            if event.phase == "transition":
+                event = _normalize_transition_event(event, scene, previous_high_impact)
+                previous_high_impact = event.type in _HIGH_IMPACT_TRANSITIONS
+            events.append(event)
+        if not any(event.phase == "transition" for event in raw_events):
+            previous_high_impact = False
         for event in events:
             if event.phase == "entrance":
                 event_end = event.start_frame + event.duration_frames

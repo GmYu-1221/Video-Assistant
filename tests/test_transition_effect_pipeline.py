@@ -86,6 +86,31 @@ def test_composition_uses_independent_transition_effect_registry():
     assert "clipPath" in presentation
     assert "opacity" in presentation
     assert "rotate" in presentation
+    assert "entrance={incomingTransition ? undefined : asset?.entrance}" in composition
+
+
+def test_render_plan_normalizes_high_impact_transition_parameters(tmp_path, monkeypatch):
+    from content_creator.agents.render_agent import compile_render_plan
+    from content_creator.schemas import RemotionCreativePlan
+
+    root = tmp_path / "project"
+    audio_dir = root / "audio"; audio_dir.mkdir(parents=True)
+    (audio_dir / "source.wav").write_bytes(b"audio")
+    project = VideoProject(
+        project_id="p",
+        images=[ImageAsset(id="image-001", filename="a.jpg", relative_path="a.jpg", width=100, height=100), ImageAsset(id="image-002", filename="b.jpg", relative_path="b.jpg", width=100, height=100)],
+        audio=AudioConfig(path="audio/bgm_adapted.wav", source_path="audio/source.wav", duration=1, sample_rate=44100),
+        timeline=[TimelineItem(asset_id="image-001", start_frame=0, end_frame=60, duration_frames=60, transition=TransitionConfig()), TimelineItem(asset_id="image-002", start_frame=60, end_frame=120, duration_frames=60, transition=TransitionConfig())],
+        output=VideoOutput(project_dir=str(root), render_data=str(root / "render_data.json"), final_video=str(root / "final.mp4")),
+    )
+    storyboard = plan_to_storyboard(DirectorPlan.model_validate({"timeline": [{"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "玻璃破碎"}}, {"asset_id": "image-002", "duration_frames": 60}]}), "cinematic")
+    creative = RemotionCreativePlan.model_validate({"plans": [{"scene_id": "image-001", "visual_events": [{"type": "shake_transition", "phase": "transition", "start_frame": 0, "duration_frames": 60, "source_asset_id": "image-001", "target_asset_id": "image-002", "params": {"intensity": 0.95, "motion_blur": True}}]}, {"scene_id": "image-002", "visual_events": []}]})
+    monkeypatch.setattr("content_creator.agents.render_agent.adapt_audio_to_duration", lambda *_args: None)
+    result = compile_render_plan(project, storyboard, creative)
+    event = result.timeline[0].visual_events[0]
+    assert event.start_frame == 42
+    assert event.duration_frames == 18
+    assert event.params == {"intensity": 0.6, "motion_blur": False}
 
 
 def test_blur_transition_registry_contains_all_concrete_effects():

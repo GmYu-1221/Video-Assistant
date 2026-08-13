@@ -15,6 +15,7 @@ DIRECTOR_VISUAL_CAPABILITIES: dict[str, list[dict[str, Any]]] = {
         {"name": "glitch_reveal", "description": "图片通过受控的数字故障、扫描和信号错位逐步显现。", "examples": ["数字故障进入", "扫描线显现", "信号错位出现"]},
         {"name": "light_leak", "description": "图片从电影感的漏光和光晕中显现。", "examples": ["漏光中出现", "光晕揭示画面", "光线扫过后显现"]},
         {"name": "stretch_reveal", "description": "图片通过拉伸进入画面，动画结束后恢复静止。", "examples": ["丝滑拉伸进入", "图片展开出现", "柔性拉开入场"]},
+        {"name": "elastic_blur_reveal", "description": "图片像带重量一样弹性入场，伴随轻微镜头虚化并快速恢复清晰静止。", "examples": ["图片像有重量一样弹入", "弹性入场带轻微虚化", "压缩后回弹显现"]},
         {"name": "drop_reveal_elastic", "description": "图片从指定方向落入画面，并以弹性方式停稳。", "examples": ["从上方弹性落下", "图片掉入画面", "橡胶般落地"]},
         {"name": "particle_flip_reveal", "description": "图片伴随粒子帷幕和翻转效果组装显现。", "examples": ["粒子翻转进入", "碎片汇聚成画面", "粒子组装出现"]},
         {"name": "creative_reveal", "description": "图片通过柔和遮罩、透明度或轻微位移完成受控揭示。", "examples": ["遮罩展开", "柔和显现", "从中心揭示"]},

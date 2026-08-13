@@ -15,6 +15,7 @@ class AnimationEffectType(str, Enum):
     glitch_reveal = "glitch_reveal"
     light_leak = "light_leak"
     stretch_reveal = "stretch_reveal"
+    elastic_blur_reveal = "elastic_blur_reveal"
     drop_reveal_elastic = "drop_reveal_elastic"
     particle_flip_reveal = "particle_flip_reveal"
     creative_reveal = "creative_reveal"

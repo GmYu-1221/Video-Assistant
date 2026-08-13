@@ -1,7 +1,7 @@
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
-/***/ 7541
+/***/ 9511
 (__unused_webpack_module, __unused_webpack___webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -3118,6 +3118,27 @@ const StretchReveal = ({ animation, children }) => {
   return /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `translateY(${y}%) scale(${stretch})`, filter: `blur(${blur}px)`, transformOrigin: "center bottom" }, children });
 };
 
+;// ./src/effects/ElasticBlurReveal.tsx
+
+
+
+const ElasticBlurReveal = ({ animation, children }) => {
+  const frame = (0,esm/* useCurrentFrame */.UC)();
+  const elapsed = frame - ((animation == null ? void 0 : animation.start_frame) ?? 0);
+  const { fps } = (0,esm/* useVideoConfig */.Bk)();
+  const duration = Math.max(1, (animation == null ? void 0 : animation.duration_frames) ?? 24);
+  if (elapsed < 0 || elapsed >= duration) return /* @__PURE__ */ (0,jsx_runtime.jsx)(jsx_runtime.Fragment, { children });
+  const intensity = Math.min(1, Math.max(0, Number((animation == null ? void 0 : animation.params.intensity) ?? 0.65)));
+  const blurPx = Math.min(24, Math.max(0, Number((animation == null ? void 0 : animation.params.blur_px) ?? 7)));
+  const startOpacity = Math.min(1, Math.max(0, Number((animation == null ? void 0 : animation.params.opacity) ?? 0.82)));
+  const progress = (0,esm/* spring */.oz)({ frame: elapsed, fps, config: { damping: 13, stiffness: 165, mass: 0.75 }, durationInFrames: duration });
+  const scaleX = (0,esm/* interpolate */.GW)(progress, [0, 1], [1 + intensity * 0.2, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const scaleY = (0,esm/* interpolate */.GW)(progress, [0, 1], [1 - intensity * 0.13, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const opacity = (0,esm/* interpolate */.GW)(progress, [0, 1], [startOpacity, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const blur = (0,esm/* interpolate */.GW)(progress, [0, 1], [blurPx, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  return /* @__PURE__ */ (0,jsx_runtime.jsx)("div", { style: { position: "absolute", inset: 0, transform: `scaleX(${scaleX}) scaleY(${scaleY})`, opacity, filter: `blur(${blur}px)`, transformOrigin: "center" }, children });
+};
+
 ;// ./src/effects/DropRevealElastic.tsx
 
 
@@ -3194,12 +3215,14 @@ const CreativeReveal = ({ animation, children }) => {
 
 
 
+
 const EffectRegistry = {
   card_flip_reveal: CardFlipReveal,
   camera_push: CameraPush,
   glitch_reveal: GlitchReveal,
   light_leak: LightLeak,
   stretch_reveal: StretchReveal,
+  elastic_blur_reveal: ElasticBlurReveal,
   drop_reveal_elastic: DropRevealElastic,
   particle_flip_reveal: ParticleFlipReveal,
   creative_reveal: CreativeReveal
@@ -20400,7 +20423,7 @@ var NoReactInternals = {
 /******/ 	// Load entry module and return exports
 /******/ 	// This entry module is referenced by other modules so it can't be inlined
 /******/ 	__webpack_require__(2675);
-/******/ 	__webpack_require__(7541);
+/******/ 	__webpack_require__(9511);
 /******/ 	__webpack_require__(7858);
 /******/ 	var __webpack_exports__ = __webpack_require__(1313);
 /******/ 	

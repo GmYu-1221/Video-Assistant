@@ -60,6 +60,40 @@ def test_falling_entrance_generates_validated_drop_reveal_plan(monkeypatch):
     assert animation.params == {"direction": "top"}
 
 
+def test_weighted_elastic_blur_entrance_generates_validated_plan(monkeypatch):
+    provider = RawResponseLLM(
+        '{"type":"elastic_blur_reveal","duration_frames":24,"params":{"intensity":0.7,"blur_px":8,"opacity":0.82}}'
+    )
+    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: provider)
+    plan = DirectorPlan.model_validate({"timeline": [{
+        "asset_id": "image-001", "duration_frames": 60, "reason": "opening",
+        "creative_intent": {"description": "图片像有重量一样弹入，带轻微镜头虚化"},
+    }]})
+
+    animation = create_animation_plan(plan).animations[0]
+
+    assert animation.type.value == "elastic_blur_reveal"
+    assert animation.duration_frames == 24
+    assert animation.params == {"intensity": 0.7, "blur_px": 8, "opacity": 0.82}
+
+
+@pytest.mark.parametrize("duration_frames", [17, 37])
+def test_elastic_blur_reveal_rejects_duration_outside_entrance_range(monkeypatch, duration_frames):
+    monkeypatch.setattr(
+        "content_creator.agents.remotion_agent.get_agent_provider",
+        lambda _: RawResponseLLM(f'{{"type":"elastic_blur_reveal","duration_frames":{duration_frames},"params":{{}}}}'),
+    )
+    plan = DirectorPlan.model_validate({"timeline": [{
+        "asset_id": "image-001", "duration_frames": 60, "reason": "opening",
+        "creative_intent": {"description": "图片像有重量一样弹入，带轻微镜头虚化"},
+    }]})
+
+    animation = create_animation_plan(plan).animations[0]
+
+    assert animation.type.value == "creative_reveal"
+    assert animation.implementation == "fallback"
+
+
 @pytest.mark.parametrize(
     "response",
     [

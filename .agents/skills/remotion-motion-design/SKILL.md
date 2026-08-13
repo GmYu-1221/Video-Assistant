@@ -13,6 +13,10 @@ events and their documented parameters; never describe or generate TSX.
   image arrival. Use `creative_reveal` only when the intent does not justify a
   more specific registered event.
 - Use `camera_push` for sustained cinematic emphasis, not as an entrance.
+- Emit `camera_push` with `phase=camera`; use `phase=effect` only for a registered
+  sustained overlay such as `light_leak`.
+- Use `elastic_blur_reveal` for a weighted single-image entrance with brief lens
+  blur, 18-36 frames, and a spring settle to a fully static sharp image.
 - A still image should have purposeful camera movement or a brief entrance, but
   do not stack independent reveals on a transition-owned target.
 
