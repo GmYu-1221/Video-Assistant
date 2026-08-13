@@ -1,4 +1,5 @@
 import json
+import logging
 
 from content_creator.agents.remotion_agent import create_remotion_creative_plan
 from content_creator.schemas import DirectorPlan
@@ -138,7 +139,7 @@ def test_cinematic_display_does_not_keep_inferred_camera_push():
         "creative_intent": {"description": "电影感展示"},
     }]})
     result = create_remotion_creative_plan(plan, provider=UnwantedCameraPushLLM())
-    assert result.plans[0].visual_events == []
+    assert [event.type for event in result.plans[0].visual_events] == ["creative_reveal"]
 
 
 class BlurTransitionLLM:
@@ -216,7 +217,7 @@ def test_cinematic_bokeh_intent_keeps_bokeh_blur_transition():
 
 def test_cinematic_display_does_not_keep_inferred_blur_transition():
     result = create_remotion_creative_plan(_blur_transition_plan("电影感展示图片"), provider=BlurTransitionLLM("gaussian_blur_transition"))
-    assert result.plans[0].visual_events == []
+    assert [event.type for event in result.plans[0].visual_events] == ["shake_transition"]
 
 
 def test_unknown_strong_transition_downgrades_unified_glass_shatter():
@@ -228,3 +229,54 @@ def test_unknown_strong_transition_downgrades_unified_glass_shatter():
     assert event.type == "shake_transition"
     assert event.duration_frames == 18
     assert event.params == {"intensity": 0.45, "motion_blur": False}
+
+
+class PartiallyInvalidBlurPlanLLM:
+    model_name = "remotion-test"
+
+    def complete_json(self, _prompt: str) -> str:
+        return json.dumps({"plans": [
+            {"scene_id": "image-001", "visual_events": [{
+                "type": "gaussian_blur_transition", "phase": "transition", "start_frame": 30,
+                "duration_frames": 30, "source_asset_id": "image-001", "target_asset_id": "image-002",
+                "params": {"blur_type": "gaussian", "direction": "radial", "intensity": 0.7, "softness": 0.6, "motion_blur": False},
+            }]},
+            {"scene_id": "image-002", "visual_events": [{
+                "type": "gaussian_blur_transition", "phase": "transition", "start_frame": 30,
+                "duration_frames": 30, "source_asset_id": "image-002", "target_asset_id": "image-003",
+                "params": {"blur_type": "gaussian", "direction": "radial", "intensity": 0.7, "softness": 0.6, "motion_blur": False},
+            }]},
+            {"scene_id": "image-003", "visual_events": [{
+                "type": "gaussian_blur_transition", "phase": "transition", "start_frame": 30,
+                "duration_frames": 30, "source_asset_id": "image-003", "target_asset_id": "image-004",
+                "params": {"blur_type": "gaussian", "direction": "radial", "intensity": 0.7, "softness": 0.6, "motion_blur": False},
+            }]},
+            {"scene_id": "image-004", "visual_events": [{
+                "type": "gaussian_blur_transition", "phase": "transition", "start_frame": 30,
+                "duration_frames": 30,
+                "params": {"blur_type": "gaussian", "direction": "radial", "intensity": 0.7, "softness": 0.6, "motion_blur": False},
+            }]},
+        ]})
+
+
+def test_invalid_transition_event_is_dropped_without_global_fallback(caplog):
+    plan = DirectorPlan.model_validate({"timeline": [
+        {"asset_id": "image-001", "duration_frames": 60, "reason": "first", "transition_intent": {"description": "模糊转场"}},
+        {"asset_id": "image-002", "duration_frames": 60, "reason": "second", "transition_intent": {"description": "模糊转场"}},
+        {"asset_id": "image-003", "duration_frames": 60, "reason": "third", "transition_intent": {"description": "模糊转场"}},
+        {"asset_id": "image-004", "duration_frames": 60, "reason": "final", "transition_intent": {"description": "模糊转场"}},
+    ]})
+    caplog.set_level(logging.INFO)
+
+    result = create_remotion_creative_plan(plan, provider=PartiallyInvalidBlurPlanLLM())
+
+    assert [[event.type for event in item.visual_events] for item in result.plans] == [
+        ["gaussian_blur_transition"],
+        ["gaussian_blur_transition"],
+        ["gaussian_blur_transition"],
+        [],
+    ]
+    assert "[VisualEvent Validation]\nDropped event:\ntype: gaussian_blur_transition" in caplog.text
+    assert "Transition visual event requires target_asset_id: gaussian_blur_transition" in caplog.text
+    assert "[VisualEvent Validation]\nKept events:\ncount: 3" in caplog.text
+    assert "No valid visual events" not in caplog.text

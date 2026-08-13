@@ -643,7 +643,17 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress
             scene = scene_map.get(item.scene_id)
             if scene is None:
                 raise ValueError(f"Remotion Agent returned unknown scene_id: {item.scene_id}")
-            validated.append(item.model_copy(update={"visual_events": [_validate_visual_event(event, scene, next_map.get(item.scene_id)) for event in item.visual_events]}))
+            events = []
+            for event in item.visual_events:
+                try:
+                    events.append(_validate_visual_event(event, scene, next_map.get(item.scene_id)))
+                except (UnknownVisualEffect, ValueError) as exc:
+                    logger.warning(
+                        "[VisualEvent Validation]\nDropped event:\ntype: %s\nreason: %s",
+                        event.type,
+                        exc,
+                    )
+            validated.append(item.model_copy(update={"visual_events": events}))
         # A transition owns source/target reveal. Camera push survives only for
         # explicit camera-motion direction.
         incoming = {event.target_asset_id: event for item in validated for event in item.visual_events if event.phase == "transition" and event.target_asset_id}
@@ -674,6 +684,11 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress
                     kept.append(event)
             cleaned.append(item.model_copy(update={"visual_events": kept}))
         validated = cleaned
+        kept_event_count = sum(len(item.visual_events) for item in validated)
+        logger.info("[VisualEvent Validation]\nKept events:\ncount: %d", kept_event_count)
+        if kept_event_count == 0:
+            logger.warning("[Remotion Agent] No valid visual events, using safe fallback")
+            return _fallback_creative_plan(plan)
         logger.info("[Remotion Agent] generated RemotionCreativePlan")
         return RemotionCreativePlan(plans=validated)
     except (OSError, TimeoutError, ConnectionError):
