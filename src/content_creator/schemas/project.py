@@ -4,6 +4,7 @@ from .transition import TransitionConfig
 from .color import RGBColor
 from .animation_plan import AnimationEffect
 from .transition_effect_plan import TransitionEffectPlanItem
+from .remotion_creative_plan import VisualEvent
 
 
 class EntranceConfig(BaseModel):
@@ -40,6 +41,7 @@ class TimelineItem(BaseModel):
     transition: TransitionConfig
     animation: AnimationEffect | None = None
     transition_effect: TransitionEffectPlanItem | None = None
+    visual_events: list[VisualEvent] = Field(default_factory=list)
 
 
 class VideoOutput(BaseModel):

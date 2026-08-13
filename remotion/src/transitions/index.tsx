@@ -5,7 +5,7 @@ import {fade} from './fade'; import {flip} from './flip'; import {slide} from '.
 import {crossfade} from './presentations/crossfade'; import {blackFlash} from './presentations/black_flash'; import {whiteFlash} from './presentations/white_flash'; import {push} from './presentations/push'; import {whip} from './presentations/whip'; import {stretchWhip} from './presentations/stretch_whip'; import {digitalWipe} from './presentations/digital_wipe'; import {iris} from './presentations/iris'; import {clockWipe} from './presentations/clock_wipe'; import {blinds} from './presentations/blinds'; import {pixelReveal} from './presentations/pixel_reveal'; import {glitch} from './presentations/glitch'; import {lightLeak} from './presentations/light_leak';
 import type {TransitionConfig} from '../types'; import {TransitionMetadataRegistry} from './metadata';
 import {AbsoluteFill} from 'remotion';
-import {GlassShatter} from './presentations/glass-shatter';
+export {TransitionEffectRegistry, TransitionEffectRenderer} from './TransitionEffectRenderer';
 type Builder = (config: TransitionConfig, key: string) => ReactElement;
 const timing = (c: TransitionConfig) => linearTiming({durationInFrames: c.duration_frames});
 const element = <P extends Record<string, unknown>>(key: string, c: TransitionConfig, p: TransitionPresentation<P>): ReactElement => {
@@ -26,17 +26,4 @@ export const TransitionFactory = (transition: TransitionConfig, key: string): Re
     : transition;
   return (TransitionRegistry[safe.type] ?? TransitionRegistry.fade)(safe, key);
 };
-export type TransitionEffectPlan = {
-  from_asset_id: string;
-  to_asset_id: string;
-  type: 'glass_shatter_transition';
-  duration_frames: number;
-  params: {fragment_count?: number; impact_origin?: 'center'|'left'|'right'|'top'|'bottom'; motion_blur?: boolean};
-};
-type TransitionEffectBuilder = (effect: TransitionEffectPlan, key: string) => ReactElement;
-const transitionEffectElement = (effect: TransitionEffectPlan, key: string): ReactElement => <TransitionSeries.Transition key={key} timing={linearTiming({durationInFrames: effect.duration_frames})} presentation={{component: GlassShatter, props: effect.params}}/>;
-export const TransitionEffectRegistry: Record<TransitionEffectPlan['type'], TransitionEffectBuilder> = {
-  glass_shatter_transition: transitionEffectElement,
-};
-export const TransitionEffectFactory = (effect: TransitionEffectPlan, key: string): ReactElement => TransitionEffectRegistry[effect.type](effect, key);
 export {TransitionMetadataRegistry};

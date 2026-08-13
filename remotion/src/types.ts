@@ -11,9 +11,11 @@ export interface TransitionPlan { transitions: TransitionPlanItem[]; }
 export interface ImageAsset { id: string; filename: string; relative_path: string; width: number; height: number; fit: "contain"; backgroundColor: RGBColor; duration_frames: number; motion: MotionType | string; entrance: EntranceConfig; }
 export interface AudioConfig { path: string; source_path?: string | null; duration: number; sample_rate: number; bpm: number; }
 export interface AnimationDesign { description: string; movement: string; direction?: string | null; energy: number; timing?: string | null; camera?: string | null; effects: string[]; }
-export type TransitionEffectType = "glass_shatter_transition";
-export interface TransitionEffectPlan { from_asset_id: string; to_asset_id: string; type: TransitionEffectType; duration_frames: number; params: {fragment_count?: number; impact_origin?: "center" | "left" | "right" | "top" | "bottom"; motion_blur?: boolean;}; implementation: "new" | "fallback"; design: Record<string, unknown>; }
-export interface TimelineItem { asset_id: string; start_frame: number; end_frame: number; duration_frames: number; transition: TransitionConfig; animation?: AnimationEffect | null; transition_effect?: TransitionEffectPlan | null; }
+export type TransitionEffectType = "glass_shatter_transition" | "shake_transition";
+export interface TransitionEffectPlan { from_asset_id: string; to_asset_id: string; type: TransitionEffectType; duration_frames: number; params: {fragment_count?: number; impact_origin?: "center" | "left" | "right" | "top" | "bottom"; intensity?: number; motion_blur?: boolean;}; implementation: "new" | "fallback"; design: Record<string, unknown>; }
+export type VisualEventPhase = "entrance" | "exit" | "transition" | "camera" | "effect";
+export interface VisualEvent { type: string; phase: VisualEventPhase; start_frame: number; duration_frames: number; target_asset_id?: string | null; params: Record<string, unknown>; }
+export interface TimelineItem { asset_id: string; start_frame: number; end_frame: number; duration_frames: number; transition: TransitionConfig; visual_events?: VisualEvent[]; animation?: AnimationEffect | null; transition_effect?: TransitionEffectPlan | null; }
 export interface VideoOutput { project_dir: string; render_data: string; final_video: string; }
 export interface VideoProject { project_id: string; fps: number; width: number; height: number; images: ImageAsset[]; audio: AudioConfig; timeline: TimelineItem[]; output: VideoOutput; media_base_url?: string; }
 export type RemotionProps = VideoProject & Record<string, unknown>;

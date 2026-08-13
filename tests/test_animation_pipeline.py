@@ -7,8 +7,15 @@ from content_creator.schemas import AudioConfig, DirectorPlan, ImageAsset, Scene
 from content_creator.services.llm.provider import MockLLMProvider
 
 
+class ParticleLLM:
+    model_name = "remotion-test"
+
+    def complete_json(self, _prompt: str) -> str:
+        return '{"type":"particle_flip_reveal","duration_frames":24,"params":{"particle_density":120,"rotation_axis":"Y"}}'
+
+
 def test_director_creative_intent_reaches_render_data(tmp_path, monkeypatch):
-    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: MockLLMProvider())
+    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: ParticleLLM())
     root = tmp_path / "project"
     audio_dir = root / "audio"
     audio_dir.mkdir(parents=True)

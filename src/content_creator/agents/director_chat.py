@@ -173,12 +173,14 @@ def format_plan(session: ProjectSession, as_json: bool = False) -> str:
     lines: list[str] = []
     for index, item in enumerate(session.current_plan.timeline, 1):
         animation = item.creative_intent.description if item.creative_intent else "none"
+        creative_transition = item.transition_intent.description if item.transition_intent else "none"
         lines.extend([
             f"Scene {index:02d}",
             f"Asset: {item.asset_id}",
             f"Duration: {item.duration_frames} frames / {item.duration_frames / session.fps:.1f}s",
             f"Animation Design: {animation}",
-            f"Transition: {item.transition_intent.description if item.transition_intent else item.transition.type.value} / {item.transition.duration_frames}f",
+            f"Transition: {item.transition.type.value} / {item.transition.duration_frames}f (baseline)",
+            f"Creative Transition: {creative_transition}",
             f"Emotion: {item.reason}",
             "",
         ])

@@ -1,24 +1,55 @@
 import json
 from pathlib import Path
-from content_creator.schemas import AnimationPlan, DirectorPlan, DirectorTimelineItem, TimelineItem, TransitionEffectPlan, VideoProject
-from content_creator.agents.remotion_agent import create_remotion_plans
+from content_creator.schemas import AnimationEffect, AnimationEffectType, DirectorPlan, DirectorTimelineItem, TimelineItem, RemotionCreativePlan, VisualEvent, VideoProject, TransitionEffectPlanItem, TransitionEffectType
+from content_creator.agents.remotion_agent import create_remotion_creative_plan
 from content_creator.services.music import adapt_audio_to_duration
 
-def compile_render_plan(project: VideoProject, storyboard, animation_plan: AnimationPlan | None = None, transition_effect_plan: TransitionEffectPlan | None = None) -> VideoProject:
+def compile_render_plan(project: VideoProject, storyboard, creative_plan: RemotionCreativePlan | None = None, animation_plan=None, transition_effect_plan=None) -> VideoProject:
     cursor = 0
     timeline = []
-    if animation_plan is None or transition_effect_plan is None:
+    legacy_animation_by_asset = {}
+    legacy_transition_by_source = {}
+    if creative_plan is not None and not isinstance(creative_plan, RemotionCreativePlan):
+        # Legacy positional AnimationPlan/TransitionEffectPlan callers.
+        legacy_animation = creative_plan
+        legacy_transition = animation_plan if transition_effect_plan is None else transition_effect_plan
+        legacy_animation_by_asset = {x.asset_id: x for x in getattr(legacy_animation, "animations", [])}
+        legacy_transition_by_source = {x.from_asset_id: x for x in getattr(legacy_transition, "transitions", [])}
+        plans = []
+        for scene in storyboard.scenes:
+            events = []
+            animation = next((x for x in getattr(legacy_animation, "animations", []) if x.asset_id == scene.asset_id), None)
+            if animation:
+                events.append(VisualEvent(type=animation.type.value, phase="entrance", start_frame=0, duration_frames=animation.duration_frames, params=animation.params))
+            transition = next((x for x in getattr(legacy_transition, "transitions", []) if x.from_asset_id == scene.asset_id), None)
+            if transition:
+                events.append(VisualEvent(type=transition.type.value, phase="transition", start_frame=max(0, scene.duration_frames-transition.duration_frames), duration_frames=transition.duration_frames, target_asset_id=transition.to_asset_id, params=transition.params))
+            plans.append({"scene_id": scene.asset_id, "visual_events": events})
+        creative_plan = RemotionCreativePlan.model_validate({"plans": plans})
+    if creative_plan is None:
         # Storyboard is a durable plan boundary. Rebuild a compatible DirectorPlan
         # so animations survive callers that compile a storyboard directly.
         rebuilt_plan = DirectorPlan(timeline=[DirectorTimelineItem(asset_id=scene.asset_id, duration_frames=scene.duration_frames, transition=scene.transition, motion=scene.motion.type, reason=scene.emotion, creative_intent=scene.creative_intent, transition_intent=scene.transition_intent, timing=scene.timing) for scene in storyboard.scenes])
+        # Legacy callers that do not pass an explicit plan retain the old API
+        # conversion while the production entry points use the unified plan.
+        from content_creator.agents.remotion_agent import create_remotion_plans
         generated_animation, generated_transitions = create_remotion_plans(rebuilt_plan)
-        animation_plan = animation_plan or generated_animation
-        transition_effect_plan = transition_effect_plan or generated_transitions
-    animation_by_asset = {item.asset_id: item for item in animation_plan.animations}
-    transition_by_source = {item.from_asset_id: item for item in transition_effect_plan.transitions}
+        legacy_animation_by_asset = {x.asset_id: x for x in generated_animation.animations}
+        legacy_transition_by_source = {x.from_asset_id: x for x in generated_transitions.transitions}
+        creative_plan = RemotionCreativePlan(plans=[])
+    events_by_scene = {item.scene_id: item.visual_events for item in creative_plan.plans}
     for scene in storyboard.scenes:
         end = cursor + scene.duration_frames
-        timeline.append(TimelineItem(asset_id=scene.asset_id, start_frame=cursor, end_frame=end, duration_frames=scene.duration_frames, transition=scene.transition, animation=animation_by_asset.get(scene.asset_id), transition_effect=transition_by_source.get(scene.asset_id)))
+        events = events_by_scene.get(scene.asset_id, [])
+        entrance = next((event for event in events if event.phase in {"entrance", "effect"}), None)
+        transition_event = next((event for event in events if event.phase == "transition"), None)
+        legacy_animation = legacy_animation_by_asset.get(scene.asset_id)
+        if legacy_animation is None and entrance and entrance.type in {item.value for item in AnimationEffectType}:
+            legacy_animation = AnimationEffect(asset_id=scene.asset_id, type=AnimationEffectType(entrance.type), component=entrance.type, duration_frames=entrance.duration_frames, params=entrance.params)
+        legacy_transition = legacy_transition_by_source.get(scene.asset_id)
+        if legacy_transition is None and transition_event and transition_event.type in {item.value for item in TransitionEffectType} and transition_event.target_asset_id:
+            legacy_transition = TransitionEffectPlanItem(from_asset_id=scene.asset_id, to_asset_id=transition_event.target_asset_id, type=TransitionEffectType(transition_event.type), duration_frames=transition_event.duration_frames, params=transition_event.params)
+        timeline.append(TimelineItem(asset_id=scene.asset_id, start_frame=cursor, end_frame=end, duration_frames=scene.duration_frames, transition=scene.transition, animation=legacy_animation, transition_effect=legacy_transition, visual_events=events))
         cursor = end
     project_dir = Path(project.output.project_dir).resolve()
     audio_dir = project_dir / "audio"
@@ -39,5 +70,5 @@ def compile_render_plan(project: VideoProject, storyboard, animation_plan: Anima
     return updated
 
 def render_node(state: dict) -> dict:
-    project = compile_render_plan(state["project"], state["storyboard"], state.get("animation_plan"), state.get("transition_effect_plan"))
+    project = compile_render_plan(state["project"], state["storyboard"], state.get("remotion_creative_plan"))
     return {"project": project, "render_plan": project.model_dump(mode="json")}

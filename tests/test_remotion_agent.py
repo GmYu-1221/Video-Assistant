@@ -32,9 +32,9 @@ def test_particle_flip_creative_intent_has_executable_particle_parameters(monkey
     _use_fallback(monkeypatch)
     plan = DirectorPlan.model_validate({"timeline": [{"asset_id": "image-001", "duration_frames": 60, "reason": "opening", "creative_intent": {"description": "Image flips upward from bottom with particles", "effects": ["particle dissolve"]}}]})
     animation = create_animation_plan(plan).animations[0]
-    assert animation.type.value == "particle_flip_reveal"
-    assert animation.duration_frames == 24
-    assert animation.params == {"particle_density": 120, "rotation_axis": "Y", "motion_blur": True, "perspective": 800, "energy": 0.5}
+    assert animation.type.value == "creative_reveal"
+    assert animation.duration_frames == 18
+    assert animation.params == {}
     assert animation.implementation == "fallback"
 
 

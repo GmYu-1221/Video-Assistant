@@ -41,6 +41,45 @@ class RawResponseLLM(RemotionLLM):
         return self.response
 
 
+def test_falling_entrance_generates_validated_drop_reveal_plan(monkeypatch):
+    provider = RawResponseLLM(
+        '{"type":"drop_reveal_elastic","duration_frames":24,"params":{"direction":"top"}}'
+    )
+    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: provider)
+    plan = DirectorPlan.model_validate({"timeline": [{
+        "asset_id": "image-001", "duration_frames": 60, "reason": "opening",
+        "creative_intent": {"description": "从上面掉下来入场"},
+    }]})
+
+    animation = create_animation_plan(plan).animations[0]
+
+    assert "animation_effect_capabilities" in provider.prompts[0]
+    assert "drop_reveal_elastic" in provider.prompts[0]
+    assert animation.type.value == "drop_reveal_elastic"
+    assert animation.duration_frames == 24
+    assert animation.params == {"direction": "top"}
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        '{"duration_frames":24,"params":{}}',
+        '{"type":"drop_reveal_elastic","duration_frames":24,"params":{"direction":"diagonal"}}',
+    ],
+)
+def test_invalid_animation_response_uses_safe_fallback(monkeypatch, response):
+    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: RawResponseLLM(response))
+    plan = DirectorPlan.model_validate({"timeline": [{
+        "asset_id": "image-001", "duration_frames": 60, "reason": "opening",
+        "creative_intent": {"description": "从上面掉下来入场"},
+    }]})
+
+    animation = create_animation_plan(plan).animations[0]
+
+    assert animation.type.value == "creative_reveal"
+    assert animation.implementation == "fallback"
+
+
 def test_remotion_llm_generates_animation_plan_and_render_data(tmp_path, monkeypatch):
     provider = RemotionLLM()
     monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda agent: provider)
