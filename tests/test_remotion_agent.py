@@ -30,7 +30,12 @@ def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
     assert "stretch_transition" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
     assert "丝滑拉伸" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
     rules = "\n".join(prompt["rules"])
-    assert "camera_push effect at frames 0-60 plus card_flip_transition" in rules
+    assert "default to 10-30 frames (18 frames when no timing is specified)" in rules
+    assert "scale 1, rotate 0, translate 0, opacity 1" in rules
+    assert "图片丝滑拉伸进入" in rules
+    assert "Generate camera_push only when the Director explicitly requests" in rules
+    assert "Never infer it from cinematic, dramatic, smooth, premium, entrance, or transition" in rules
+    assert "camera_push conflicts with a transition by default" in rules
     assert "card_flip_reveal is entrance-only" in rules
     serialized = json.dumps(prompt)
     assert "remotion-engineering" not in serialized

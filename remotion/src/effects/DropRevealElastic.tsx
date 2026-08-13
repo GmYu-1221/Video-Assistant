@@ -4,11 +4,12 @@ import type {EffectProps} from './types';
 
 export const DropRevealElastic: React.FC<EffectProps> = ({animation, children}) => {
   const frame = useCurrentFrame();
+  const elapsed = frame - (animation?.start_frame ?? 0);
   const {fps} = useVideoConfig();
   const duration = Math.max(1, animation?.duration_frames ?? 20);
   const direction = animation?.params?.direction;
-  if (frame >= duration) return <>{children}</>;
-  const progress = spring({frame, fps, config: {damping: 12, stiffness: 150}, durationInFrames: duration});
+  if (elapsed >= duration) return <>{children}</>;
+  const progress = spring({frame: elapsed, fps, config: {damping: 12, stiffness: 150}, durationInFrames: duration});
   const offset = interpolate(progress, [0, 1], [110, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
   const translateX = direction === 'left' ? -offset : direction === 'right' ? offset : 0;
   const translateY = direction === 'bottom' ? offset : direction === 'left' || direction === 'right' ? 0 : -offset;

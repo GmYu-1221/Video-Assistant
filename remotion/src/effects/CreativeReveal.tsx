@@ -4,11 +4,12 @@ import type {EffectProps} from './types';
 
 export const CreativeReveal: React.FC<EffectProps> = ({animation, children}) => {
   const frame = useCurrentFrame();
+  const elapsed = frame - (animation?.start_frame ?? 0);
   const {fps} = useVideoConfig();
   const duration = Math.max(1, animation?.duration_frames ?? 18);
   const params = animation?.params ?? {};
-  if (frame >= duration) return <>{children}</>;
-  const progress = spring({frame, fps, config: {damping: 18, stiffness: 140}, durationInFrames: duration});
+  if (elapsed >= duration) return <>{children}</>;
+  const progress = spring({frame: elapsed, fps, config: {damping: 18, stiffness: 140}, durationInFrames: duration});
   const energy = Math.min(1, Math.max(0, Number(params.energy ?? 0.5)));
   const translateY = params.direction === 'up'
     ? interpolate(progress, [0, 1], [20 + energy * 20, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})

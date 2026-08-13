@@ -4,11 +4,12 @@ import type {EffectProps} from './types';
 
 export const ParticleFlipReveal: React.FC<EffectProps> = ({animation, children}) => {
   const frame = useCurrentFrame();
+  const elapsed = frame - (animation?.start_frame ?? 0);
   const {fps} = useVideoConfig();
   const duration = Math.max(1, animation?.duration_frames ?? 20);
   const params = animation?.params ?? {};
-  if (frame >= duration) return <>{children}</>;
-  const progress = spring({frame, fps, config: {damping: 16, stiffness: 145}, durationInFrames: duration});
+  if (elapsed >= duration) return <>{children}</>;
+  const progress = spring({frame: elapsed, fps, config: {damping: 16, stiffness: 145}, durationInFrames: duration});
   const axis = params.rotation_axis === 'X' ? 'X' : 'Y';
   const rotation = interpolate(progress, [0, 1], [150, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
   const blur = interpolate(progress, [0, 1], [params.motion_blur === false ? 0 : 10, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});

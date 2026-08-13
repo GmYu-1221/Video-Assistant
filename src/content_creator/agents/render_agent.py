@@ -1,8 +1,11 @@
 import json
+import logging
 from pathlib import Path
 from content_creator.schemas import AnimationEffect, AnimationEffectType, DirectorPlan, DirectorTimelineItem, TimelineItem, RemotionCreativePlan, VisualEvent, VideoProject, TransitionEffectPlanItem, TransitionEffectType
 from content_creator.agents.remotion_agent import create_remotion_creative_plan
 from content_creator.services.music import adapt_audio_to_duration
+
+logger = logging.getLogger(__name__)
 
 def compile_render_plan(project: VideoProject, storyboard, creative_plan: RemotionCreativePlan | None = None, animation_plan=None, transition_effect_plan=None) -> VideoProject:
     cursor = 0
@@ -41,6 +44,17 @@ def compile_render_plan(project: VideoProject, storyboard, creative_plan: Remoti
     for scene in storyboard.scenes:
         end = cursor + scene.duration_frames
         events = events_by_scene.get(scene.asset_id, [])
+        for event in events:
+            if event.phase == "entrance":
+                event_end = event.start_frame + event.duration_frames
+                logger.info(
+                    "Entrance event:\n%s\nframes %d-%d\nStatic hold:\nframes %d-%d",
+                    event.type,
+                    event.start_frame,
+                    event_end,
+                    event_end,
+                    scene.duration_frames,
+                )
         entrance = next((event for event in events if event.phase in {"entrance", "effect"}), None)
         transition_event = next((event for event in events if event.phase == "transition"), None)
         legacy_animation = legacy_animation_by_asset.get(scene.asset_id)

@@ -68,7 +68,7 @@ def test_camera_push_and_card_flip_transition_are_a_valid_combination(monkeypatc
     provider = TransitionConflictLLM()
     monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: provider)
     plan = DirectorPlan.model_validate({"timeline": [
-        {"asset_id": "image-001", "duration_frames": 60, "reason": "first", "transition_intent": {"description": "flip to image two"}},
+        {"asset_id": "image-001", "duration_frames": 60, "reason": "first", "creative_intent": {"description": "图一缓慢推进"}, "transition_intent": {"description": "flip to image two"}},
         {"asset_id": "image-002", "duration_frames": 60, "reason": "second"},
     ]})
     result = create_remotion_creative_plan(plan)
@@ -95,3 +95,47 @@ def test_transition_removes_overlapping_particle_reveal(monkeypatch):
     ]})
     result = create_remotion_creative_plan(plan)
     assert [event.type for event in result.plans[0].visual_events] == ["glass_shatter_transition"]
+
+
+class StretchEntranceLLM:
+    model_name = "remotion-test"
+
+    def complete_json(self, _prompt: str) -> str:
+        return json.dumps({"plans": [{"scene_id": "image-001", "visual_events": [
+            {"type": "stretch_reveal", "phase": "entrance", "start_frame": 0, "duration_frames": 18, "params": {"intensity": 0.7}},
+        ]}]})
+
+
+def test_silk_stretch_entrance_uses_an_18_frame_visual_event(monkeypatch):
+    plan = DirectorPlan.model_validate({"timeline": [{
+        "asset_id": "image-001",
+        "duration_frames": 60,
+        "reason": "opening",
+        "creative_intent": {"description": "图片丝滑拉伸进入"},
+    }]})
+    result = create_remotion_creative_plan(plan, provider=StretchEntranceLLM())
+    event = result.plans[0].visual_events[0]
+    assert event.type == "stretch_reveal"
+    assert event.phase == "entrance"
+    assert event.duration_frames == 18
+    assert all(candidate.type != "camera_push" for candidate in result.plans[0].visual_events)
+
+
+class UnwantedCameraPushLLM:
+    model_name = "remotion-test"
+
+    def complete_json(self, _prompt: str) -> str:
+        return json.dumps({"plans": [{"scene_id": "image-001", "visual_events": [
+            {"type": "camera_push", "phase": "effect", "start_frame": 0, "duration_frames": 60, "params": {"intensity": 0.3}},
+        ]}]})
+
+
+def test_cinematic_display_does_not_keep_inferred_camera_push():
+    plan = DirectorPlan.model_validate({"timeline": [{
+        "asset_id": "image-001",
+        "duration_frames": 60,
+        "reason": "opening",
+        "creative_intent": {"description": "电影感展示"},
+    }]})
+    result = create_remotion_creative_plan(plan, provider=UnwantedCameraPushLLM())
+    assert result.plans[0].visual_events == []

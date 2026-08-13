@@ -52,7 +52,10 @@ _ANIMATION_EFFECT_CAPABILITIES = {
     },
     AnimationEffectType.camera_push: {
         "description": "Image receives a subtle cinematic camera push.",
-        "params": {"intensity": {"type": "number", "minimum": 0, "maximum": 1}},
+        "params": {
+            "intensity": {"type": "number", "minimum": 0, "maximum": 1},
+            "motion_blur": {"type": "boolean"},
+        },
     },
     AnimationEffectType.glitch_reveal: {
         "description": "Image resolves through controlled digital glitch layers.",
@@ -126,6 +129,7 @@ _TRANSITION_DURATION_RANGES = {
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str], None]
 _SECRET = re.compile(r"(?i)(?:authorization\s*:\s*(?:bearer\s+)?|bearer\s+|api[_-]?key\s*[:=]\s*|token\s*[:=]\s*|password\s*[:=]\s*)[^\s,;]+")
+_CAMERA_PUSH_INTENT = re.compile(r"(?:缓慢推进|镜头推进|push\s*in|zoom\s*in|camera\s+movement|ken\s*burns)", re.IGNORECASE)
 
 
 class InvalidAnimationResponse(ValueError):
@@ -470,11 +474,15 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
             "Use only registered visual effect types and documented params.",
             "All frame positions are local to the owning scene.",
             "One scene may contain multiple visual_events when their responsibilities are compatible.",
+            "Entrance events are short, self-contained arrivals: default to 10-30 frames (18 frames when no timing is specified). Never use the full scene duration unless the Director explicitly requests continuous motion.",
+            "After an entrance event ends, the image must hold static: scale 1, rotate 0, translate 0, opacity 1. An entrance effect must not influence the remaining scene frames.",
+            "Example: '图片丝滑拉伸进入' returns a stretch_reveal entrance event with duration_frames 18; after frame 18, emit no entrance motion.",
             "A transition event belongs to the source scene and must set target_asset_id.",
             "A transition event owns the reveal of its target asset. Never create entrance, reveal, fade in, creative_reveal, particle_flip_reveal, or drop_reveal for a target asset covered by a transition.",
             "Transitions are cross-scene visual events; entrance animations are single-scene events. If both are requested, keep the transition and remove the target entrance.",
             "Example: '图一玻璃破碎，图二从碎片后出现' returns only a glass_shatter_transition event with source_asset_id image-001 and target_asset_id image-002.",
-            "camera_push is a compatible sustained effect and may overlap a transition when the Director requests camera movement before or through the cut. Example: '图一缓慢推进，然后翻转到图二' returns camera_push effect at frames 0-60 plus card_flip_transition at frames 30-60; do not replace this valid combination with a fallback.",
+            "Generate camera_push only when the Director explicitly requests 缓慢推进, 镜头推进, push in, zoom in, camera movement, or Ken Burns. Never infer it from cinematic, dramatic, smooth, premium, entrance, or transition.",
+            "camera_push conflicts with a transition by default. Keep camera_push plus a transition only when the Director explicitly requests both camera movement and the transition. Example: '图一缓慢推进，然后翻转到图二' returns camera_push effect at frames 0-60 plus card_flip_transition at frames 30-60.",
             "card_flip_reveal is entrance-only for one image appearing. card_flip_transition is transition-only for two images changing; use card_flip_transition for '图一图二翻转转场'.",
             "Do not return component names, TSX, React, CSS, or legacy animation/transition fields.",
         ],
@@ -526,6 +534,15 @@ def _validate_visual_event(event: VisualEvent, scene: DirectorTimelineItem, next
     return event
 
 
+def _explicitly_requests_camera_push(scene: DirectorTimelineItem) -> bool:
+    """Require explicit camera-motion language before preserving camera_push."""
+    intent = scene.creative_intent
+    if intent is None:
+        return False
+    text = " ".join(filter(None, [intent.description, intent.movement, intent.camera, intent.timing, *intent.effects]))
+    return bool(_CAMERA_PUSH_INTENT.search(text))
+
+
 def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress: ProgressCallback | None = None) -> RemotionCreativePlan:
     """Single LLM entry point for all scene and transition visual decisions."""
     provider = provider or get_agent_provider("remotion")
@@ -550,12 +567,13 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress
             if scene is None:
                 raise ValueError(f"Remotion Agent returned unknown scene_id: {item.scene_id}")
             validated.append(item.model_copy(update={"visual_events": [_validate_visual_event(event, scene, next_map.get(item.scene_id)) for event in item.visual_events]}))
-        # A transition owns source/target reveal. Camera push is deliberately a
-        # compatible sustained effect; competing entrance/reveal events are not.
+        # A transition owns source/target reveal. Camera push survives only for
+        # explicit camera-motion direction.
         incoming = {event.target_asset_id: event for item in validated for event in item.visual_events if event.phase == "transition" and event.target_asset_id}
         outgoing = {item.scene_id: [event for event in item.visual_events if event.phase == "transition"] for item in validated}
         cleaned = []
         for item in validated:
+            scene = scene_map[item.scene_id]
             transitions = outgoing.get(item.scene_id, [])
             kept = []
             for event in item.visual_events:
@@ -565,7 +583,11 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress
                 if item.scene_id in incoming:
                     continue
                 overlaps = any(event.start_frame < transition.start_frame + transition.duration_frames and transition.start_frame < event.start_frame + event.duration_frames for transition in transitions)
-                if event.type == "camera_push" or not overlaps:
+                if event.type == "camera_push":
+                    if _explicitly_requests_camera_push(scene):
+                        kept.append(event)
+                    continue
+                if not overlaps:
                     kept.append(event)
             cleaned.append(item.model_copy(update={"visual_events": kept}))
         validated = cleaned

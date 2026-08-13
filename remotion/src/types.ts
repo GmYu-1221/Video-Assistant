@@ -5,7 +5,7 @@ export type EntranceType = "fade" | "fade_scale" | "slide_up" | "none";
 export interface EntranceConfig { type: EntranceType | string; durationInFrames: number; }
 export interface TransitionConfig { type: TransitionType; duration_frames: number; direction: string; intensity: number; easing: string; background_color?: RGBColor | null; allow_distortion: boolean; }
 export type AnimationEffectType = "none" | "card_flip_reveal" | "camera_push" | "glitch_reveal" | "light_leak" | "stretch_reveal" | "drop_reveal_elastic" | "particle_flip_reveal" | "creative_reveal";
-export interface AnimationEffect { asset_id: string; type: AnimationEffectType; component: string; implementation: "custom" | "fallback" | "new"; duration_frames: number; params: Record<string, unknown>; fallback: AnimationEffectType; }
+export interface AnimationEffect { asset_id: string; type: AnimationEffectType; component: string; implementation: "custom" | "fallback" | "new"; duration_frames: number; start_frame?: number; params: Record<string, unknown>; fallback: AnimationEffectType; }
 export interface TransitionPlanItem { index: number; transition: TransitionConfig; }
 export interface TransitionPlan { transitions: TransitionPlanItem[]; }
 export interface ImageAsset { id: string; filename: string; relative_path: string; width: number; height: number; fit: "contain"; backgroundColor: RGBColor; duration_frames: number; motion: MotionType | string; entrance: EntranceConfig; }
