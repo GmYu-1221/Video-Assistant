@@ -1,5 +1,7 @@
 from pathlib import Path
-from content_creator.agents.remotion_agent import build_advice, create_animation_plan, load_skill_documents
+import json
+
+from content_creator.agents.remotion_agent import _creative_plan_prompt, build_advice, create_animation_plan, load_skill_documents
 from content_creator.schemas import DirectorPlan, ScenePlan, Storyboard
 from content_creator.services.llm.provider import MockLLMProvider
 
@@ -9,8 +11,20 @@ def _use_fallback(monkeypatch):
 
 def test_remotion_agent_reads_official_skill_documents():
     documents = load_skill_documents()
-    assert len(documents) == 4
+    assert len(documents) == 6
     assert all(Path(document).name == "SKILL.md" for document in documents)
+
+
+def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
+    plan = DirectorPlan.model_validate({"timeline": [{"asset_id": "image-001", "duration_frames": 60, "reason": "opening"}]})
+    prompt = json.loads(_creative_plan_prompt(plan))
+    assert "Remotion Motion Design" in prompt["remotion_motion_guidelines"]
+    assert "Image Animation Guidance" in prompt["remotion_motion_guidelines"]
+    assert "Cinematic Motion Guidance" in prompt["remotion_motion_guidelines"]
+    assert "Visual Event Architecture" in prompt["project_visual_event_rules"]
+    assert "Transition Ownership Rule" in prompt["project_visual_event_rules"]
+    serialized = json.dumps(prompt)
+    assert "remotion-engineering" not in serialized
 
 def test_remotion_advice_enforces_existing_rendering_rules():
     advice = build_advice({"storyboard": Storyboard(scenes=[ScenePlan(scene_id="001", asset_id="image-001", duration_frames=60)])})

@@ -10,6 +10,7 @@ class VisualEvent(BaseModel):
     phase: Literal["entrance", "exit", "transition", "camera", "effect"]
     start_frame: int = Field(default=0, ge=0)
     duration_frames: int = Field(gt=0)
+    source_asset_id: str | None = None
     target_asset_id: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
 

@@ -23,7 +23,7 @@ def compile_render_plan(project: VideoProject, storyboard, creative_plan: Remoti
                 events.append(VisualEvent(type=animation.type.value, phase="entrance", start_frame=0, duration_frames=animation.duration_frames, params=animation.params))
             transition = next((x for x in getattr(legacy_transition, "transitions", []) if x.from_asset_id == scene.asset_id), None)
             if transition:
-                events.append(VisualEvent(type=transition.type.value, phase="transition", start_frame=max(0, scene.duration_frames-transition.duration_frames), duration_frames=transition.duration_frames, target_asset_id=transition.to_asset_id, params=transition.params))
+                events.append(VisualEvent(type=transition.type.value, phase="transition", start_frame=max(0, scene.duration_frames-transition.duration_frames), duration_frames=transition.duration_frames, source_asset_id=transition.from_asset_id, target_asset_id=transition.to_asset_id, params=transition.params))
             plans.append({"scene_id": scene.asset_id, "visual_events": events})
         creative_plan = RemotionCreativePlan.model_validate({"plans": plans})
     if creative_plan is None:
@@ -48,7 +48,7 @@ def compile_render_plan(project: VideoProject, storyboard, creative_plan: Remoti
             legacy_animation = AnimationEffect(asset_id=scene.asset_id, type=AnimationEffectType(entrance.type), component=entrance.type, duration_frames=entrance.duration_frames, params=entrance.params)
         legacy_transition = legacy_transition_by_source.get(scene.asset_id)
         if legacy_transition is None and transition_event and transition_event.type in {item.value for item in TransitionEffectType} and transition_event.target_asset_id:
-            legacy_transition = TransitionEffectPlanItem(from_asset_id=scene.asset_id, to_asset_id=transition_event.target_asset_id, type=TransitionEffectType(transition_event.type), duration_frames=transition_event.duration_frames, params=transition_event.params)
+            legacy_transition = TransitionEffectPlanItem(from_asset_id=transition_event.source_asset_id or scene.asset_id, to_asset_id=transition_event.target_asset_id, type=TransitionEffectType(transition_event.type), duration_frames=transition_event.duration_frames, params=transition_event.params)
         timeline.append(TimelineItem(asset_id=scene.asset_id, start_frame=cursor, end_frame=end, duration_frames=scene.duration_frames, transition=scene.transition, animation=legacy_animation, transition_effect=legacy_transition, visual_events=events))
         cursor = end
     project_dir = Path(project.output.project_dir).resolve()

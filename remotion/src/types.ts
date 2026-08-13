@@ -14,7 +14,7 @@ export interface AnimationDesign { description: string; movement: string; direct
 export type TransitionEffectType = "glass_shatter_transition" | "shake_transition";
 export interface TransitionEffectPlan { from_asset_id: string; to_asset_id: string; type: TransitionEffectType; duration_frames: number; params: {fragment_count?: number; impact_origin?: "center" | "left" | "right" | "top" | "bottom"; intensity?: number; motion_blur?: boolean;}; implementation: "new" | "fallback"; design: Record<string, unknown>; }
 export type VisualEventPhase = "entrance" | "exit" | "transition" | "camera" | "effect";
-export interface VisualEvent { type: string; phase: VisualEventPhase; start_frame: number; duration_frames: number; target_asset_id?: string | null; params: Record<string, unknown>; }
+export interface VisualEvent { type: string; phase: VisualEventPhase; start_frame: number; duration_frames: number; source_asset_id?: string | null; target_asset_id?: string | null; params: Record<string, unknown>; }
 export interface TimelineItem { asset_id: string; start_frame: number; end_frame: number; duration_frames: number; transition: TransitionConfig; visual_events?: VisualEvent[]; animation?: AnimationEffect | null; transition_effect?: TransitionEffectPlan | null; }
 export interface VideoOutput { project_dir: string; render_data: string; final_video: string; }
 export interface VideoProject { project_id: string; fps: number; width: number; height: number; images: ImageAsset[]; audio: AudioConfig; timeline: TimelineItem[]; output: VideoOutput; media_base_url?: string; }

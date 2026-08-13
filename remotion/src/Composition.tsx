@@ -17,10 +17,14 @@ export const Slideshow: React.FC<RemotionProps> = (props) => {
       {props.timeline.flatMap((item, index) => {
         const asset = map.get(item.asset_id);
         const isLast = index === props.timeline.length - 1;
-        const events = item.visual_events ?? [];
+        const priority = {transition: 0, entrance: 1, effect: 2, exit: 3, camera: 4};
+        const events = [...(item.visual_events ?? [])].sort((a, b) => priority[a.phase] - priority[b.phase] || a.start_frame - b.start_frame);
         const transitionEvent = events.find((event) => event.phase === 'transition');
         const transitionFrames = isLast ? 0 : transitionEvent?.duration_frames ?? item.transition_effect?.duration_frames ?? item.transition.duration_frames;
-        const sceneEvents = events.filter((event) => event.phase !== 'transition');
+        const incomingTransition = props.timeline[index - 1]?.visual_events?.find((event) => event.phase === 'transition' && event.target_asset_id === item.asset_id);
+        // The incoming transition already controls this scene's reveal during
+        // the overlap, so an entrance wrapper would create a competing reveal.
+        const sceneEvents = events.filter((event) => event.phase !== 'transition' && !(incomingTransition && event.phase === 'entrance'));
         const sceneContent = sceneEvents.reduce<React.ReactNode>((content, event, eventIndex) => VisualEffectRenderer(event, `visual-${item.asset_id}-${eventIndex}`, content), <ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} imageWidth={asset?.width ?? props.width} imageHeight={asset?.height ?? props.height} motion={asset?.motion ?? 'static'} entrance={asset?.entrance} />);
         const sequence = <TransitionSeries.Sequence key={`sequence-${item.asset_id}`} durationInFrames={item.duration_frames + transitionFrames}>
           {events.length ? sceneContent : <EffectRenderer animation={item.animation}><ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} imageWidth={asset?.width ?? props.width} imageHeight={asset?.height ?? props.height} motion={asset?.motion ?? 'static'} entrance={asset?.entrance} /></EffectRenderer>}

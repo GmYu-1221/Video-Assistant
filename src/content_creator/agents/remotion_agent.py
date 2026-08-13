@@ -23,7 +23,16 @@ from content_creator.schemas import (
 )
 from content_creator.services.llm.router import get_agent_provider
 
-_SKILL_NAMES = ("remotion-best-practices", "remotion-docs", "remotion-markup", "remotion-render")
+# Runtime knowledge only. Development-only Skills under ~/.codex/skills are not
+# prompt material for the provider.
+_SKILL_NAMES = (
+    "video-assistant-visual-events",
+    "remotion-motion-design",
+    "remotion-best-practices",
+    "remotion-docs",
+    "remotion-markup",
+    "remotion-render",
+)
 _EFFECT_COMPONENTS = {
     AnimationEffectType.card_flip_reveal: "CardFlipReveal",
     AnimationEffectType.camera_push: "CameraPush",
@@ -100,6 +109,12 @@ _TRANSITION_EFFECT_CAPABILITIES = {
 _VISUAL_EFFECT_CAPABILITIES = {
     **{effect.value: {**capability, "phase": ["entrance", "effect"]} for effect, capability in _ANIMATION_EFFECT_CAPABILITIES.items() if effect.value != "none"},
     **{effect.value: {**capability, "phase": ["transition"]} for effect, capability in _TRANSITION_EFFECT_CAPABILITIES.items()},
+}
+_TRANSITION_DURATION_RANGES = {
+    "glass_shatter_transition": (30, 90, 45),
+    "shake_transition": (12, 45, 18),
+    "particle_dissolve_transition": (24, 90, 36),
+    "liquid_morph_transition": (36, 120, 48),
 }
 logger = logging.getLogger(__name__)
 _SECRET = re.compile(r"(?i)(?:authorization\s*:\s*(?:bearer\s+)?|bearer\s+|api[_-]?key\s*[:=]\s*|token\s*[:=]\s*|password\s*[:=]\s*)[^\s,;]+")
@@ -435,13 +450,21 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
         "task": "Convert all Director visual intents into one executable unified visual event plan.",
         "scenes": scenes,
         "visual_effect_capabilities": _VISUAL_EFFECT_CAPABILITIES,
-        "remotion_skill_guidelines": documents,
-        "output_contract": {"plans": [{"scene_id": "asset id", "visual_events": [{"type": "registered effect", "phase": "entrance|exit|transition|camera|effect", "start_frame": "scene-local integer", "duration_frames": "positive integer", "target_asset_id": "optional next asset", "params": "object"}]}]},
+        "project_visual_event_rules": documents["video-assistant-visual-events"],
+        "remotion_motion_guidelines": documents["remotion-motion-design"],
+        "remotion_reference_guidelines": {
+            name: content for name, content in documents.items()
+            if name not in {"video-assistant-visual-events", "remotion-motion-design"}
+        },
+        "output_contract": {"plans": [{"scene_id": "asset id", "visual_events": [{"type": "registered effect", "phase": "entrance|exit|transition|camera|effect", "start_frame": "scene-local integer", "duration_frames": "positive integer", "source_asset_id": "required for transition", "target_asset_id": "required for transition", "params": "object"}]}]},
         "rules": [
             "Return only one JSON object with plans; no Markdown or explanation.",
             "Use only registered visual effect types and documented params.",
             "All frame positions are local to the owning scene.",
             "A transition event belongs to the source scene and must set target_asset_id.",
+            "A transition event owns the reveal of its target asset. Never create entrance, reveal, fade in, creative_reveal, particle_flip_reveal, or drop_reveal for a target asset covered by a transition.",
+            "Transitions are cross-scene visual events; entrance animations are single-scene events. If both are requested, keep the transition and remove the target entrance.",
+            "Example: '图一玻璃破碎，图二从碎片后出现' returns only a glass_shatter_transition event with source_asset_id image-001 and target_asset_id image-002.",
             "Do not return component names, TSX, React, CSS, or legacy animation/transition fields.",
         ],
     }, ensure_ascii=False)
@@ -454,9 +477,11 @@ def _fallback_creative_plan(plan: DirectorPlan) -> RemotionCreativePlan:
         if scene.creative_intent:
             events.append(VisualEvent(type="creative_reveal", phase="entrance", start_frame=0, duration_frames=min(18, scene.duration_frames), params={}))
         if scene.transition_intent and index + 1 < len(plan.timeline):
-            events.append(VisualEvent(type="glass_shatter_transition", phase="transition", start_frame=max(0, scene.duration_frames - 18), duration_frames=min(18, scene.duration_frames, plan.timeline[index + 1].duration_frames), target_asset_id=plan.timeline[index + 1].asset_id, params={"fragment_count": 48, "impact_origin": "center", "motion_blur": True}))
+            fallback_duration = min(30, scene.duration_frames, plan.timeline[index + 1].duration_frames)
+            events.append(VisualEvent(type="glass_shatter_transition", phase="transition", start_frame=max(0, scene.duration_frames - fallback_duration), duration_frames=fallback_duration, source_asset_id=scene.asset_id, target_asset_id=plan.timeline[index + 1].asset_id, params={"fragment_count": 48, "impact_origin": "center", "motion_blur": True}))
         items.append(RemotionCreativePlanItem(scene_id=scene.asset_id, visual_events=events))
-    return RemotionCreativePlan(plans=items)
+    transition_targets = {event.target_asset_id for item in items for event in item.visual_events if event.phase == "transition"}
+    return RemotionCreativePlan(plans=[item.model_copy(update={"visual_events": [event for event in item.visual_events if not (event.phase == "entrance" and item.scene_id in transition_targets)]}) for item in items])
 
 
 def _validate_visual_event(event: VisualEvent, scene: DirectorTimelineItem, next_asset_id: str | None) -> VisualEvent:
@@ -464,6 +489,10 @@ def _validate_visual_event(event: VisualEvent, scene: DirectorTimelineItem, next
         raise UnknownVisualEffect(f"Remotion Agent selected an unavailable visual effect: {event.type}")
     if event.start_frame + event.duration_frames > scene.duration_frames:
         raise ValueError(f"Visual event exceeds scene duration: {event.type}")
+    if event.phase == "transition":
+        expected_min, expected_max, _recommended = _TRANSITION_DURATION_RANGES.get(event.type, (1, scene.duration_frames, 1))
+        if event.duration_frames < expected_min or event.duration_frames > min(expected_max, scene.duration_frames):
+            raise ValueError(f"Invalid duration for {event.type}: expected {expected_min}-{min(expected_max, scene.duration_frames)} frames")
     capability = _VISUAL_EFFECT_CAPABILITIES[event.type]
     clean_params = dict(event.params)
     for name, value in list(clean_params.items()):
@@ -477,8 +506,10 @@ def _validate_visual_event(event: VisualEvent, scene: DirectorTimelineItem, next
         if not valid:
             raise ValueError(f"Invalid visual parameter {name} for {event.type}")
     event = event.model_copy(update={"params": clean_params})
-    if event.phase == "transition" and not event.target_asset_id:
-        event = event.model_copy(update={"target_asset_id": next_asset_id})
+    if event.phase == "transition":
+        event = event.model_copy(update={"source_asset_id": event.source_asset_id or scene.asset_id, "target_asset_id": event.target_asset_id or next_asset_id})
+        if event.target_asset_id != next_asset_id:
+            raise ValueError(f"Transition target does not match next scene: {event.type}")
     if event.phase == "transition" and not event.target_asset_id:
         raise ValueError(f"Transition visual event requires target_asset_id: {event.type}")
     return event
@@ -504,6 +535,10 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None) -> Remotion
             if scene is None:
                 raise ValueError(f"Remotion Agent returned unknown scene_id: {item.scene_id}")
             validated.append(item.model_copy(update={"visual_events": [_validate_visual_event(event, scene, next_map.get(item.scene_id)) for event in item.visual_events]}))
+        # A transition owns the target reveal. Remove conflicting entrance events
+        # from the target scene after all scene-local events are validated.
+        incoming = {event.target_asset_id: event for item in validated for event in item.visual_events if event.phase == "transition" and event.target_asset_id}
+        validated = [item.model_copy(update={"visual_events": [event for event in item.visual_events if not (event.phase == "entrance" and item.scene_id in incoming)]}) for item in validated]
         logger.info("[Remotion Agent] generated RemotionCreativePlan")
         return RemotionCreativePlan(plans=validated)
     except (OSError, TimeoutError, ConnectionError):
