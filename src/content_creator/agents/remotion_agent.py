@@ -29,6 +29,7 @@ from content_creator.services.llm.router import get_agent_provider
 _SKILL_NAMES = (
     "video-assistant-visual-events",
     "remotion-motion-design",
+    "stretch-motion-design",
     "remotion-best-practices",
     "remotion-docs",
     "remotion-markup",

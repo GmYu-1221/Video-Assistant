@@ -11,7 +11,7 @@ def _use_fallback(monkeypatch):
 
 def test_remotion_agent_reads_official_skill_documents():
     documents = load_skill_documents()
-    assert len(documents) == 6
+    assert len(documents) == 7
     assert all(Path(document).name == "SKILL.md" for document in documents)
 
 
@@ -25,6 +25,10 @@ def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
     assert "Transition Ownership Rule" in prompt["project_visual_event_rules"]
     assert "camera_push" in prompt["project_visual_event_rules"]
     assert "card_flip_transition" in prompt["project_visual_event_rules"]
+    assert "stretch-motion-design" in prompt["remotion_reference_guidelines"]
+    assert "stretch_reveal" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
+    assert "stretch_transition" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
+    assert "丝滑拉伸" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
     rules = "\n".join(prompt["rules"])
     assert "camera_push effect at frames 0-60 plus card_flip_transition" in rules
     assert "card_flip_reveal is entrance-only" in rules
