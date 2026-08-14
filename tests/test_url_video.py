@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from content_creator.schemas import ArticleBrief, ArticleImage, AssetCandidate, AssetDecision, AssetKind, ImageTag, VideoCopy
@@ -28,7 +29,7 @@ def test_url_projects_force_reference_canvas(tmp_path, monkeypatch):
         stages.append("agent")
         return [AssetDecision(asset_id=item.id, selected=True, relevance=.8) for item in candidates]
 
-    def download(*_args):
+    def download(*_args, **_kwargs):
         stages.append("download")
         return sources
 
@@ -43,3 +44,28 @@ def test_url_projects_force_reference_canvas(tmp_path, monkeypatch):
     assert project.video_copy.headline == "标题"
     assert stages == ["discovery", "filter", "agent", "download"]
     assert (Path(project.output.project_dir) / "asset_manifest.json").is_file()
+
+
+def test_browser_import_protected_asset_skips_second_agent_call(tmp_path, monkeypatch):
+    sources = []
+    candidates = []
+    for index in range(4):
+        path = tmp_path / f"imported-{index}.jpg"
+        Image.new("RGB", (1280, 720), (index * 40, 20, 90)).save(path)
+        url = f"https://cdn.example.com/image-{index}.jpg"
+        sources.append(ArticleImage(id=f"article-{index:03d}", source_url=url, local_path=str(path), width=1280, height=720, source_index=index, sha256=f"{index:064x}"))
+        candidates.append(AssetCandidate(id=f"asset-{index:03d}", kind=AssetKind.image, source_url=url, page_url="https://example.com/article", original_index=index))
+    monkeypatch.setattr(url_video, "discover_asset_candidates", lambda *_: (candidates, {"asset_discovery": {}}))
+    monkeypatch.setattr(url_video, "basic_asset_filter", lambda found, _diagnostics: found)
+    monkeypatch.setattr(url_video, "select_assets_with_agent", lambda *_: [AssetDecision(asset_id=item.id, selected=True, role="diagram", relevance=.8) for item in candidates])
+
+    def protected_download(_found, _decisions, _project_dir, diagnostics, **_kwargs):
+        diagnostics["downloader"] = {"browser_asset_required": 1, "items": [{"asset_id": "asset-protected", "status": "browser_asset_required"}]}
+        return sources
+
+    monkeypatch.setattr(url_video, "download_selected_assets", protected_download)
+    monkeypatch.setattr(url_video, "tag_images", lambda *_: pytest.fail("tag_images must not be called after protected browser assets"))
+    monkeypatch.setattr(url_video, "compile_render_plan", lambda project, *_args, **_kwargs: project)
+    html = "<article><h1>Imported article</h1><p>" + ("正文内容 " * 100) + "</p></article>"
+    project, _ = url_video.create_url_project("https://example.com/article", tmp_path / "output", imported_html=html)
+    assert len(project.images) == 4

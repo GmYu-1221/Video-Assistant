@@ -6,8 +6,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from content_creator.schemas import AudioConfig, TimelineItem, VideoOutput, VideoProject
-from content_creator.services.article import basic_asset_filter, capture_article_screenshots, chromium_available, discover_asset_candidates, download_selected_assets, fetch_article, log_asset_diagnostics, order_images, select_assets_with_agent, tag_images
+from content_creator.schemas import AudioConfig, ImageTag, TimelineItem, VideoCopy, VideoOutput, VideoProject
+from content_creator.services.article import basic_asset_filter, capture_article_screenshots, chromium_available, discover_asset_candidates, download_selected_assets, fetch_article, log_asset_diagnostics, order_images, parse_article_html, select_assets_with_agent, tag_images
 from content_creator.services.assets import scan_and_process
 from content_creator.services.music import analyze_audio, load_catalog, select_track
 from content_creator.services.timeline import build_timeline
@@ -18,12 +18,22 @@ REFERENCE_HEIGHT = 1920
 REFERENCE_FPS = 30
 
 
-def create_url_project(url: str, output_root: str | Path, on_progress=None) -> tuple[VideoProject, dict]:
+def create_url_project(url: str, output_root: str | Path, on_progress=None, *, imported_html: str | None = None) -> tuple[VideoProject, dict]:
+    def progress(message: str) -> None:
+        if on_progress:
+            on_progress(message)
+
+    progress("抓取文章" if imported_html is None else "解析浏览器导入内容")
+    if imported_html is None:
+        brief, soup = fetch_article(url)
+    else:
+        brief, soup = parse_article_html(url, imported_html)
+
     root = Path(output_root).resolve()
     project_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     project_dir = root / "projects" / project_id
     project_dir.mkdir(parents=True, exist_ok=False)
-    diagnostics: dict = {"url": url}
+    diagnostics: dict = {"url": url, "browser_imported": imported_html is not None}
 
     def persist_diagnostics() -> None:
         (project_dir / "asset_diagnostics.json").write_text(json.dumps(diagnostics, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
@@ -37,12 +47,6 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None) -> t
         }
         (project_dir / "asset_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def progress(message: str) -> None:
-        if on_progress:
-            on_progress(message)
-
-    progress("抓取文章")
-    brief, soup = fetch_article(url)
     (project_dir / "article.json").write_text(brief.model_dump_json(indent=2), encoding="utf-8")
     progress("发现网页素材")
     candidates, discovery = discover_asset_candidates(soup, brief)
@@ -52,8 +56,11 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None) -> t
     progress("分析网页素材")
     decisions = select_assets_with_agent(brief, filtered, diagnostics)
     progress("下载已选素材")
-    article_images = download_selected_assets(filtered, decisions, project_dir, diagnostics)
+    article_images = download_selected_assets(filtered, decisions, project_dir, diagnostics, browser_imported=imported_html is not None)
     persist_manifest(filtered, decisions)
+    protected_assets = diagnostics.get("downloader", {}).get("browser_asset_required", 0)
+    if protected_assets:
+        progress(f"已跳过 {protected_assets} 个浏览器受保护素材")
     if len(article_images) < 4:
         diagnostics["screenshot_fallback"] = {"triggered": True, "reason": "selected_and_downloaded_images_below_minimum", "project_images_before_fallback": len(article_images), "missing": 4 - len(article_images)}
         persist_diagnostics()
@@ -63,11 +70,29 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None) -> t
         except Exception as exc:
             diagnostics["screenshot_fallback"]["error"] = str(exc)
             persist_diagnostics()
+            if imported_html is not None:
+                raise ValueError("正文已由浏览器导入，但服务器无法获取足够可渲染素材") from exc
             raise
     else:
         diagnostics["screenshot_fallback"] = {"triggered": False, "reason": "not_needed", "project_images_before_fallback": len(article_images), "missing": 0}
     progress("分析图片与生成文案")
-    brief, copy, tags = tag_images(brief, article_images)
+    if imported_html is not None and protected_assets:
+        # Browser import only supplied page HTML. Preserve the first Agent
+        # decision set and avoid a second model call to compensate for assets
+        # that the server is not authorized to download.
+        decisions_by_url = {candidate.source_url: decision for candidate, decision in zip(filtered, decisions) if decision.selected}
+        tags = []
+        for image in article_images:
+            decision = decisions_by_url.get(image.source_url)
+            if decision is None:
+                tags.append(ImageTag(image_id=image.id, role="evidence", salience=.5, visual_quality=.6, section_index=image.source_index))
+            else:
+                tags.append(ImageTag(image_id=image.id, role=decision.role, topics=decision.topics, entities=decision.entities, salience=decision.relevance, visual_quality=decision.visual_quality, section_index=image.source_index))
+        copy = VideoCopy(headline=brief.title[:80], subtitle=(brief.site_name or "文章要点")[:40], body=brief.text[:400])
+        brief = brief.model_copy(update={"summary": brief.text[:1200], "topics": [topic for tag in tags for topic in tag.topics][:12]})
+        diagnostics.setdefault("asset_agent", {})["tagging_skipped_due_browser_assets"] = True
+    else:
+        brief, copy, tags = tag_images(brief, article_images)
     selected, contexts = order_images(article_images, tags)
     if len(selected) < 4:
         raise ValueError("文章可用视觉素材少于 4 张")

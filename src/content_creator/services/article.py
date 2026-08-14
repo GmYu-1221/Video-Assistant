@@ -35,6 +35,15 @@ _IMAGE_EXTENSIONS = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
 _UI_TOKEN = re.compile(r"(?:^|[-_/.])(icon|avatar|logo|wordmark|button|badge|lock|protection)(?:[-_/.]|$)", re.I)
 
 
+class BrowserImportRequired(ValueError):
+    """The page is public, but its origin declined automated retrieval."""
+
+    def __init__(self, url: str, status_code: int) -> None:
+        self.url = url
+        self.status_code = status_code
+        super().__init__(f"网页返回 HTTP {status_code}，需要通过浏览器导入页面内容")
+
+
 def _assert_public_url(value: str) -> None:
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
@@ -82,19 +91,30 @@ def fetch_article(url: str) -> tuple[ArticleBrief, BeautifulSoup]:
     _assert_public_url(url)
     headers = {"User-Agent": "Mozilla/5.0 (compatible; VideoAssistant/1.0)", "Accept": "text/html,application/xhtml+xml"}
     with httpx.Client(headers=headers, timeout=httpx.Timeout(15, connect=8), trust_env=True) as client:
-        response = _get(client, url, MAX_HTML_BYTES)
-    content_type = response.headers.get("content-type", "")
+        try:
+            response = _get(client, url, MAX_HTML_BYTES)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {401, 403}:
+                raise BrowserImportRequired(url, exc.response.status_code) from exc
+            raise
+    return parse_article_html(url, response.text, canonical_url=str(response.url), content_type=response.headers.get("content-type", ""), allow_rendered_fallback=True)
+
+
+def parse_article_html(url: str, html: str, *, canonical_url: str | None = None, content_type: str = "text/html", allow_rendered_fallback: bool = False) -> tuple[ArticleBrief, BeautifulSoup]:
+    """Parse supplied page HTML without accessing browser state or credentials."""
+    _assert_public_url(url)
+    if len(html.encode("utf-8")) > MAX_HTML_BYTES:
+        raise ValueError("导入的网页 HTML 超过 5MB 限制")
     if "html" not in content_type.lower():
         raise ValueError("URL 未返回 HTML 文章页面")
-    html = response.text
     extracted, soup = _extract_article_text(html)
-    if len(extracted.strip()) < 160:
+    if len(extracted.strip()) < 160 and allow_rendered_fallback:
         html = _rendered_html(url)
         extracted, soup = _extract_article_text(html)
     if len(extracted.strip()) < 80:
         raise ValueError("未能从网页提取足够的正文内容")
     title = _meta(soup, "og:title", "twitter:title") or (soup.title.get_text(strip=True) if soup.title else "未命名文章")
-    canonical = _meta(soup, "og:url") or str(response.url)
+    canonical = _meta(soup, "og:url") or canonical_url or url
     site = _meta(soup, "og:site_name") or urlparse(canonical).hostname or ""
     return ArticleBrief(url=url, canonical_url=canonical, site_name=site, author=_meta(soup, "author", "article:author"), published_at=_meta(soup, "article:published_time", "date"), title=title[:500], text=extracted[:50000]), soup
 
@@ -399,12 +419,12 @@ def _download_with_retry(client: httpx.Client, url: str, limit: int) -> httpx.Re
     raise RuntimeError("unreachable")
 
 
-def download_selected_assets(candidates: list[AssetCandidate], decisions: list[AssetDecision], project_dir: str | Path, diagnostics: dict) -> list[ArticleImage]:
+def download_selected_assets(candidates: list[AssetCandidate], decisions: list[AssetDecision], project_dir: str | Path, diagnostics: dict, *, browser_imported: bool = False) -> list[ArticleImage]:
     by_id = {candidate.id: candidate for candidate in candidates}
     selected = [by_id[item.asset_id] for item in decisions if item.selected and item.asset_id in by_id]
     source_dir = Path(project_dir) / "materials" / "images"
     source_dir.mkdir(parents=True, exist_ok=True)
-    stats = {"attempted": 0, "succeeded": 0, "failed": 0, "svg": 0, "jpeg": 0, "png": 0, "webp": 0, "other": 0, "items": []}
+    stats = {"attempted": 0, "succeeded": 0, "failed": 0, "browser_asset_required": 0, "svg": 0, "jpeg": 0, "png": 0, "webp": 0, "other": 0, "items": []}
     assets: list[ArticleImage] = []
     hashes: set[str] = set()
     perceptual_hashes: list[int] = []
@@ -458,6 +478,15 @@ def download_selected_assets(candidates: list[AssetCandidate], decisions: list[A
                 assets.append(ArticleImage(id=f"article-{len(assets):03d}", source_url=item.source_url, local_path=str(target), width=width, height=height, source_index=item.original_index, alt=item.alt, caption=item.caption, context=item.nearby_text, sha256=digest))
                 record.update({"status": "downloaded", "local_path": str(target), "mime_type": content_type, "width": width, "height": height})
                 stats["succeeded"] += 1
+            except httpx.HTTPStatusError as exc:
+                if target is not None:
+                    target.unlink(missing_ok=True)
+                if browser_imported and exc.response.status_code in {401, 403}:
+                    record.update({"status": "browser_asset_required", "http_status": exc.response.status_code, "local_path": None, "error": str(exc)})
+                    stats["browser_asset_required"] += 1
+                else:
+                    record.update({"http_status": exc.response.status_code, "error": str(exc)})
+                    stats["failed"] += 1
             except (httpx.HTTPError, OSError, ValueError, Image.DecompressionBombError) as exc:
                 if target is not None:
                     target.unlink(missing_ok=True)
