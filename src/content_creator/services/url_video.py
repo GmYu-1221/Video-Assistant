@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from content_creator.schemas import AudioConfig, ImageTag, TimelineItem, VideoCopy, VideoOutput, VideoProject
-from content_creator.services.article import basic_asset_filter, capture_article_screenshots, chromium_available, discover_asset_candidates, download_selected_assets, fetch_article, log_asset_diagnostics, order_images, parse_article_html, select_assets_with_agent, tag_images
+from content_creator.services.article import _brief_from_extraction, augment_soup_with_selected_html, basic_asset_filter, capture_article_screenshots, chromium_available, discover_asset_candidates, download_selected_assets, extract_article_html, fetch_article_with_extraction, log_asset_diagnostics, order_images, select_assets_with_agent, tag_images
 from content_creator.services.assets import scan_and_process
 from content_creator.services.music import analyze_audio, load_catalog, select_track
 from content_creator.services.timeline import build_timeline
@@ -25,15 +25,17 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
 
     progress("抓取文章" if imported_html is None else "解析浏览器导入内容")
     if imported_html is None:
-        brief, soup = fetch_article(url)
+        extraction, soup = fetch_article_with_extraction(url)
     else:
-        brief, soup = parse_article_html(url, imported_html)
+        extraction, soup = extract_article_html(url, imported_html)
+    brief = _brief_from_extraction(extraction)
+    soup = augment_soup_with_selected_html(soup, extraction.selected_html)
 
     root = Path(output_root).resolve()
     project_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     project_dir = root / "projects" / project_id
     project_dir.mkdir(parents=True, exist_ok=False)
-    diagnostics: dict = {"url": url, "browser_imported": imported_html is not None}
+    diagnostics: dict = {"url": url, "browser_imported": imported_html is not None, "article_extraction": extraction.diagnostics | {"requested_url": extraction.requested_url, "canonical_url": extraction.canonical_url, "effective_base_url": extraction.effective_base_url, "extraction_method": extraction.extraction_method, "extraction_confidence": extraction.extraction_confidence, "selected_candidate_ids": extraction.selected_candidate_ids, "final_body_chars": len(extraction.body)}}
 
     def persist_diagnostics() -> None:
         (project_dir / "asset_diagnostics.json").write_text(json.dumps(diagnostics, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
@@ -77,7 +79,16 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         persist_diagnostics()
         progress("准备正文截图引擎" if not chromium_available() else "补充正文截图")
         try:
-            article_images.extend(capture_article_screenshots(brief.effective_base_url or brief.url, project_dir, len(article_images), 4 - len(article_images), diagnostics, imported_html=imported_html))
+            article_images.extend(capture_article_screenshots(
+                brief.effective_base_url or brief.url,
+                project_dir,
+                len(article_images),
+                4 - len(article_images),
+                diagnostics,
+                selected_html=extraction.selected_html,
+                body=extraction.body,
+                title=extraction.title,
+            ))
         except Exception as exc:
             diagnostics["screenshot_fallback"]["error"] = str(exc)
             persist_diagnostics()

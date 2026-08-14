@@ -1,4 +1,5 @@
 from io import BytesIO
+import json
 from pathlib import Path
 
 import httpx
@@ -8,7 +9,7 @@ from bs4 import BeautifulSoup
 
 from content_creator.schemas import ArticleBrief, ArticleImage, AssetCandidate, AssetDecision, AssetKind, ImageRole, ImageTag, MusicTrack
 from content_creator.services import article as article_service
-from content_creator.services.article import BrowserImportRequired, _assert_public_url, _clean_imported_article_document, _hamming_distance, _perceptual_hash, basic_asset_filter, discover_asset_candidates, download_selected_assets, order_images, parse_article_html, select_assets_with_agent
+from content_creator.services.article import BrowserImportRequired, _assert_public_url, _build_screenshot_document, _clean_imported_article_document, _deduplicate_text_candidates, _discover_text_candidates, _hamming_distance, _merge_text_candidates, _perceptual_hash, _select_article_candidates, _screenshot_anchors, basic_asset_filter, capture_article_screenshots, chromium_available, discover_asset_candidates, download_selected_assets, extract_article_html, order_images, parse_article_html, select_assets_with_agent
 from content_creator.services.music.catalog import select_track
 
 
@@ -72,7 +73,7 @@ def test_asset_filter_and_agent_fallback_keep_non_ui_article_candidates(monkeypa
 
 
 def test_browser_import_html_is_parsed_without_network_access():
-    html = "<html><head><title>Imported</title></head><body><article><h1>Imported article</h1><p>" + ("正文内容 " * 30) + "</p><img src='https://cdn.example.com/hero.jpg' alt='hero'></article></body></html>"
+    html = "<html><head><title>Imported</title></head><body><article><h1>Imported article</h1><p>" + ("正文内容 " * 15) + "</p><p>" + ("更多正文 " * 15) + "</p><img src='https://cdn.example.com/hero.jpg' alt='hero'></article></body></html>"
     brief, soup = parse_article_html("https://example.com/article", html)
     assert brief.title == "Imported"
     assert len(brief.text) >= 80
@@ -80,7 +81,7 @@ def test_browser_import_html_is_parsed_without_network_access():
 
 
 def test_imported_html_rejects_invalid_canonical_and_preserves_requested_identity():
-    html = "<html><head><meta property='og:url' content='https://www.zhihu.com/question/undefined/answer/42'><title>Imported</title></head><body><article><p>" + ("正文内容 " * 30) + "</p></article></body></html>"
+    html = "<html><head><meta property='og:url' content='https://www.zhihu.com/question/undefined/answer/42'><title>Imported</title></head><body><article><p>" + ("正文内容 " * 15) + "</p><p>" + ("更多正文 " * 15) + "</p></article></body></html>"
     brief, _ = parse_article_html("https://www.zhihu.com/question/1/answer/42", html)
     assert brief.requested_url == "https://www.zhihu.com/question/1/answer/42"
     assert brief.canonical_url == brief.requested_url
@@ -150,6 +151,113 @@ def test_imported_screenshot_document_is_inert_article_fragment():
     assert "iframe" not in document
     assert "https://cdn.example.com/a.jpg" not in document
     assert "正文" in document
+
+
+def test_screenshot_document_uses_selected_html_and_removes_network_capable_markup():
+    html = "<main><script>window.pwned=true</script><h2 onclick='bad()'>小节</h2><p>第一段正文</p><img src='https://cdn.example.com/a.jpg'><a href='https://example.com'>链接</a><form action='https://example.com'><input></form></main>"
+    document, source, stats = _build_screenshot_document(html, "备用正文", "文章标题")
+    assert source == "selected_html"
+    assert stats["cleaned_chars"] >= len("第一段正文")
+    assert "window.pwned" not in document
+    assert "onclick" not in document
+    assert "cdn.example.com" not in document
+    assert "https://example.com" not in document
+    assert "#video-assistant-article" in document
+    assert "Video Assistant Noto" in document
+
+
+def test_screenshot_document_uses_extracted_body_when_html_is_empty():
+    document, source, stats = _build_screenshot_document("", "第一段正文。\n\n第二段正文。", "文章标题")
+    assert source == "extracted_body"
+    assert stats["paragraph_count"] == 2
+    assert "第一段正文" in document
+    assert "第二段正文" in document
+
+
+def test_screenshot_anchors_are_clamped_and_prioritize_distinct_paragraphs():
+    class Locator:
+        def count(self): return 5
+        def nth(self, index):
+            return type("Paragraph", (), {"bounding_box": lambda self: {"x": 80, "y": index * 500, "width": 1000, "height": 80}})()
+
+    class Main:
+        def locator(self, _selector): return Locator()
+
+    anchors = _screenshot_anchors(Main(), {"x": 80, "y": 0, "width": 1120, "height": 2400}, 630, 1800, 4)
+    assert len(anchors) >= 4
+    assert all(0 <= top <= 1800 for top, _ in anchors)
+    assert len({round(top) for top, _ in anchors[:4]}) == 4
+
+
+@pytest.mark.skipif(not chromium_available(), reason="Playwright Chromium is not installed")
+def test_local_screenshot_fallback_never_navigates_to_source_url(tmp_path):
+    paragraphs = "".join(f"<p>第 {index} 段正文，包含足够长的内容用于不同截图画面。" + ("更多说明文字。" * 16) + "</p>" for index in range(16))
+    diagnostics = {}
+    assets = capture_article_screenshots(
+        "https://blocked.example.com/article",
+        tmp_path,
+        0,
+        2,
+        diagnostics,
+        selected_html=f"<article>{paragraphs}</article>",
+        title="本地正文截图",
+    )
+    fallback = diagnostics["screenshot_fallback"]
+    assert len(assets) == 2
+    assert fallback["network_navigation"] is False
+    assert fallback["source"] == "selected_html"
+    assert all(Path(asset.local_path).is_file() for asset in assets)
+    assert all(clip["x"] >= 0 and clip["y"] >= 0 and clip["right"] <= fallback["page_size"]["scrollWidth"] and clip["bottom"] <= fallback["page_size"]["scrollHeight"] for clip in fallback["clips"])
+
+
+def test_cctv_script_html_candidate_restores_body_and_images(monkeypatch):
+    html = """<html><head><title>抗台风</title></head><body><div id='text_area'></div>
+    <script>var contentdate = '<p><img src=\"https://cdn.example.com/one.jpg\">第一段正文内容，描述新闻背景、现场情况和文章主题。</p><p>第二段正文介绍阻尼器的工作原理以及工程技术细节和安全价值。</p><p><img src=\"https://cdn.example.com/two.jpg\">第三段正文内容，说明后续技术方案、实际效果和发展方向。</p>';</script>
+    </body></html>"""
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    extraction, _ = extract_article_html("https://example.com/a", html)
+    assert extraction.extraction_method == "script_html"
+    assert len(extraction.body) >= 50
+    assert extraction.selected_html.count("<img") == 2
+    assert extraction.selected_candidate_ids
+
+
+def test_jsonld_body_candidate_is_discovered():
+    payload = json.dumps({"@type": "NewsArticle", "articleBody": "第一段新闻正文。\n第二段新闻正文。" + ("新闻内容 " * 20)}, ensure_ascii=False)
+    soup = BeautifulSoup(f"<html><head><script type='application/ld+json'>{payload}</script></head><body></body></html>", "html.parser")
+    candidates = _discover_text_candidates(str(soup), soup, "新闻标题")
+    assert any(item.source == "jsonld" and item.paragraph_count == 1 for item in candidates)
+
+
+def test_candidate_deduplication_prevents_duplicate_merge():
+    html = "<article><p>" + ("相同的第一段正文。" * 8) + "</p><p>" + ("相同的第二段正文。" * 8) + "</p></article>"
+    soup = BeautifulSoup(html, "html.parser")
+    first = _discover_text_candidates(html, soup, "标题")
+    second = [item.model_copy(update={"id": "duplicate-copy", "source": "script_html"}) for item in first]
+    candidates = _deduplicate_text_candidates(first + second)
+    merged = _merge_text_candidates(candidates, [item.id for item in candidates])
+    assert len(merged.body.splitlines()) == 2
+
+
+def test_article_agent_receives_previews_only(monkeypatch):
+    brief = ArticleBrief(url="https://example.com/a", canonical_url="https://example.com/a", title="Example", text="body")
+    soup = BeautifulSoup("<article><p>" + ("开头标记 " * 100) + "中间标记" + (" 结尾标记" * 100) + "</p><p>第二段。</p></article>", "html.parser")
+    candidates = _deduplicate_text_candidates(_discover_text_candidates(str(soup), soup, brief.title))
+    seen = {}
+
+    class Provider:
+        model_name = "article-test"
+        def complete_json(self, prompt):
+            seen["prompt"] = prompt
+            return '{"selected_candidate_ids":["text-000"],"confidence":0.9,"reason":"正文"}'
+        def complete(self, prompt):
+            return self.complete_json(prompt)
+
+    monkeypatch.setattr(article_service, "get_agent_provider", lambda _name: Provider())
+    extraction, _diagnostics = _select_article_candidates(candidates, brief.title)
+    assert len(extraction.body) > 500
+    assert "开头标记" in seen["prompt"]
+    assert extraction.body not in seen["prompt"]
 
 
 def test_fetch_article_turns_401_403_into_browser_import_required(monkeypatch):

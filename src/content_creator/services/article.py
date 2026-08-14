@@ -12,6 +12,7 @@ import socket
 import subprocess
 import sys
 import time
+from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
 
@@ -20,7 +21,7 @@ import trafilatura
 from bs4 import BeautifulSoup
 from PIL import Image, ImageOps
 
-from content_creator.schemas import ArticleBrief, ArticleImage, AssetCandidate, AssetDecision, AssetKind, ImageRole, ImageTag, TransitionContext, TransitionRelation, VideoCopy
+from content_creator.schemas import ArticleBrief, ArticleExtractionResult, ArticleImage, ArticleTextCandidate, AssetCandidate, AssetDecision, AssetKind, CandidatePreview, ImageRole, ImageTag, TransitionContext, TransitionRelation, VideoCopy
 from content_creator.services.llm.router import get_agent_provider
 
 MAX_HTML_BYTES = 5_000_000
@@ -90,6 +91,11 @@ def _meta(soup: BeautifulSoup, *names: str) -> str:
 
 
 def fetch_article(url: str) -> tuple[ArticleBrief, BeautifulSoup]:
+    extraction, soup = fetch_article_with_extraction(url)
+    return _brief_from_extraction(extraction), soup
+
+
+def fetch_article_with_extraction(url: str) -> tuple[ArticleExtractionResult, BeautifulSoup]:
     _assert_public_url(url)
     headers = {"User-Agent": "Mozilla/5.0 (compatible; VideoAssistant/1.0)", "Accept": "text/html,application/xhtml+xml"}
     with httpx.Client(headers=headers, timeout=httpx.Timeout(15, connect=8), trust_env=True) as client:
@@ -99,26 +105,58 @@ def fetch_article(url: str) -> tuple[ArticleBrief, BeautifulSoup]:
             if exc.response.status_code in {401, 403}:
                 raise BrowserImportRequired(url, exc.response.status_code) from exc
             raise
-    return parse_article_html(url, response.text, canonical_url=str(response.url), content_type=response.headers.get("content-type", ""), allow_rendered_fallback=True)
+    return extract_article_html(url, response.text, canonical_url=str(response.url), effective_base_url=str(response.url), content_type=response.headers.get("content-type", ""), allow_rendered_fallback=True)
 
 
 def parse_article_html(url: str, html: str, *, canonical_url: str | None = None, content_type: str = "text/html", allow_rendered_fallback: bool = False) -> tuple[ArticleBrief, BeautifulSoup]:
-    """Parse supplied page HTML without accessing browser state or credentials."""
+    """Compatibility wrapper that keeps the public ArticleBrief API stable."""
+    extraction, soup = extract_article_html(url, html, canonical_url=canonical_url, content_type=content_type, allow_rendered_fallback=allow_rendered_fallback)
+    return _brief_from_extraction(extraction), soup
+
+
+def extract_article_html(url: str, html: str, *, canonical_url: str | None = None, effective_base_url: str | None = None, content_type: str = "text/html", allow_rendered_fallback: bool = False) -> tuple[ArticleExtractionResult, BeautifulSoup]:
+    """Extract article text through local candidates and an ID-only LLM decision."""
     _assert_public_url(url)
     if len(html.encode("utf-8")) > MAX_HTML_BYTES:
         raise ValueError("导入的网页 HTML 超过 5MB 限制")
     if "html" not in content_type.lower():
         raise ValueError("URL 未返回 HTML 文章页面")
-    extracted, soup = _extract_article_text(html)
-    if len(extracted.strip()) < 160 and allow_rendered_fallback:
-        html = _rendered_html(url)
-        extracted, soup = _extract_article_text(html)
-    if len(extracted.strip()) < 80:
-        raise ValueError("未能从网页提取足够的正文内容")
-    title = _meta(soup, "og:title", "twitter:title") or (soup.title.get_text(strip=True) if soup.title else "未命名文章")
+    soup = BeautifulSoup(html, "html.parser")
     canonical = _trusted_canonical_url(url, _meta(soup, "og:url") or canonical_url)
-    site = _meta(soup, "og:site_name") or urlparse(canonical).hostname or ""
-    return ArticleBrief(url=url, requested_url=url, canonical_url=canonical, effective_base_url=url, site_name=site, author=_meta(soup, "author", "article:author"), published_at=_meta(soup, "article:published_time", "date"), title=title[:500], text=extracted[:50000]), soup
+    base = effective_base_url or url
+    title = _meta(soup, "og:title", "twitter:title") or (soup.title.get_text(strip=True) if soup.title else "未命名文章")
+    candidates = _deduplicate_text_candidates(_discover_text_candidates(html, soup, title))
+    selected, diagnostics = _select_article_candidates(candidates, title)
+    if not _quality_ok(selected.body) and allow_rendered_fallback:
+        rendered = _rendered_html(url)
+        rendered_soup = BeautifulSoup(rendered, "html.parser")
+        rendered_candidates = _deduplicate_text_candidates(_discover_text_candidates(rendered, rendered_soup, title, source_override="rendered_dom", start_index=len(candidates)))
+        candidates = _deduplicate_text_candidates(candidates + rendered_candidates)
+        selected, diagnostics = _select_article_candidates(candidates, title)
+        soup = rendered_soup if selected.extraction_method == "rendered_dom" else soup
+    if not _quality_ok(selected.body):
+        raise ValueError(f"未能从网页提取足够的正文内容（候选 {len(candidates)} 个，最终 {len(selected.body)} 字）")
+    diagnostics["candidate_total"] = len(candidates)
+    selected = selected.model_copy(update={"canonical_url": canonical, "effective_base_url": base, "requested_url": url})
+    selected = selected.model_copy(update={"diagnostics": diagnostics})
+    return selected, soup
+
+
+def _brief_from_extraction(extraction: ArticleExtractionResult) -> ArticleBrief:
+    return ArticleBrief(url=extraction.requested_url, requested_url=extraction.requested_url, canonical_url=extraction.canonical_url, effective_base_url=extraction.effective_base_url, title=extraction.title[:500], text=extraction.body[:50000])
+
+
+def augment_soup_with_selected_html(soup: BeautifulSoup, selected_html: str) -> BeautifulSoup:
+    """Expose selected inert article markup to Asset Discovery without scripts."""
+    if not selected_html:
+        return soup
+    augmented = BeautifulSoup(str(soup), "html.parser")
+    fragment = BeautifulSoup(selected_html, "html.parser")
+    for node in fragment.select("script, iframe, object, embed, noscript"):
+        node.decompose()
+    target = augmented.body or augmented
+    target.append(fragment)
+    return augmented
 
 
 def _trusted_canonical_url(requested_url: str, candidate: str | None) -> str:
@@ -148,6 +186,235 @@ def _extract_article_text(html: str) -> tuple[str, BeautifulSoup]:
     return extracted, soup
 
 
+_SCRIPT_ASSIGNMENT = re.compile(r"(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*(['\"])", re.S)
+_TEXT_SELECTORS = ("article", "main", "[role=main]", ".article", ".article-content", ".post-content", ".entry-content", ".content", ".text_area", ".content_area")
+_METADATA_SOURCES = {"metadata", "jsonld"}
+
+
+def _normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", html_escape.unescape(value or "")).strip()
+
+
+def _decode_static_script_string(value: str) -> str:
+    # Decode only inert string escapes. Never evaluate JavaScript or JSON code.
+    value = value.replace("\\/", "/").replace("\\'", "'").replace('\\"', '"').replace("\\n", "\n").replace("\\r", "\n").replace("\\t", "\t").replace("\\\\", "\\")
+    value = re.sub(r"\\u([0-9a-fA-F]{4})", lambda match: chr(int(match.group(1), 16)), value)
+    value = re.sub(r"\\x([0-9a-fA-F]{2})", lambda match: chr(int(match.group(1), 16)), value)
+    return html_escape.unescape(value)
+
+
+def _candidate_from_html(candidate_id: str, source: str, key: str, fragment_html: str, title: str, section: int) -> ArticleTextCandidate | None:
+    if not fragment_html or len(fragment_html) > MAX_HTML_BYTES:
+        return None
+    fragment = BeautifulSoup(fragment_html, "html.parser")
+    for node in fragment.select("script, iframe, object, embed, noscript"):
+        node.decompose()
+    text = _normalize_text(fragment.get_text(" ", strip=True))
+    paragraphs = [node for node in fragment.find_all(["p", "h2", "h3", "li"]) if _normalize_text(node.get_text(" ", strip=True))]
+    if len(text) < 40:
+        return None
+    return ArticleTextCandidate(id=candidate_id, source=source, selector_or_key=key, text=text, html=str(fragment), title_context=title[:500], section_index=section, char_count=len(text), paragraph_count=len(paragraphs), image_count=len(fragment.find_all("img")))
+
+
+def _discover_text_candidates(raw_html: str, soup: BeautifulSoup, title: str, *, source_override: str | None = None, start_index: int = 0) -> list[ArticleTextCandidate]:
+    candidates: list[ArticleTextCandidate] = []
+    index = start_index
+    for selector in _TEXT_SELECTORS:
+        for node in soup.select(selector)[:4]:
+            candidate = _candidate_from_html(f"text-{index:03d}", source_override or "dom", selector, str(node), title, index)
+            if candidate:
+                candidates.append(candidate)
+                index += 1
+    # JSON-LD is parsed as data, never executed.
+    def walk_json(value, key_path: str = ""):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {"articleBody", "description"} and isinstance(child, str):
+                    candidate = _candidate_from_html(f"text-{index:03d}", "jsonld", f"{key_path}.{key}", f"<article><p>{html_escape.escape(child)}</p></article>", title, index)
+                    if candidate:
+                        candidates.append(candidate)
+                walk_json(child, f"{key_path}.{key}")
+        elif isinstance(value, list):
+            for offset, child in enumerate(value):
+                walk_json(child, f"{key_path}[{offset}]")
+    for node in soup.select('script[type="application/ld+json"]'):
+        try:
+            walk_json(json.loads(node.string or node.get_text()))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    # Generic static extraction of HTML-valued JavaScript strings, including
+    # CCTV's `var contentdate = '<p>...</p>'` payload.
+    if source_override is None:
+        for script in soup.find_all("script"):
+            script_text = script.string or script.get_text()
+            for match in _SCRIPT_ASSIGNMENT.finditer(script_text):
+                quote = match.group(2)
+                cursor = match.end()
+                escaped = False
+                end = None
+                while cursor < len(script_text):
+                    char = script_text[cursor]
+                    if char == quote and not escaped:
+                        end = cursor
+                        break
+                    escaped = char == "\\" and not escaped
+                    if char != "\\":
+                        escaped = False
+                    cursor += 1
+                if end is None:
+                    continue
+                decoded = _decode_static_script_string(script_text[match.end():end])
+                if decoded.count("<p") + decoded.count("<h2") + decoded.count("<figure") < 2:
+                    continue
+                candidate = _candidate_from_html(f"text-{index:03d}", "script_html", match.group(1), decoded, title, index)
+                if candidate:
+                    candidates.append(candidate)
+                    index += 1
+    for meta_name in ("description", "og:description"):
+        for node in soup.select(f'meta[name="{meta_name}"], meta[property="{meta_name}"]'):
+            value = node.get("content", "")
+            candidate = _candidate_from_html(f"text-{index:03d}", "metadata", meta_name, f"<p>{html_escape.escape(value)}</p>", title, index)
+            if candidate:
+                candidates.append(candidate)
+                index += 1
+    return candidates
+
+
+def _deduplicate_text_candidates(candidates: list[ArticleTextCandidate]) -> list[ArticleTextCandidate]:
+    result: list[ArticleTextCandidate] = []
+    groups: list[tuple[str, str]] = []
+    for candidate in candidates:
+        normalized = candidate.text.lower()
+        duplicate_group = None
+        for group_id, existing in groups:
+            ratio = SequenceMatcher(None, normalized[:12000], existing[:12000]).ratio()
+            if ratio >= .86 or (len(normalized) > 500 and (normalized in existing or existing in normalized)):
+                duplicate_group = group_id
+                break
+        if duplicate_group is None:
+            duplicate_group = f"text-group-{len(groups):03d}"
+            groups.append((duplicate_group, normalized))
+        result.append(candidate.model_copy(update={"duplicate_group": duplicate_group}))
+    return result
+
+
+def _candidate_score(candidate: ArticleTextCandidate) -> float:
+    score = min(candidate.char_count / 2000, 8.0) + candidate.paragraph_count * 1.5 + candidate.image_count * 2
+    if candidate.source in {"dom", "script_html", "rendered_dom"}:
+        score += 8
+    if candidate.source in _METADATA_SOURCES:
+        score -= 12
+    if candidate.paragraph_count < 2:
+        score -= 8
+    link_text = sum(len(_normalize_text(link.get_text(" ", strip=True))) for link in BeautifulSoup(candidate.html, "html.parser").find_all("a"))
+    if candidate.char_count and link_text / candidate.char_count > .35:
+        score -= 15
+    return score
+
+
+def _preview(candidate: ArticleTextCandidate) -> CandidatePreview:
+    text = candidate.text
+    midpoint = len(text) // 2
+    return CandidatePreview(id=candidate.id, source=candidate.source, selector_or_key=candidate.selector_or_key, char_count=candidate.char_count, paragraph_count=candidate.paragraph_count, image_count=candidate.image_count, title_context=candidate.title_context, beginning=text[:360], middle=text[max(0, midpoint - 180):midpoint + 180], ending=text[-360:])
+
+
+def _quality_ok(body: str) -> bool:
+    parsed = BeautifulSoup(body, "html.parser") if "<" in body else None
+    text = _normalize_text(parsed.get_text(" ", strip=True)) if parsed else _normalize_text(body)
+    paragraphs = ([node for node in parsed.find_all(["p", "h2", "h3", "li"]) if _normalize_text(node.get_text(" ", strip=True))] if parsed else [line for line in body.splitlines() if _normalize_text(line)])
+    if len(text) < 80 or len(paragraphs) < 2:
+        return False
+    text_density = len(text) / max(len(body), 1)
+    if text_density < .08:
+        return False
+    links = sum(len(_normalize_text(node.get_text(" ", strip=True))) for node in parsed.find_all("a")) if parsed else 0
+    if links / max(len(text), 1) > .35:
+        return False
+    paragraph_texts = [_normalize_text(node.get_text(" ", strip=True) if hasattr(node, "get_text") else str(node)) for node in paragraphs]
+    duplicate_ratio = 1 - len(set(paragraph_texts)) / max(len(paragraph_texts), 1)
+    return duplicate_ratio < .35
+
+
+def _merge_text_candidates(candidates: list[ArticleTextCandidate], selected_ids: list[str]) -> ArticleExtractionResult:
+    by_id = {candidate.id: candidate for candidate in candidates}
+    selected = [by_id[item] for item in selected_ids if item in by_id]
+    selected.sort(key=lambda item: (item.section_index, item.id))
+    chosen_groups: set[str] = set()
+    merged_paragraphs: list[str] = []
+    selected_html: list[str] = []
+    used_ids: list[str] = []
+    for candidate in selected:
+        if candidate.source in _METADATA_SOURCES and any(item.source not in _METADATA_SOURCES for item in selected):
+            continue
+        if candidate.duplicate_group and candidate.duplicate_group in chosen_groups:
+            continue
+        if candidate.duplicate_group:
+            chosen_groups.add(candidate.duplicate_group)
+        fragment = BeautifulSoup(candidate.html, "html.parser")
+        for node in fragment.find_all(["p", "h2", "h3", "li"]):
+            paragraph = _normalize_text(node.get_text(" ", strip=True))
+            if paragraph and not any(SequenceMatcher(None, paragraph, existing).ratio() >= .92 for existing in merged_paragraphs):
+                merged_paragraphs.append(paragraph)
+        selected_html.append(str(fragment))
+        used_ids.append(candidate.id)
+    body = "\n".join(merged_paragraphs)
+    used_candidates = [by_id[item] for item in used_ids]
+    method = "+".join(dict.fromkeys(item.source for item in used_candidates)) or "deterministic"
+    confidence = min(1.0, max((_candidate_score(item) for item in selected), default=0) / 20)
+    return ArticleExtractionResult(requested_url="", canonical_url="", effective_base_url="", extraction_method=method, extraction_confidence=confidence, selected_candidate_ids=used_ids, title=used_candidates[0].title_context if used_candidates else "未命名文章", body=body, selected_html="<article>" + "".join(selected_html) + "</article>")
+
+
+def _select_article_candidates(candidates: list[ArticleTextCandidate], title: str) -> tuple[ArticleExtractionResult, dict]:
+    diagnostics = {"candidate_total": len(candidates), "agent_sent": len(candidates), "agent_mode": "deterministic_fallback", "selected_candidate_ids": [], "fallback": True}
+    if not candidates:
+        return ArticleExtractionResult(requested_url="", canonical_url="", effective_base_url="", extraction_method="none", title=title, body=""), diagnostics
+    by_id = {candidate.id: candidate for candidate in candidates}
+    ranked = sorted(candidates, key=lambda item: (-_candidate_score(item), item.section_index, item.id))
+    selected_ids = []
+    for candidate in ranked:
+        selected_ids.append(candidate.id)
+        if _quality_ok(_merge_text_candidates(candidates, selected_ids).body):
+            break
+    provider = get_agent_provider("article")
+    if provider.model_name != "mock":
+        previews = [_preview(item).model_dump(mode="json") for item in candidates]
+        prompt = json.dumps({"task": "从已发现的正文候选中选择完整文章正文。只能返回候选 ID，不要生成正文或 URL。metadata 只能作为摘要辅助，不能替代完整正文。", "title": title, "candidates": previews, "output": {"selected_candidate_ids": ["candidate-id"], "confidence": "0..1", "reason": "short"}}, ensure_ascii=False)
+        for attempt in range(2):
+            try:
+                raw = provider.complete_json(prompt) if attempt == 0 else provider.complete(prompt + "\n上次响应无效，只返回完整 JSON。")
+                raw = re.sub(r"^```(?:json)?\\s*|\\s*```$", "", raw.strip(), flags=re.I).strip()
+                decision = json.loads(raw)
+                ids = decision.get("selected_candidate_ids")
+                if not isinstance(ids, list) or not ids or not all(item in by_id for item in ids):
+                    raise ValueError("正文 Agent 返回了未知或空候选 ID")
+                selected_ids = ids
+                diagnostics.update({"agent_mode": "success" if attempt == 0 else "retry_success", "fallback": False, "selected_candidate_ids": ids, "confidence": decision.get("confidence", 0), "reason": str(decision.get("reason", ""))[:400]})
+                break
+            except Exception as exc:
+                diagnostics.setdefault("agent_errors", []).append(f"{type(exc).__name__}: {exc}")
+    result = _merge_text_candidates(candidates, selected_ids)
+    result = result.model_copy(update={"title": title})
+    diagnostics["selected_candidate_ids"] = result.selected_candidate_ids
+    diagnostics["body_chars"] = len(result.body)
+    diagnostics["method"] = result.extraction_method
+    if not _quality_ok(result.body):
+        # Deterministic fallback is complete and independent of model output.
+        fallback_ids = []
+        for candidate in ranked:
+            if candidate.source in _METADATA_SOURCES and any(item.source not in _METADATA_SOURCES for item in ranked):
+                continue
+            fallback_ids.append(candidate.id)
+            trial = _merge_text_candidates(candidates, fallback_ids)
+            if _quality_ok(trial.body):
+                result = trial.model_copy(update={"title": title})
+                break
+        diagnostics["fallback"] = True
+        diagnostics["selected_candidate_ids"] = result.selected_candidate_ids
+        diagnostics["body_chars"] = len(result.body)
+        diagnostics["method"] = result.extraction_method
+    return result, diagnostics
+
+
 def _rendered_html(url: str) -> str:
     try:
         from playwright.sync_api import sync_playwright
@@ -169,62 +436,109 @@ def _rendered_html(url: str) -> str:
         raise ValueError("网页需要 JavaScript 渲染，但正文截图引擎不可用；请运行 make browser") from exc
 
 
-def capture_article_screenshots(url: str, project_dir: str | Path, start_index: int, count: int, diagnostics: dict | None = None, *, imported_html: str | None = None) -> list[ArticleImage]:
-    """Capture distinct 16:9 regions from the cleaned article body."""
+_SCREENSHOT_FONT_URL = "https://video-assistant.local/fonts/noto-sans-sc.ttf"
+
+
+def capture_article_screenshots(source_url: str, project_dir: str | Path, start_index: int, count: int, diagnostics: dict | None = None, *, selected_html: str = "", body: str = "", title: str = "") -> list[ArticleImage]:
+    """Capture distinct 16:9 regions from the already extracted article body.
+
+    This function deliberately never navigates to ``source_url``. A page may
+    allow the original HTTP fetch but reject Chromium with a 403, so screenshot
+    fallback renders the trusted extraction result locally instead.
+    """
     if count <= 0:
         return []
     if not chromium_available():
         raise ValueError("正文截图引擎尚未安装；请运行 make browser")
+    document, source, document_stats = _build_screenshot_document(selected_html, body, title)
+    if document_stats["cleaned_chars"] < 80:
+        raise ValueError("正文截图内容不足，无法生成本地排版")
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=1)
-            if imported_html is None:
-                page.route("**/*", _public_route)
-                page.goto(url, wait_until="networkidle", timeout=25_000)
-            else:
-                # Do not execute a third-party page. The imported DOM is reduced
-                # to a script-free article fragment before being rendered.
-                page.set_content(_clean_imported_article_document(imported_html, url), wait_until="domcontentloaded")
-            main = _article_locator(page)
-            if main is None:
-                raise ValueError("无法定位文章正文区域")
-            page.add_style_tag(content="header,nav,footer,aside,[role=banner],[role=navigation],.sidebar,.advert,.ads,.cookie,.cookie-banner{display:none!important}")
-            main.evaluate("""element => { document.querySelectorAll('body > *').forEach(node => { if (!node.contains(element) && node !== element) node.style.display = 'none'; }); element.style.margin = '0 auto'; }""")
+            _route_screenshot_assets(page)
+            page.set_content(document, wait_until="domcontentloaded")
+            page.evaluate("""async () => { await document.fonts.ready; }""")
+            main = page.locator("#video-assistant-article")
             box = main.bounding_box()
             if not box or box["width"] < 320 or box["height"] < 180:
-                raise ValueError("文章正文区域尺寸不足")
-            page_size = page.evaluate("() => ({scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight})")
-            crop_width = min(box["width"], box["height"] * 16 / 9, 1280, page_size["scrollWidth"])
-            crop_height = min(crop_width * 9 / 16, page_size["scrollHeight"])
+                raise ValueError("本地正文排版区域尺寸不足")
+            # Playwright rejects a clip ending on a fractional document edge.
+            # Use the floor of the rendered box, not scrollHeight's rounded-up
+            # integer, so `y + height` is always inside the screenshot surface.
+            page_size = page.evaluate("""() => {
+                const root = document.documentElement.getBoundingClientRect();
+                const body = document.body.getBoundingClientRect();
+                return {
+                    scrollWidth: Math.floor(Math.min(document.documentElement.scrollWidth, document.body.scrollWidth, root.width, body.width)),
+                    scrollHeight: Math.floor(Math.min(document.documentElement.scrollHeight, document.body.scrollHeight, root.height, body.height)),
+                };
+            }""")
+            crop_width = min(box["width"], 1280, page_size["scrollWidth"], page_size["scrollHeight"] * 16 / 9)
+            crop_height = crop_width * 9 / 16
             if crop_width < 320 or crop_height < 180:
                 raise ValueError("正文截图裁切区域尺寸不足")
             left = min(max(0, box["x"] + max(0, (box["width"] - crop_width) / 2)), max(0, page_size["scrollWidth"] - crop_width))
-            max_top = min(max(0, box["y"] + max(0, box["height"] - crop_height)), max(0, page_size["scrollHeight"] - crop_height))
+            # Chromium treats an edge-aligned clip as out of bounds when layout
+            # has fractional pixels, so retain one CSS pixel of headroom.
+            max_top = max(0, page_size["scrollHeight"] - crop_height - 1)
             output = Path(project_dir) / "article_downloads"
+            output.mkdir(parents=True, exist_ok=True)
             result: list[ArticleImage] = []
             hashes: list[int] = []
-            positions = [box["y"] + (max_top - box["y"]) * index / max(1, count - 1) for index in range(count)]
+            anchors = _screenshot_anchors(main, box, crop_height, max_top, count)
             if diagnostics is not None:
-                diagnostics.setdefault("screenshot_fallback", {}).update({"page_size": page_size, "article_box": box, "clips": [{"x": left, "y": top, "width": crop_width, "height": crop_height, "right": left + crop_width, "bottom": top + crop_height} for top in positions]})
-            for top in positions:
+                diagnostics.setdefault("screenshot_fallback", {}).update({
+                    "source": source,
+                    "network_navigation": False,
+                    **document_stats,
+                    "page_size": page_size,
+                    "article_box": box,
+                    "clips": [],
+                    "items": [],
+                })
+            for top, paragraph_index in anchors:
+                if len(result) >= count:
+                    break
                 target = output / f"screenshot-{len(result):03d}.jpg"
-                page.screenshot(path=str(target), type="jpeg", quality=88, clip={"x": left, "y": top, "width": crop_width, "height": crop_height})
-                _normalize_screenshot(target)
+                desired_top = min(max(0, top), max_top)
+                viewport_height = 720
+                max_scroll = max(0, page_size["scrollHeight"] - viewport_height)
+                scroll_top = min(max(0, desired_top - (viewport_height - crop_height) / 2), max_scroll)
+                crop_top = min(max(0, desired_top - scroll_top), viewport_height - crop_height)
+                clip = {"x": left, "y": scroll_top + crop_top, "width": crop_width, "height": crop_height}
+                if clip["x"] + clip["width"] > page_size["scrollWidth"] or clip["y"] + clip["height"] > page_size["scrollHeight"]:
+                    raise ValueError("正文截图裁切区域超出页面边界")
+                # Chromium's page-level clip fails beyond the first viewport for
+                # some `set_content()` documents. Scroll then crop the viewport
+                # bitmap locally, which keeps every coordinate inside 1280x720.
+                page.evaluate("top => window.scrollTo(0, top)", scroll_top)
+                page.screenshot(path=str(target), type="jpeg", quality=88)
+                _normalize_screenshot(target, crop=(left, crop_top, crop_width, crop_height))
                 digest = hashlib.sha256(target.read_bytes()).hexdigest()
                 perceptual = _perceptual_hash(target)
+                item = {"paragraph_index": paragraph_index, "sha256": digest, "perceptual_hash": f"{perceptual:016x}", "clip": {**clip, "right": left + crop_width, "bottom": top + crop_height}}
                 if any(_hamming_distance(perceptual, previous) <= 4 for previous in hashes):
                     target.unlink(missing_ok=True)
+                    item["status"] = "duplicate"
+                    if diagnostics is not None:
+                        diagnostics["screenshot_fallback"]["clips"].append(item["clip"])
+                        diagnostics["screenshot_fallback"]["items"].append(item)
                     continue
                 hashes.append(perceptual)
-                result.append(ArticleImage(id=f"article-{start_index + len(result):03d}", source_url=url, local_path=str(target), width=SCREENSHOT_SIZE[0], height=SCREENSHOT_SIZE[1], source_index=start_index + len(result), alt="文章正文截图", caption="", context="正文截图", sha256=digest))
+                item["status"] = "saved"
+                if diagnostics is not None:
+                    diagnostics["screenshot_fallback"]["clips"].append(item["clip"])
+                    diagnostics["screenshot_fallback"]["items"].append(item)
+                result.append(ArticleImage(id=f"article-{start_index + len(result):03d}", source_url=source_url, local_path=str(target), width=SCREENSHOT_SIZE[0], height=SCREENSHOT_SIZE[1], source_index=start_index + len(result), alt="文章正文截图", caption="", context="正文截图", sha256=digest))
             browser.close()
             if len(result) < count:
-                raise ValueError("正文截图内容重复，无法补足镜头")
+                raise ValueError(f"正文截图内容重复，尝试 {len(anchors)} 个段落位置后仅生成 {len(result)} 张")
             return result
     except Exception as exc:
-        raise ValueError(f"文章图片少于 4 张，且无法生成正文截图：{exc}") from exc
+        raise ValueError(f"本地正文截图失败：{exc}") from exc
 
 
 def chromium_available() -> bool:
@@ -235,41 +549,83 @@ def chromium_available() -> bool:
     return completed.returncode == 0 and "chromium-" in completed.stdout
 
 
-def _article_locator(page):
-    candidates = []
-    for selector in (".RichContent-inner", ".RichText", "article", "main", "[role=main]", ".article", ".article-content", ".post-content", ".entry-content", ".mw-parser-output"):
-        locator = page.locator(selector).first
-        try:
-            box = locator.bounding_box()
-            if box and box["width"] >= 320 and box["height"] >= 180:
-                candidates.append((box["width"] * box["height"], locator))
-        except Exception:
-            continue
-    return max(candidates, key=lambda item: item[0])[1] if candidates else None
+def _route_screenshot_assets(page) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    font_path = repo_root / "remotion" / "public" / "fonts" / "noto-sans-sc" / "NotoSansSC[wght].ttf"
+
+    def route(route) -> None:
+        if route.request.url == _SCREENSHOT_FONT_URL and font_path.is_file():
+            route.fulfill(path=str(font_path), content_type="font/ttf")
+        else:
+            route.abort()
+
+    page.route("**/*", route)
 
 
-def _clean_imported_article_document(imported_html: str, base_url: str) -> str:
-    """Build inert, local HTML for screenshot fallback from an imported DOM."""
-    soup = BeautifulSoup(imported_html, "html.parser")
-    for node in soup.select("script, iframe, object, embed, link, style, noscript, svg"):
+def _build_screenshot_document(selected_html: str, body: str, title: str) -> tuple[str, str, dict]:
+    """Build an inert local document from an extraction result, never page DOM."""
+    source = "selected_html" if selected_html.strip() else "extracted_body"
+    raw = selected_html if selected_html.strip() else "".join(f"<p>{html_escape.escape(part)}</p>" for part in _body_paragraphs(body))
+    soup = BeautifulSoup(raw, "html.parser")
+    raw_chars = len(soup.get_text(" ", strip=True))
+    for node in soup.select("script, iframe, object, embed, link, style, noscript, svg, img, picture, source, video, audio, form, input, button, select, textarea"):
         node.decompose()
     for node in soup.find_all(True):
         for attribute in list(node.attrs):
-            if attribute.lower().startswith("on") or attribute.lower() in {"src", "srcset", "data-src", "data-original"}:
+            if attribute.lower().startswith("on") or attribute.lower() in {"src", "srcset", "data-src", "data-original", "href", "action", "poster"}:
                 del node.attrs[attribute]
-    candidates = soup.select(".RichContent-inner, .RichText, article, main, [role=main], .article, .article-content, .post-content, .entry-content")
-    if not candidates:
-        candidates = [soup.body or soup]
-    fragment = max(candidates, key=lambda node: len(node.get_text(" ", strip=True)))
+    candidates = soup.select("article, main, [role=main]")
+    fragment = max(candidates, key=lambda node: len(node.get_text(" ", strip=True))) if candidates else (soup.body or soup)
     content = str(fragment)
-    safe_base = html_escape.escape(base_url, quote=True)
-    return f"""<!doctype html><html><head><base href=\"{safe_base}\"><meta charset=\"utf-8\"><style>
-      *{{box-sizing:border-box}} body{{margin:0;background:#fff;color:#171717;font:28px/1.65 -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif}} #video-assistant-article{{width:1120px;margin:0 auto;padding:56px 72px}} h1,h2,h3{{line-height:1.3;margin:0 0 24px}} p,li,pre,blockquote{{margin:0 0 22px}} pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f4f4;padding:20px}} img{{display:none!important}} a{{color:inherit;text-decoration:none}}
-    </style></head><body><article id=\"video-assistant-article\">{content}</article></body></html>"""
+    cleaned_text = fragment.get_text(" ", strip=True)
+    paragraph_count = len(fragment.find_all(["p", "li", "blockquote", "pre", "h2", "h3"]))
+    safe_title = html_escape.escape(title.strip())
+    document = f"""<!doctype html><html><head><meta charset=\"utf-8\"><style>
+      @font-face{{font-family:'Video Assistant Noto';src:url('{_SCREENSHOT_FONT_URL}') format('truetype');font-weight:100 900;font-display:block}}
+      *{{box-sizing:border-box}} html,body{{margin:0;min-height:720px;background:#fff;color:#171717}}
+      body{{font:28px/1.65 'Video Assistant Noto',sans-serif}} #video-assistant-article{{width:1120px;min-height:720px;margin:0 auto;padding:56px 72px}}
+      h1{{font-size:42px;line-height:1.3;margin:0 0 38px}} h2,h3{{line-height:1.3;margin:34px 0 20px}} p,li,pre,blockquote{{margin:0 0 22px}}
+      pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f4f4;padding:20px}} a{{color:inherit;text-decoration:none}}
+    </style></head><body><article id=\"video-assistant-article\">{f'<h1>{safe_title}</h1>' if safe_title else ''}{content}</article></body></html>"""
+    return document, source, {"raw_chars": raw_chars, "cleaned_chars": len(cleaned_text), "paragraph_count": paragraph_count}
 
 
-def _normalize_screenshot(path: Path) -> None:
+def _body_paragraphs(body: str) -> list[str]:
+    return [part.strip() for part in re.split(r"\n{2,}|(?<=[。！？.!?])\s+(?=[^\s])", body) if part.strip()]
+
+
+def _screenshot_anchors(main, box: dict, crop_height: float, max_top: float, count: int) -> list[tuple[float, int]]:
+    paragraph_boxes: list[tuple[float, int]] = []
+    locator = main.locator("p,li,blockquote,pre,h2,h3")
+    for index in range(locator.count()):
+        paragraph_box = locator.nth(index).bounding_box()
+        if paragraph_box:
+            # Keep a little context above a paragraph but do not pull an
+            # unrelated table of contents or preceding platform fragment into
+            # the screenshot window.
+            paragraph_boxes.append((min(max(0, paragraph_box["y"] - 32), max_top), index))
+    if not paragraph_boxes:
+        paragraph_boxes = [(min(max(0, box["y"]), max_top), -1)]
+    unique: list[tuple[float, int]] = []
+    for anchor in paragraph_boxes:
+        if not unique or abs(anchor[0] - unique[-1][0]) > 4:
+            unique.append(anchor)
+    primary_indices = sorted({round(index * (len(unique) - 1) / max(1, count - 1)) for index in range(min(count, len(unique)))})
+    primary = [unique[index] for index in primary_indices]
+    return primary + [anchor for anchor in unique if anchor not in primary]
+
+
+def _clean_imported_article_document(imported_html: str, base_url: str) -> str:
+    """Compatibility wrapper retained for callers that import browser HTML."""
+    document, _, _ = _build_screenshot_document(imported_html, "", "")
+    return document
+
+
+def _normalize_screenshot(path: Path, crop: tuple[float, float, float, float] | None = None) -> None:
     with Image.open(path).convert("RGB") as image:
+        if crop is not None:
+            left, top, width, height = crop
+            image = image.crop((round(left), round(top), round(left + width), round(top + height)))
         ImageOps.fit(image, SCREENSHOT_SIZE, Image.Resampling.LANCZOS, centering=(0.5, 0.5)).save(path, "JPEG", quality=90, optimize=True)
 
 
@@ -594,7 +950,7 @@ def download_selected_assets(candidates: list[AssetCandidate], decisions: list[A
 
 
 def log_asset_diagnostics(diagnostics: dict) -> None:
-    for label, key in (("Asset Discovery", "asset_discovery"), ("Rule Filter", "rule_filter"), ("Asset Agent", "asset_agent"), ("Downloader", "downloader"), ("Project Compile", "project_compile"), ("Screenshot Fallback", "screenshot_fallback")):
+    for label, key in (("Article Extraction", "article_extraction"), ("Asset Discovery", "asset_discovery"), ("Rule Filter", "rule_filter"), ("Asset Agent", "asset_agent"), ("Downloader", "downloader"), ("Project Compile", "project_compile"), ("Screenshot Fallback", "screenshot_fallback")):
         if key in diagnostics:
             logger.warning("[%s] %s", label, json.dumps(diagnostics[key], ensure_ascii=False, default=str))
 

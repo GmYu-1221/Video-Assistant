@@ -53,6 +53,46 @@ class ArticleBrief(BaseModel):
     mood: str = Field(default="informative", max_length=40)
 
 
+class ArticleTextCandidate(BaseModel):
+    id: str
+    source: str
+    selector_or_key: str = ""
+    text: str = ""
+    html: str = ""
+    title_context: str = ""
+    section_index: int = Field(default=0, ge=0)
+    char_count: int = Field(default=0, ge=0)
+    paragraph_count: int = Field(default=0, ge=0)
+    image_count: int = Field(default=0, ge=0)
+    duplicate_group: str | None = None
+
+
+class CandidatePreview(BaseModel):
+    id: str
+    source: str
+    selector_or_key: str = ""
+    char_count: int = Field(default=0, ge=0)
+    paragraph_count: int = Field(default=0, ge=0)
+    image_count: int = Field(default=0, ge=0)
+    title_context: str = ""
+    beginning: str = ""
+    middle: str = ""
+    ending: str = ""
+
+
+class ArticleExtractionResult(BaseModel):
+    requested_url: str
+    canonical_url: str
+    effective_base_url: str
+    extraction_method: str
+    extraction_confidence: float = Field(default=0.0, ge=0, le=1)
+    selected_candidate_ids: list[str] = Field(default_factory=list)
+    title: str
+    body: str
+    selected_html: str = ""
+    diagnostics: dict = Field(default_factory=dict)
+
+
 class ArticleImage(BaseModel):
     id: str
     source_url: str = Field(min_length=1, max_length=2048)

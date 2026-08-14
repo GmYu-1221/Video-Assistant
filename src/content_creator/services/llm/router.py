@@ -9,10 +9,15 @@ _AGENT_MODEL_ENV = {
     "remotion": "REMOTION_MODEL",
     "chat": "CHAT_MODEL",
     "asset": "ASSET_MODEL",
+    "article": "ARTICLE_MODEL",
 }
 
 
 def get_agent_provider(agent_name: str) -> LLMProvider:
     model_env = _AGENT_MODEL_ENV.get(agent_name.lower(), f"{agent_name.upper()}_MODEL")
-    model = get_env(model_env) or get_env("LLM_MODEL")
+    model = get_env(model_env)
+    if agent_name.lower() == "article":
+        model = model or get_env("ASSET_MODEL") or get_env("LLM_MODEL")
+    else:
+        model = model or get_env("LLM_MODEL")
     return get_provider(get_env("LLM_PROVIDER", "openai-compatible"), model)
