@@ -1,5 +1,5 @@
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from .transition import TransitionConfig
 from .color import RGBColor
 from .animation_plan import AnimationEffect
@@ -34,6 +34,21 @@ class AudioConfig(BaseModel):
     bpm: float = Field(default=120.0, gt=0)
 
 
+class VideoCopy(BaseModel):
+    """User-authored copy rendered in the persistent center-stage layout."""
+    headline: str = Field(default="", max_length=80)
+    subtitle: str = Field(default="", max_length=40)
+    body: str = Field(default="", max_length=400)
+
+    @field_validator("headline", "subtitle", "body")
+    @classmethod
+    def validate_line_count(cls, value: str, info) -> str:
+        limits = {"headline": 2, "subtitle": 2, "body": 8}
+        if len(value.splitlines() or [value]) > limits[info.field_name]:
+            raise ValueError(f"{info.field_name} exceeds {limits[info.field_name]} lines")
+        return value
+
+
 class TimelineItem(BaseModel):
     asset_id: str
     start_frame: int = Field(ge=0)
@@ -60,4 +75,5 @@ class VideoProject(BaseModel):
     audio: AudioConfig
     timeline: list[TimelineItem] = Field(min_length=1)
     output: VideoOutput
+    video_copy: VideoCopy = Field(default_factory=VideoCopy)
     visual_spec: VisualSpec | None = None

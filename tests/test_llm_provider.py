@@ -1,5 +1,7 @@
 import json
 
+from PIL import Image
+
 import httpx
 from openai import OpenAI
 
@@ -80,3 +82,21 @@ def test_provider_falls_back_when_gateway_does_not_support_json_mode():
     assert provider.complete_json("return JSON") == '{"operations": []}'
     assert requests[0]["response_format"] == {"type": "json_object"}
     assert "response_format" not in requests[1]
+
+
+def test_multimodal_provider_uses_gemini_asset_model_and_image_data(tmp_path):
+    thumbnail = tmp_path / "thumbnail.jpg"
+    Image.new("RGB", (32, 32), "#336699").save(thumbnail)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["model"] == "gemini-3.6-flash"
+        content = payload["messages"][0]["content"]
+        assert content[0] == {"type": "text", "text": "select assets"}
+        assert content[1]["type"] == "image_url"
+        assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"image_tags": []}'}}]})
+
+    client = OpenAI(api_key="test-key", base_url="https://gateway.example/v1", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    provider = OpenAICompatibleProvider(api_key="test-key", model_name="gemini-3.6-flash", client=client)
+    assert provider.complete_multimodal("select assets", [str(thumbnail)]) == '{"image_tags": []}'

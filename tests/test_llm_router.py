@@ -9,7 +9,9 @@ def test_agent_model_routing_uses_per_agent_environment(monkeypatch):
     monkeypatch.setenv("DIRECTOR_MODEL", "director-model")
     monkeypatch.setenv("REMOTION_MODEL", "remotion-model")
     monkeypatch.setenv("CHAT_MODEL", "chat-model")
+    monkeypatch.setenv("ASSET_MODEL", "gemini-3.6-flash")
 
     assert get_agent_provider("director").model_name == "director-model"
     assert get_agent_provider("remotion").model_name == "remotion-model"
     assert get_agent_provider("chat").model_name == "chat-model"
+    assert get_agent_provider("asset").model_name == "gemini-3.6-flash"

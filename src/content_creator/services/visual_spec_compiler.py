@@ -27,14 +27,25 @@ def expand_transition_preset(transition: TransitionSpec, incoming_layer_id: str)
         peak_frame = max(1, min(duration - 1, int(params.get("flash_peak_frame", max(1, duration // 3)))))
         tracks = [_track("transition-overlay", AnimatableProperty.overlay_opacity, [(0, 0, EasingType.linear), (peak_frame, peak, EasingType.linear), (duration, 0, EasingType.linear)])]
     elif transition.preset == TransitionPreset.flash_zoom_blur:
-        settle = max(1, min(duration, int(params.get("settle_frames", min(8, duration)))))
-        peak_frame = max(1, min(duration - 1, int(params.get("flash_peak_frame", max(1, duration // 3)))))
-        scale = min(3.0, max(0.5, float(params.get("incoming_scale", 1.14))))
+        settle = max(1, min(duration, int(params.get("settle_frames", min(7, duration)))))
+        peak_frame = max(1, min(duration - 1, int(params.get("flash_peak_frame", 2))))
+        scale = min(3.0, max(0.5, float(params.get("incoming_scale", 1.12))))
         blur = min(80.0, max(0.0, float(params.get("blur_px", 24))))
         peak = min(1.0, max(0.0, float(params.get("flash_peak", 0.95))))
         tracks = [
             _track(incoming_layer_id, AnimatableProperty.opacity, [(0, 0.35, EasingType.linear), (settle, 1, EasingType.ease_out_cubic)]),
             _track(incoming_layer_id, AnimatableProperty.scale, [(0, scale, EasingType.linear), (settle, 1, EasingType.ease_out_cubic)]),
+            _track(incoming_layer_id, AnimatableProperty.blur, [(0, blur, EasingType.linear), (settle, 0, EasingType.ease_out_cubic)]),
+            _track("transition-overlay", AnimatableProperty.overlay_opacity, [(0, 0, EasingType.linear), (peak_frame, peak, EasingType.linear), (duration, 0, EasingType.linear)]),
+        ]
+    elif transition.preset == TransitionPreset.vertical_stretch_blur:
+        settle = max(1, min(duration, int(params.get("settle_frames", min(7, duration)))))
+        peak_frame = max(1, min(duration - 1, int(params.get("flash_peak_frame", 2))))
+        blur = min(80.0, max(0.0, float(params.get("blur_px", 28))))
+        peak = min(1.0, max(0.0, float(params.get("flash_peak", 0.75))))
+        tracks = [
+            _track(incoming_layer_id, AnimatableProperty.opacity, [(0, 0.45, EasingType.linear), (settle, 1, EasingType.ease_out_cubic)]),
+            _track(incoming_layer_id, AnimatableProperty.scale_y, [(0, 1.12, EasingType.linear), (settle, 1, EasingType.ease_out_cubic)]),
             _track(incoming_layer_id, AnimatableProperty.blur, [(0, blur, EasingType.linear), (settle, 0, EasingType.ease_out_cubic)]),
             _track("transition-overlay", AnimatableProperty.overlay_opacity, [(0, 0, EasingType.linear), (peak_frame, peak, EasingType.linear), (duration, 0, EasingType.linear)]),
         ]

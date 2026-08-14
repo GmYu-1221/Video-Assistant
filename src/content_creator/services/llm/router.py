@@ -8,6 +8,7 @@ _AGENT_MODEL_ENV = {
     "director": "DIRECTOR_MODEL",
     "remotion": "REMOTION_MODEL",
     "chat": "CHAT_MODEL",
+    "asset": "ASSET_MODEL",
 }
 
 

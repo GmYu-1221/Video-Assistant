@@ -12,7 +12,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Test the configured LLM provider")
     parser.add_argument(
         "--agent",
-        choices=("director", "remotion", "chat"),
+        choices=("director", "remotion", "chat", "asset"),
         default="director",
         help="Agent model route to test (default: director)",
     )

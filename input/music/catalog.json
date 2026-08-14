@@ -1,0 +1,10 @@
+[
+  {
+    "id": "default",
+    "path": "input/bgm.wav",
+    "moods": ["informative", "tech", "news"],
+    "topics": [],
+    "energy": 0.55,
+    "license_note": "Project default track"
+  }
+]

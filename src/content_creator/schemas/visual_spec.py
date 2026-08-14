@@ -28,6 +28,7 @@ class EasingType(str, Enum):
 class AnimatableProperty(str, Enum):
     opacity = "opacity"
     scale = "transform.scale"
+    scale_y = "transform.scaleY"
     translate_x = "transform.translateX"
     translate_y = "transform.translateY"
     blur = "filter.blur"
@@ -39,6 +40,17 @@ class TransitionPreset(str, Enum):
     crossfade = "crossfade"
     white_flash = "white_flash"
     flash_zoom_blur = "flash_zoom_blur"
+    vertical_stretch_blur = "vertical_stretch_blur"
+
+
+class TextStyle(BaseModel):
+    color: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+    font_size: int = Field(ge=16, le=80)
+    line_height: float = Field(ge=1.0, le=2.0)
+    align: Literal["left", "center", "right"] = "center"
+    font_weight: int = Field(default=400, ge=100, le=900)
+    max_lines: int = Field(ge=1, le=12)
+    top_offset: int = Field(default=0, ge=0, le=540)
 
 
 class VisualSpecTransitionDecision(BaseModel):
@@ -57,6 +69,7 @@ class VisualSpecDecision(BaseModel):
 PROPERTY_LIMITS: dict[AnimatableProperty, tuple[float, float]] = {
     AnimatableProperty.opacity: (0, 1),
     AnimatableProperty.scale: (0.5, 3),
+    AnimatableProperty.scale_y: (0.5, 3),
     AnimatableProperty.translate_x: (-200, 200),
     AnimatableProperty.translate_y: (-200, 200),
     AnimatableProperty.blur: (0, 80),
@@ -110,7 +123,18 @@ class VisualLayer(BaseModel):
     region: str = Field(min_length=1)
     source: LayerSource = Field(default_factory=LayerSource)
     style: dict[str, Any] = Field(default_factory=dict)
+    text_style: TextStyle | None = None
     tracks: list[AnimationTrack] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_layer_style(self) -> "VisualLayer":
+        if self.type == LayerType.text and self.text_style is None:
+            raise ValueError("text layers require text_style")
+        if self.type != LayerType.text and self.text_style is not None:
+            raise ValueError("only text layers may define text_style")
+        if self.type == LayerType.text and self.style:
+            raise ValueError("text layers must use text_style instead of style")
+        return self
 
 
 class SceneSpec(BaseModel):

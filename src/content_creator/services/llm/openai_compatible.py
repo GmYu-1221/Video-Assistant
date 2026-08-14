@@ -1,3 +1,6 @@
+import base64
+from pathlib import Path
+
 from openai import OpenAI
 
 
@@ -28,6 +31,17 @@ class OpenAICompatibleProvider:
             return self._complete(prompt, response_format={"type": "json_object"})
         except Exception:
             return self._complete(prompt)
+
+    def complete_multimodal(self, prompt: str, image_paths: list[str]) -> str:
+        content: list[dict] = [{"type": "text", "text": prompt}]
+        for path in image_paths[:6]:
+            data = Path(path).read_bytes()
+            if len(data) > 2_000_000:
+                continue
+            encoded = base64.b64encode(data).decode("ascii")
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": "low"}})
+        response = self._client.chat.completions.create(model=self.model_name, messages=[{"role": "user", "content": content}], temperature=0, response_format={"type": "json_object"})
+        return response.choices[0].message.content or ""
 
     def _complete(self, prompt: str, **kwargs: object) -> str:
         response = self._client.chat.completions.create(

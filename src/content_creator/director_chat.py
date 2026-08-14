@@ -21,8 +21,9 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 
 from content_creator.agents.director_chat import format_plan, generate_plan, update_plan
-from content_creator.agents.remotion_agent import create_remotion_creative_plan
+from content_creator.agents.remotion_agent import create_remotion_creative_plan, create_visual_spec_decision
 from content_creator.agents.render_agent import compile_render_plan
+from content_creator.schemas import VideoCopy
 from content_creator.services.llm.router import get_agent_provider
 from content_creator.services.renderer import render_project
 from content_creator.sessions import ProjectSession, create_project_session, load_project_session
@@ -175,7 +176,8 @@ def _render(session: ProjectSession, preview: bool, on_progress: ProgressCallbac
         session, _ = generate_plan(session, on_progress=on_progress)
     assert session.current_storyboard is not None
     creative_plan = create_remotion_creative_plan(session.current_plan, on_progress=on_progress)
-    session.project = compile_render_plan(session.project, session.current_storyboard, creative_plan)
+    decision = create_visual_spec_decision(session.current_plan)
+    session.project = compile_render_plan(session.project, session.current_storyboard, creative_plan, visual_spec_decision=decision)
     repo_root = Path(__file__).resolve().parents[2]
     target = Path(session.preview_path if preview else session.final_video_path).resolve()
     result = render_project(session.project, repo_root / "remotion", target, preview=preview, on_progress=on_progress, quiet=True)
@@ -201,7 +203,36 @@ def _header(session: ProjectSession) -> None:
 
 
 def _help() -> None:
-    print("plan: 生成或重新生成 DirectorPlan\nshow: 查看当前方案；show json 输出 JSON\npreview: 用当前方案低分辨率预览渲染\nrender: 按原始尺寸渲染 final.mp4\nsave: 保存 session.json 和 director_plan.json\nquit: 保存并退出")
+    print("plan: 生成或重新生成 DirectorPlan\nshow: 查看当前方案和文案；show json 输出 JSON\n设置标题：内容\n设置副标题：内容\n设置正文：内容\n清空文案\npreview: 用当前方案低分辨率预览渲染\nrender: 按原始尺寸渲染 final.mp4\nsave: 保存 session.json 和 director_plan.json\nquit: 保存并退出")
+
+
+_COPY_COMMANDS = {
+    "设置标题：": "headline",
+    "设置标题:": "headline",
+    "设置副标题：": "subtitle",
+    "设置副标题:": "subtitle",
+    "设置正文：": "body",
+    "设置正文:": "body",
+}
+
+
+def _apply_copy_command(session: ProjectSession, text: str) -> str | None:
+    if text == "清空文案":
+        session.project.video_copy = VideoCopy()
+        session.dirty = True
+        session.save()
+        return "文案已清空。"
+    for prefix, field in _COPY_COMMANDS.items():
+        if text.startswith(prefix):
+            value = text[len(prefix):].strip()
+            try:
+                session.project.video_copy = VideoCopy.model_validate({**session.project.video_copy.model_dump(), field: value})
+            except ValueError as exc:
+                return f"文案未保存：{exc}"
+            session.dirty = True
+            session.save()
+            return f"已设置{ {'headline': '标题', 'subtitle': '副标题', 'body': '正文'}[field] }。"
+    return None
 
 
 def _cli_progress(message: str) -> None:
@@ -230,6 +261,10 @@ def dispatch_command(session: ProjectSession, text: str) -> tuple[ProjectSession
     if text in {"quit", "exit"}:
         session.save()
         return session, False
+    copy_response = _apply_copy_command(session, text)
+    if copy_response is not None:
+        print(copy_response)
+        return session, True
     if text == "help":
         _help()
     elif text == "plan":

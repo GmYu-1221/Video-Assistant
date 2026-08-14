@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from content_creator import director_chat
 from content_creator.director_chat import _render, create_prompt_session, dispatch_command, history_path
 from content_creator.sessions.project_session import ProjectSession
+from content_creator.schemas import VideoCopy
 
 
 def _session(tmp_path: Path) -> ProjectSession:
@@ -57,7 +58,8 @@ def test_director_render_uses_quiet_remotion_output(tmp_path, monkeypatch):
     )
     captured = {}
     monkeypatch.setattr(director_chat, "create_remotion_creative_plan", lambda *args, **kwargs: object())
-    monkeypatch.setattr(director_chat, "compile_render_plan", lambda project, *args: project)
+    monkeypatch.setattr(director_chat, "create_visual_spec_decision", lambda *args, **kwargs: object())
+    monkeypatch.setattr(director_chat, "compile_render_plan", lambda project, *args, **kwargs: project)
 
     def fake_render(*args, **kwargs):
         captured.update(kwargs)
@@ -66,3 +68,17 @@ def test_director_render_uses_quiet_remotion_output(tmp_path, monkeypatch):
     monkeypatch.setattr(director_chat, "render_project", fake_render)
     assert _render(session, preview=True) == target
     assert captured["quiet"] is True
+
+
+def test_copy_commands_persist_and_clear(tmp_path, monkeypatch):
+    session = _session(tmp_path)
+    session.project = SimpleNamespace(video_copy=VideoCopy())
+    saved = []
+    monkeypatch.setattr(ProjectSession, "save", lambda self: saved.append(True))
+    dispatch_command(session, "设置标题：新模型发布")
+    dispatch_command(session, "设置副标题: 参数与能力")
+    dispatch_command(session, "设置正文：这里是正文")
+    assert session.project.video_copy.model_dump() == {"headline": "新模型发布", "subtitle": "参数与能力", "body": "这里是正文"}
+    dispatch_command(session, "清空文案")
+    assert session.project.video_copy.model_dump() == {"headline": "", "subtitle": "", "body": ""}
+    assert len(saved) == 4

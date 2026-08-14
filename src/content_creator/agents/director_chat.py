@@ -187,7 +187,16 @@ def format_plan(session: ProjectSession, as_json: bool = False) -> str:
         return "当前还没有 DirectorPlan。输入 plan 生成初版方案。"
     if as_json:
         return session.current_plan.model_dump_json(indent=2)
+    copy = getattr(getattr(session, "project", None), "video_copy", None)
     lines: list[str] = []
+    if copy is not None:
+        lines.extend([
+            "视频文案",
+            f"标题: {copy.headline or '(未设置)'}",
+            f"副标题: {copy.subtitle or '(未设置)'}",
+            f"正文: {copy.body or '(未设置)'}",
+            "",
+        ])
     for index, item in enumerate(session.current_plan.timeline, 1):
         animation = item.creative_intent.description if item.creative_intent else "none"
         creative_transition = item.transition_intent.description if item.transition_intent else "none"
