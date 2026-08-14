@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import html as html_escape
 import ipaddress
 import json
 import logging
@@ -12,7 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
 
 import httpx
 import trafilatura
@@ -33,6 +34,7 @@ _SRCSET_PART = re.compile(r"^\s*(\S+)(?:\s+(\d+(?:\.\d+)?)([wx]))?")
 _DIRECT_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov"}
 _IMAGE_EXTENSIONS = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
 _UI_TOKEN = re.compile(r"(?:^|[-_/.])(icon|avatar|logo|wordmark|button|badge|lock|protection)(?:[-_/.]|$)", re.I)
+_UI_TEXT_TOKEN = re.compile(r"(?:用户.{0,12}主页|个人主页|头像|profile picture|author avatar)", re.I)
 
 
 class BrowserImportRequired(ValueError):
@@ -114,9 +116,28 @@ def parse_article_html(url: str, html: str, *, canonical_url: str | None = None,
     if len(extracted.strip()) < 80:
         raise ValueError("未能从网页提取足够的正文内容")
     title = _meta(soup, "og:title", "twitter:title") or (soup.title.get_text(strip=True) if soup.title else "未命名文章")
-    canonical = _meta(soup, "og:url") or canonical_url or url
+    canonical = _trusted_canonical_url(url, _meta(soup, "og:url") or canonical_url)
     site = _meta(soup, "og:site_name") or urlparse(canonical).hostname or ""
-    return ArticleBrief(url=url, canonical_url=canonical, site_name=site, author=_meta(soup, "author", "article:author"), published_at=_meta(soup, "article:published_time", "date"), title=title[:500], text=extracted[:50000]), soup
+    return ArticleBrief(url=url, requested_url=url, canonical_url=canonical, effective_base_url=url, site_name=site, author=_meta(soup, "author", "article:author"), published_at=_meta(soup, "article:published_time", "date"), title=title[:500], text=extracted[:50000]), soup
+
+
+def _trusted_canonical_url(requested_url: str, candidate: str | None) -> str:
+    """Accept canonical metadata only when it is a sane same-origin page hint."""
+    if not candidate:
+        return requested_url
+    requested = urlsplit(requested_url)
+    parsed = urlsplit(candidate)
+    invalid = (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or "undefined" in parsed.path.lower().split("/")
+        or parsed.hostname.lower() != (requested.hostname or "").lower()
+    )
+    if invalid:
+        return requested_url
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", parsed.query, ""))
 
 
 def _extract_article_text(html: str) -> tuple[str, BeautifulSoup]:
@@ -148,7 +169,7 @@ def _rendered_html(url: str) -> str:
         raise ValueError("网页需要 JavaScript 渲染，但正文截图引擎不可用；请运行 make browser") from exc
 
 
-def capture_article_screenshots(url: str, project_dir: str | Path, start_index: int, count: int, diagnostics: dict | None = None) -> list[ArticleImage]:
+def capture_article_screenshots(url: str, project_dir: str | Path, start_index: int, count: int, diagnostics: dict | None = None, *, imported_html: str | None = None) -> list[ArticleImage]:
     """Capture distinct 16:9 regions from the cleaned article body."""
     if count <= 0:
         return []
@@ -159,8 +180,13 @@ def capture_article_screenshots(url: str, project_dir: str | Path, start_index: 
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=1)
-            page.route("**/*", _public_route)
-            page.goto(url, wait_until="networkidle", timeout=25_000)
+            if imported_html is None:
+                page.route("**/*", _public_route)
+                page.goto(url, wait_until="networkidle", timeout=25_000)
+            else:
+                # Do not execute a third-party page. The imported DOM is reduced
+                # to a script-free article fragment before being rendered.
+                page.set_content(_clean_imported_article_document(imported_html, url), wait_until="domcontentloaded")
             main = _article_locator(page)
             if main is None:
                 raise ValueError("无法定位文章正文区域")
@@ -169,11 +195,13 @@ def capture_article_screenshots(url: str, project_dir: str | Path, start_index: 
             box = main.bounding_box()
             if not box or box["width"] < 320 or box["height"] < 180:
                 raise ValueError("文章正文区域尺寸不足")
-            crop_width = min(box["width"], box["height"] * 16 / 9, 1280)
-            crop_height = crop_width * 9 / 16
-            left = box["x"] + max(0, (box["width"] - crop_width) / 2)
-            max_top = box["y"] + max(0, box["height"] - crop_height)
             page_size = page.evaluate("() => ({scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight})")
+            crop_width = min(box["width"], box["height"] * 16 / 9, 1280, page_size["scrollWidth"])
+            crop_height = min(crop_width * 9 / 16, page_size["scrollHeight"])
+            if crop_width < 320 or crop_height < 180:
+                raise ValueError("正文截图裁切区域尺寸不足")
+            left = min(max(0, box["x"] + max(0, (box["width"] - crop_width) / 2)), max(0, page_size["scrollWidth"] - crop_width))
+            max_top = min(max(0, box["y"] + max(0, box["height"] - crop_height)), max(0, page_size["scrollHeight"] - crop_height))
             output = Path(project_dir) / "article_downloads"
             result: list[ArticleImage] = []
             hashes: list[int] = []
@@ -209,7 +237,7 @@ def chromium_available() -> bool:
 
 def _article_locator(page):
     candidates = []
-    for selector in ("article", "main", "[role=main]", ".article", ".article-content", ".post-content", ".entry-content", ".mw-parser-output"):
+    for selector in (".RichContent-inner", ".RichText", "article", "main", "[role=main]", ".article", ".article-content", ".post-content", ".entry-content", ".mw-parser-output"):
         locator = page.locator(selector).first
         try:
             box = locator.bounding_box()
@@ -218,6 +246,26 @@ def _article_locator(page):
         except Exception:
             continue
     return max(candidates, key=lambda item: item[0])[1] if candidates else None
+
+
+def _clean_imported_article_document(imported_html: str, base_url: str) -> str:
+    """Build inert, local HTML for screenshot fallback from an imported DOM."""
+    soup = BeautifulSoup(imported_html, "html.parser")
+    for node in soup.select("script, iframe, object, embed, link, style, noscript, svg"):
+        node.decompose()
+    for node in soup.find_all(True):
+        for attribute in list(node.attrs):
+            if attribute.lower().startswith("on") or attribute.lower() in {"src", "srcset", "data-src", "data-original"}:
+                del node.attrs[attribute]
+    candidates = soup.select(".RichContent-inner, .RichText, article, main, [role=main], .article, .article-content, .post-content, .entry-content")
+    if not candidates:
+        candidates = [soup.body or soup]
+    fragment = max(candidates, key=lambda node: len(node.get_text(" ", strip=True)))
+    content = str(fragment)
+    safe_base = html_escape.escape(base_url, quote=True)
+    return f"""<!doctype html><html><head><base href=\"{safe_base}\"><meta charset=\"utf-8\"><style>
+      *{{box-sizing:border-box}} body{{margin:0;background:#fff;color:#171717;font:28px/1.65 -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif}} #video-assistant-article{{width:1120px;margin:0 auto;padding:56px 72px}} h1,h2,h3{{line-height:1.3;margin:0 0 24px}} p,li,pre,blockquote{{margin:0 0 22px}} pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f4f4;padding:20px}} img{{display:none!important}} a{{color:inherit;text-decoration:none}}
+    </style></head><body><article id=\"video-assistant-article\">{content}</article></body></html>"""
 
 
 def _normalize_screenshot(path: Path) -> None:
@@ -257,23 +305,22 @@ def discover_asset_candidates(soup: BeautifulSoup, brief: ArticleBrief) -> tuple
     counts = {"html_img": len(soup.find_all("img")), "src": 0, "srcset": 0, "picture_source": 0, "og_image": 0, "svg": 0, "video": 0}
     raw: list[dict] = []
 
-    def context_for(node, index: int) -> tuple[str, str, str]:
+    def context_for(node, index: int) -> tuple[str, str, str, bool]:
         parent = node.find_parent(["figure", "article", "section", "p", "div"])
         nearby = parent.get_text(" ", strip=True)[:2000] if parent else ""
         figure = node.find_parent("figure")
         caption_node = figure.find("figcaption") if figure else None
-        return str(node.get("alt", ""))[:600], (caption_node.get_text(" ", strip=True) if caption_node else "")[:1000], nearby
+        in_article = bool(node.find_parent(["article", "main"])) or bool(node.find_parent(class_=re.compile(r"(?:RichContent|RichText|article|post|entry|content)", re.I)))
+        return str(node.get("alt", ""))[:600], (caption_node.get_text(" ", strip=True) if caption_node else "")[:1000], nearby, in_article
 
     def add(value: object, source_type: str, node, index: int, kind: AssetKind = AssetKind.image) -> None:
         if not value or str(value).startswith("data:"):
             return
         absolute = urljoin(brief.canonical_url, str(value))
-        alt, caption, nearby = context_for(node, index)
-        raw.append({"url": absolute, "source_type": source_type, "alt": alt, "caption": caption, "nearby": nearby, "index": index, "kind": kind})
+        alt, caption, nearby, in_article = context_for(node, index)
+        raw.append({"url": absolute, "source_type": source_type, "alt": alt, "caption": caption, "nearby": nearby, "in_article": in_article, "index": index, "kind": kind})
 
     for index, image in enumerate(soup.find_all("img")):
-        if image.get("src"):
-            counts["src"] += 1
         if image.get("srcset"):
             counts["srcset"] += 1
             sources = _srcset_urls(str(image["srcset"]))
@@ -285,11 +332,12 @@ def discover_asset_candidates(soup: BeautifulSoup, brief: ArticleBrief) -> tuple
                 source = str(image["src"])
             if source:
                 add(source, "srcset", image, index)
-        else:
-            for attribute, source_type in (("data-src", "data-src"), ("data-original", "data-original"), ("src", "src")):
-                if image.get(attribute):
-                    add(image.get(attribute), source_type, image, index)
-                    break
+        # Keep every declared source. The high-quality `data-original` URL is
+        # often present alongside a small `srcset` avatar or placeholder.
+        for attribute, source_type in (("data-original", "data-original"), ("data-src", "data-src"), ("src", "src")):
+            if image.get(attribute):
+                counts["src"] += int(attribute == "src")
+                add(image.get(attribute), source_type, image, index)
 
     for index, source in enumerate(soup.select("picture source[src], picture source[srcset]"), start=counts["html_img"]):
         counts["picture_source"] += 1
@@ -325,6 +373,8 @@ def discover_asset_candidates(soup: BeautifulSoup, brief: ArticleBrief) -> tuple
         if key in merged:
             if item["source_type"] not in merged[key].source_types:
                 merged[key].source_types.append(item["source_type"])
+            if item["in_article"] and "article-content" not in merged[key].source_types:
+                merged[key].source_types.append("article-content")
             continue
         suffix = Path(urlparse(item["url"]).path).suffix.lower()
         # Wikimedia raster thumbnails retain the original SVG name in their
@@ -333,7 +383,10 @@ def discover_asset_candidates(soup: BeautifulSoup, brief: ArticleBrief) -> tuple
         is_svg = suffix == ".svg"
         if is_svg:
             counts["svg"] += 1
-        merged[key] = AssetCandidate(id=f"asset-{len(merged):03d}", kind=item["kind"], source_url=item["url"], page_url=brief.canonical_url, section_index=item["index"], original_index=item["index"], source_types=[item["source_type"]], alt=item["alt"], caption=item["caption"], nearby_text=item["nearby"], mime_type=mimetypes.guess_type(item["url"])[0] or "", is_svg=is_svg)
+        source_types = [item["source_type"]]
+        if item["in_article"]:
+            source_types.append("article-content")
+        merged[key] = AssetCandidate(id=f"asset-{len(merged):03d}", kind=item["kind"], source_url=item["url"], page_url=brief.effective_base_url or brief.url, section_index=item["index"], original_index=item["index"], source_types=source_types, alt=item["alt"], caption=item["caption"], nearby_text=item["nearby"], mime_type=mimetypes.guess_type(item["url"])[0] or "", is_svg=is_svg)
     diagnostics = {"asset_discovery": {**counts, "before_dedup": len(raw), "after_dedup": len(merged), "embedded_video": sum(item.kind == AssetKind.embedded_video for item in merged.values())}}
     return list(merged.values()), diagnostics
 
@@ -348,7 +401,7 @@ def basic_asset_filter(candidates: list[AssetCandidate], diagnostics: dict) -> l
         suffix = Path(parsed.path).suffix.lower()
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             reason = "other"
-        elif candidate.kind == AssetKind.image and _UI_TOKEN.search(f"{parsed.path} {candidate.alt}"):
+        elif candidate.kind == AssetKind.image and (_UI_TOKEN.search(f"{parsed.path} {candidate.alt}") or _UI_TEXT_TOKEN.search(f"{candidate.alt} {candidate.caption}")):
             reason = "icon_avatar_logo"
         elif candidate.kind == AssetKind.video and suffix and suffix not in _DIRECT_VIDEO_EXTENSIONS:
             reason = "format"
@@ -363,19 +416,47 @@ def basic_asset_filter(candidates: list[AssetCandidate], diagnostics: dict) -> l
     return kept
 
 
-def _local_asset_decisions(candidates: list[AssetCandidate]) -> list[AssetDecision]:
-    def priority(item: AssetCandidate) -> tuple[bool, bool, bool, int]:
-        suffix = Path(urlparse(item.source_url).path).suffix.lower()
-        return (item.kind != AssetKind.image, item.is_svg, suffix == ".gif", item.original_index)
+def _candidate_preference(item: AssetCandidate) -> float:
+    """Deterministic editorial ranking when semantic selection is unavailable."""
+    score = 0.0
+    if item.kind == AssetKind.image:
+        score += 100
+    if "article-content" in item.source_types:
+        score += 50
+    if "data-original" in item.source_types:
+        score += 45
+    if item.caption:
+        score += 20
+    if item.nearby_text:
+        score += 8
+    if "srcset" in item.source_types and "data-original" not in item.source_types:
+        score -= 15
+    if item.is_svg:
+        score -= 8
+    return score
 
-    ordered = sorted(candidates, key=priority)
+
+def _ordered_candidate_pool(candidates: list[AssetCandidate], decisions: list[AssetDecision]) -> list[AssetCandidate]:
+    by_id = {item.asset_id: item for item in decisions}
+    return sorted(candidates, key=lambda candidate: (
+        not by_id.get(candidate.id, AssetDecision(asset_id=candidate.id)).selected,
+        -by_id.get(candidate.id, AssetDecision(asset_id=candidate.id)).relevance,
+        -_candidate_preference(candidate),
+        candidate.original_index,
+        candidate.id,
+    ))
+
+
+def _local_asset_decisions(candidates: list[AssetCandidate]) -> list[AssetDecision]:
+    ordered = sorted(candidates, key=lambda item: (-_candidate_preference(item), item.original_index, item.id))
     chosen = {item.id for item in ordered[:6]}
-    return [AssetDecision(asset_id=item.id, selected=item.id in chosen, role=ImageRole.hero if item.id in chosen and item.original_index == min((choice.original_index for choice in ordered[:6]), default=0) else ImageRole.evidence, topics=item.alt.split()[:4], relevance=0.8 if item.id in chosen else 0.1, visual_quality=0.6, reason="deterministic article-order fallback") for item in candidates]
+    first_id = ordered[0].id if ordered else ""
+    return [AssetDecision(asset_id=item.id, selected=item.id in chosen, role=ImageRole.hero if item.id == first_id else ImageRole.evidence, topics=item.alt.split()[:4], relevance=max(.05, min(.95, .25 + _candidate_preference(item) / 180)) if item.kind == AssetKind.image else .05, visual_quality=.6, reason="deterministic candidate-pool fallback") for item in candidates]
 
 
 def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidate], diagnostics: dict) -> list[AssetDecision]:
     fallback = _local_asset_decisions(candidates)
-    diagnostics["asset_agent"] = {"sent": len(candidates), "mode": "local_fallback", "selected": 0, "decisions": []}
+    diagnostics["asset_agent"] = {"sent": len(candidates), "mode": "local_fallback", "selected": 0, "decisions": [], "attempts": []}
     if not candidates:
         return fallback
     provider = get_agent_provider("asset")
@@ -383,16 +464,27 @@ def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidat
         decisions = fallback
     else:
         prompt = json.dumps({"task": "选择与文章最相关、适合短视频的网页素材。只能引用 input asset_id；不得生成 URL。返回 JSON。", "article": {"title": brief.title, "text": brief.text[:9000]}, "assets": [item.model_dump(mode="json") for item in candidates], "output": {"asset_decisions": [{"asset_id": "input asset id", "selected": True, "role": "hero|overview|evidence|data|diagram|demo|product|quote|result|portrait|brand|other|irrelevant", "topics": ["string"], "entities": ["string"], "relevance": "0..1", "visual_quality": "0..1", "reason": "short reason"}]}}, ensure_ascii=False)
-        try:
-            raw = provider.complete_json(prompt)
-            parsed = [AssetDecision.model_validate(item) for item in json.loads(raw)["asset_decisions"]]
-            if {item.asset_id for item in parsed} != {item.id for item in candidates}:
-                raise ValueError("asset agent returned incomplete or unknown asset IDs")
-            decisions = parsed
-            diagnostics["asset_agent"]["mode"] = "text_fallback"
-        except Exception as exc:
-            diagnostics["asset_agent"]["error"] = f"{type(exc).__name__}: {exc}"
-            decisions = fallback
+        decisions = fallback
+        for attempt in range(2):
+            try:
+                instruction = prompt if attempt == 0 else prompt + "\n上一次响应无效。必须只返回一个完整 JSON object，不要 Markdown、说明文字或省略任何 asset_id。"
+                raw = provider.complete_json(instruction) if attempt == 0 else provider.complete(instruction)
+                raw = raw.strip()
+                if raw.startswith("```"):
+                    raw = re.sub(r"^```(?:json)?\\s*|\\s*```$", "", raw, flags=re.I).strip()
+                if not raw:
+                    raise ValueError("empty_model_response")
+                parsed = [AssetDecision.model_validate(item) for item in json.loads(raw)["asset_decisions"]]
+                if {item.asset_id for item in parsed} != {item.id for item in candidates}:
+                    raise ValueError("asset agent returned incomplete or unknown asset IDs")
+                decisions = parsed
+                diagnostics["asset_agent"]["mode"] = "text_success" if attempt == 0 else "text_retry_success"
+                diagnostics["asset_agent"]["attempts"].append({"attempt": attempt + 1, "status": "success"})
+                break
+            except Exception as exc:
+                diagnostics["asset_agent"]["attempts"].append({"attempt": attempt + 1, "status": "failed", "error": f"{type(exc).__name__}: {exc}"})
+        if decisions is fallback:
+            diagnostics["asset_agent"]["error"] = diagnostics["asset_agent"]["attempts"][-1]["error"]
     diagnostics["asset_agent"].update({"selected": sum(item.selected for item in decisions), "decisions": [item.model_dump(mode="json") for item in decisions if item.selected]})
     return decisions
 
@@ -419,18 +511,20 @@ def _download_with_retry(client: httpx.Client, url: str, limit: int) -> httpx.Re
     raise RuntimeError("unreachable")
 
 
-def download_selected_assets(candidates: list[AssetCandidate], decisions: list[AssetDecision], project_dir: str | Path, diagnostics: dict, *, browser_imported: bool = False) -> list[ArticleImage]:
+def download_selected_assets(candidates: list[AssetCandidate], decisions: list[AssetDecision], project_dir: str | Path, diagnostics: dict, *, browser_imported: bool = False, max_renderable: int = 6) -> list[ArticleImage]:
     by_id = {candidate.id: candidate for candidate in candidates}
-    selected = [by_id[item.asset_id] for item in decisions if item.selected and item.asset_id in by_id]
+    candidate_pool = _ordered_candidate_pool(candidates, decisions)
     source_dir = Path(project_dir) / "materials" / "images"
     source_dir.mkdir(parents=True, exist_ok=True)
-    stats = {"attempted": 0, "succeeded": 0, "failed": 0, "browser_asset_required": 0, "svg": 0, "jpeg": 0, "png": 0, "webp": 0, "other": 0, "items": []}
+    stats = {"attempted": 0, "succeeded": 0, "failed": 0, "browser_asset_required": 0, "svg": 0, "jpeg": 0, "png": 0, "webp": 0, "other": 0, "items": [], "candidate_pool_total": len(candidate_pool), "selected_preference_count": sum(item.selected for item in decisions), "candidate_pool_exhausted": False, "renderable_count": 0}
     assets: list[ArticleImage] = []
     hashes: set[str] = set()
     perceptual_hashes: list[int] = []
     headers = {"User-Agent": "Mozilla/5.0 (compatible; VideoAssistant/1.0)", "Accept": "image/avif,image/webp,image/*,video/*;q=0.8,*/*;q=0.1"}
     with httpx.Client(headers=headers, timeout=httpx.Timeout(20, connect=8), trust_env=True) as client:
-        for index, item in enumerate(selected):
+        for index, item in enumerate(candidate_pool):
+            if len(assets) >= max_renderable:
+                break
             stats["attempted"] += 1
             target: Path | None = None
             record = {"asset_id": item.id, "source_url": item.source_url, "status": "failed"}
@@ -493,6 +587,8 @@ def download_selected_assets(candidates: list[AssetCandidate], decisions: list[A
                 record["error"] = str(exc)
                 stats["failed"] += 1
             stats["items"].append(record)
+    stats["renderable_count"] = len(assets)
+    stats["candidate_pool_exhausted"] = len(assets) < max_renderable and stats["attempted"] == len(candidate_pool)
     diagnostics["downloader"] = stats
     return assets
 

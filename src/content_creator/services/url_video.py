@@ -58,21 +58,35 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     progress("下载已选素材")
     article_images = download_selected_assets(filtered, decisions, project_dir, diagnostics, browser_imported=imported_html is not None)
     persist_manifest(filtered, decisions)
-    protected_assets = diagnostics.get("downloader", {}).get("browser_asset_required", 0)
+    downloader = diagnostics.get("downloader", {})
+    protected_assets = downloader.get("browser_asset_required", 0)
+    summary = {
+        "discovered": diagnostics.get("asset_discovery", {}).get("after_dedup", 0),
+        "rule_filtered_remaining": diagnostics.get("rule_filter", {}).get("remaining", 0),
+        "agent_preferred": diagnostics.get("asset_agent", {}).get("selected", 0),
+        "downloaded": len(article_images),
+        "candidate_pool_total": downloader.get("candidate_pool_total", 0),
+        "candidate_pool_exhausted": downloader.get("candidate_pool_exhausted", False),
+    }
+    diagnostics["asset_summary"] = summary
+    progress(f"素材状态：发现 {summary['discovered']} 个，优先选择 {summary['agent_preferred']} 个，成功下载 {summary['downloaded']} 个")
     if protected_assets:
         progress(f"已跳过 {protected_assets} 个浏览器受保护素材")
-    if len(article_images) < 4:
+    if len(article_images) < 4 and downloader.get("candidate_pool_exhausted"):
         diagnostics["screenshot_fallback"] = {"triggered": True, "reason": "selected_and_downloaded_images_below_minimum", "project_images_before_fallback": len(article_images), "missing": 4 - len(article_images)}
         persist_diagnostics()
         progress("准备正文截图引擎" if not chromium_available() else "补充正文截图")
         try:
-            article_images.extend(capture_article_screenshots(brief.canonical_url, project_dir, len(article_images), 4 - len(article_images), diagnostics))
+            article_images.extend(capture_article_screenshots(brief.effective_base_url or brief.url, project_dir, len(article_images), 4 - len(article_images), diagnostics, imported_html=imported_html))
         except Exception as exc:
             diagnostics["screenshot_fallback"]["error"] = str(exc)
             persist_diagnostics()
-            if imported_html is not None:
-                raise ValueError("正文已由浏览器导入，但服务器无法获取足够可渲染素材") from exc
-            raise
+            details = f"发现 {summary['discovered']} 个候选、优先选择 {summary['agent_preferred']} 个、成功下载 {len(article_images)} 个"
+            raise ValueError(f"{details}；正文截图兜底失败：{exc}") from exc
+    elif len(article_images) < 4:
+        # This is intentionally a hard invariant. A screenshot must never hide
+        # a candidate-pool truncation or an interrupted downloader.
+        raise ValueError("候选素材池尚未耗尽，不能执行正文截图兜底")
     else:
         diagnostics["screenshot_fallback"] = {"triggered": False, "reason": "not_needed", "project_images_before_fallback": len(article_images), "missing": 0}
     progress("分析图片与生成文案")
@@ -80,7 +94,12 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         # Browser import only supplied page HTML. Preserve the first Agent
         # decision set and avoid a second model call to compensate for assets
         # that the server is not authorized to download.
-        decisions_by_url = {candidate.source_url: decision for candidate, decision in zip(filtered, decisions) if decision.selected}
+        candidates_by_id = {candidate.id: candidate for candidate in filtered}
+        decisions_by_url = {
+            candidates_by_id[decision.asset_id].source_url: decision
+            for decision in decisions
+            if decision.selected and decision.asset_id in candidates_by_id
+        }
         tags = []
         for image in article_images:
             decision = decisions_by_url.get(image.source_url)

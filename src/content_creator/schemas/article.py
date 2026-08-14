@@ -37,8 +37,12 @@ class TransitionRelation(str, Enum):
 
 
 class ArticleBrief(BaseModel):
+    # `url` is kept for compatibility with existing projects. The explicit
+    # fields preserve the submitted URL identity separately from page hints.
     url: str = Field(min_length=1, max_length=2048)
+    requested_url: str = Field(default="", max_length=2048)
     canonical_url: str = Field(min_length=1, max_length=2048)
+    effective_base_url: str = Field(default="", max_length=2048)
     site_name: str = Field(default="", max_length=160)
     author: str = Field(default="", max_length=160)
     published_at: str = Field(default="", max_length=80)
