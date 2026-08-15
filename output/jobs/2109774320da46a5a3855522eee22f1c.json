@@ -1,0 +1,181 @@
+{
+  "id": "2109774320da46a5a3855522eee22f1c",
+  "url": "https://github.com/deepseek-ai/DeepSeek-V3",
+  "status": "completed",
+  "stage": "已记录你的字体与字幕偏好",
+  "error": null,
+  "project_dir": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_133713_037623",
+  "video_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_133713_037623/versions/v003/final.mp4",
+  "browser_import_status": null,
+  "browser_import_url": "javascript:(()=>{const f=document.createElement('form');f.method='POST';f.action=\"http://127.0.0.1:8000/api/browser-import\";f.target='_blank';for(const [k,v] of [['token',\"uKTfGQmfuQxFXH1igBRBvH6723BoMGrJW8_moCqQd4I\"],['source_url',location.href],['html',document.documentElement.outerHTML]]){const i=document.createElement('input');i.type='hidden';i.name=k;i.value=v;f.appendChild(i)}document.body.appendChild(f);f.submit();setTimeout(()=>f.remove(),1000)})()",
+  "events": [
+    {
+      "status": "running",
+      "stage": "抓取文章"
+    },
+    {
+      "status": "running",
+      "stage": "发现网页素材"
+    },
+    {
+      "status": "running",
+      "stage": "过滤网页素材"
+    },
+    {
+      "status": "running",
+      "stage": "分析网页素材"
+    },
+    {
+      "status": "running",
+      "stage": "下载已选素材"
+    },
+    {
+      "status": "running",
+      "stage": "素材状态：发现 12 个，优先选择 8 个，成功下载 3 个"
+    },
+    {
+      "status": "running",
+      "stage": "补充正文截图"
+    },
+    {
+      "status": "running",
+      "stage": "分析图片与生成文案"
+    },
+    {
+      "status": "running",
+      "stage": "翻译中文说明文案"
+    },
+    {
+      "status": "running",
+      "stage": "选择背景音乐"
+    },
+    {
+      "status": "running",
+      "stage": "Director 编排连续性状态"
+    },
+    {
+      "status": "running",
+      "stage": "编排动态布局视频"
+    },
+    {
+      "status": "running",
+      "stage": "渲染视频"
+    },
+    {
+      "status": "running",
+      "stage": "正式渲染开始..."
+    },
+    {
+      "status": "running",
+      "stage": "正在打包 Remotion 项目..."
+    },
+    {
+      "status": "running",
+      "stage": "正在渲染并编码视频..."
+    },
+    {
+      "status": "running",
+      "stage": "视频渲染已完成"
+    },
+    {
+      "status": "completed",
+      "stage": "已完成"
+    },
+    {
+      "status": "revising",
+      "stage": "根据反馈生成字幕版本 v002"
+    },
+    {
+      "status": "revising",
+      "stage": "Layout Director 正在重新设计字体与字幕"
+    },
+    {
+      "status": "revising",
+      "stage": "渲染字幕版本 v002"
+    },
+    {
+      "status": "revising",
+      "stage": "正式渲染开始..."
+    },
+    {
+      "status": "revising",
+      "stage": "正在打包 Remotion 项目..."
+    },
+    {
+      "status": "revising",
+      "stage": "正在渲染并编码视频..."
+    },
+    {
+      "status": "revising",
+      "stage": "视频渲染已完成"
+    },
+    {
+      "status": "completed",
+      "stage": "字幕版本 v002 已完成"
+    },
+    {
+      "status": "revising",
+      "stage": "根据反馈生成字幕版本 v003"
+    },
+    {
+      "status": "revising",
+      "stage": "Layout Director 正在重新设计字体与字幕"
+    },
+    {
+      "status": "revising",
+      "stage": "渲染字幕版本 v003"
+    },
+    {
+      "status": "revising",
+      "stage": "正式渲染开始..."
+    },
+    {
+      "status": "revising",
+      "stage": "正在打包 Remotion 项目..."
+    },
+    {
+      "status": "revising",
+      "stage": "正在渲染并编码视频..."
+    },
+    {
+      "status": "revising",
+      "stage": "视频渲染已完成"
+    },
+    {
+      "status": "completed",
+      "stage": "字幕版本 v003 已完成"
+    },
+    {
+      "status": "completed",
+      "stage": "已记录你的字体与字幕偏好"
+    }
+  ],
+  "versions": [
+    {
+      "id": "v001",
+      "video_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_133713_037623/versions/v001/final.mp4",
+      "project_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_133713_037623/versions/v001/project.json",
+      "created_at": "2026-08-15T05:42:33.749524+00:00",
+      "source_version": null,
+      "feedback_id": null
+    },
+    {
+      "id": "v002",
+      "video_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_133713_037623/versions/v002/final.mp4",
+      "project_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_133713_037623/versions/v002/project.json",
+      "created_at": "2026-08-15T05:46:58.589680+00:00",
+      "source_version": "v001",
+      "feedback_id": "fee220aea6904808b7efe27a53aefc7b"
+    },
+    {
+      "id": "v003",
+      "video_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_133713_037623/versions/v003/final.mp4",
+      "project_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_133713_037623/versions/v003/project.json",
+      "created_at": "2026-08-15T05:52:16.965524+00:00",
+      "source_version": "v002",
+      "feedback_id": "84a70b86d82a46cea4b5b4f814f47a6c"
+    }
+  ],
+  "current_version": "v003",
+  "feedback_status": "recorded"
+}

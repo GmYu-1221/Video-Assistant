@@ -53,6 +53,16 @@ class ArticleBrief(BaseModel):
     mood: str = Field(default="informative", max_length=40)
 
 
+class LocalizedArticleCopy(BaseModel):
+    language: str = "zh-CN"
+    title: str
+    summary: str = ""
+    paragraphs: list[str] = Field(default_factory=list)
+    source_paragraph_indices: list[int] = Field(default_factory=list)
+    translation_mode: str = "passthrough"
+    chinese_text_ratio: float = Field(default=0.0, ge=0, le=1)
+
+
 class ArticleTextCandidate(BaseModel):
     id: str
     source: str
@@ -132,6 +142,7 @@ class AssetDecision(BaseModel):
     entities: list[str] = Field(default_factory=list, max_length=12)
     relevance: float = Field(default=0.0, ge=0, le=1)
     visual_quality: float = Field(default=0.5, ge=0, le=1)
+    title_match_score: float = Field(default=0.0, ge=0, le=1)
     reason: str = Field(default="", max_length=400)
 
 

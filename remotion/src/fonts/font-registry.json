@@ -4,7 +4,7 @@
     "family": "Source Han Serif CN",
     "local_path": "fonts/source-han-serif/SourceHanSerifCN-Regular.otf",
     "weights": [400],
-    "roles": ["display", "headline", "body", "caption", "quote", "numeric"],
+    "roles": ["display", "headline", "body", "caption", "metadata", "quote", "numeric"],
     "moods": ["editorial", "serious", "cultural", "calm"],
     "styles": ["serif", "traditional"],
     "best_for": ["editorial", "news", "culture", "quote", "long-form"],
@@ -13,6 +13,7 @@
     "recommended_max_lines": 8,
     "fallback_family": "Noto Sans SC",
     "license": "OFL-1.1",
+    "license_status": "verified",
     "source": "https://github.com/adobe-fonts/source-han-serif"
   },
   {
@@ -29,6 +30,7 @@
     "recommended_max_lines": 6,
     "fallback_family": "Noto Sans SC",
     "license": "OFL-1.1",
+    "license_status": "verified",
     "source": "https://github.com/lxgw/LxgwWenKai"
   },
   {
@@ -46,6 +48,7 @@
     "fallback_family": "Noto Sans SC",
     "is_artistic": true,
     "license": "OFL-1.1",
+    "license_status": "verified",
     "source": "https://fonts.google.com/specimen/ZCOOL+QingKe+HuangYou"
   },
   {
@@ -63,6 +66,7 @@
     "fallback_family": "Noto Sans SC",
     "is_artistic": true,
     "license": "OFL-1.1",
+    "license_status": "verified",
     "source": "https://fonts.google.com/specimen/ZCOOL+KuaiLe"
   },
   {
@@ -80,6 +84,7 @@
     "fallback_family": "Noto Sans SC",
     "is_artistic": true,
     "license": "OFL-1.1",
+    "license_status": "verified",
     "source": "https://fonts.google.com/specimen/Ma+Shan+Zheng"
   },
   {
@@ -87,7 +92,7 @@
     "family": "Noto Sans SC",
     "local_path": "fonts/noto-sans-sc/NotoSansSC[wght].ttf",
     "weights": [400],
-    "roles": ["display", "headline", "body", "caption", "quote", "numeric", "artistic"],
+    "roles": ["display", "headline", "body", "caption", "metadata", "quote", "numeric", "artistic"],
     "moods": ["neutral", "clear", "reliable"],
     "styles": ["sans-serif"],
     "best_for": ["body", "caption", "metadata", "dense-information", "fallback"],
@@ -96,6 +101,7 @@
     "recommended_max_lines": 10,
     "fallback_family": "Source Han Serif CN",
     "license": "OFL-1.1",
+    "license_status": "verified",
     "source": "https://fonts.google.com/specimen/Noto+Sans+SC"
   }
 ]

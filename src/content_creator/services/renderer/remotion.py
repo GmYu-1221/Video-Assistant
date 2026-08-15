@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from pathlib import Path
 from content_creator.schemas import VideoProject
@@ -49,6 +50,33 @@ def render_project(
             raise RuntimeError("Remotion did not produce a non-empty MP4")
         if on_progress:
             on_progress("完成|预览已完成" if preview else "完成|视频渲染已完成")
+        return target
+    finally:
+        server.close()
+
+
+def render_layout_still(project: VideoProject, remotion_dir: str | Path, output_path: str | Path, frame: int) -> Path:
+    """Render a true Remotion/Chromium key frame for layout QA."""
+    server = MediaServer(project.output.project_dir)
+    base_url = server.start()
+    props_path = Path(project.output.project_dir) / ".layout_preview_props.json"
+    props = project.model_dump(mode="json")
+    props["media_base_url"] = base_url
+    props_path.write_text(json.dumps(props), encoding="utf-8")
+    target = Path(output_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        completed = subprocess.run(["pnpm", "exec", "remotion", "still", "src/index.ts", "VisualSpec", str(target), "--frame", str(frame), "--props", str(props_path), "--log", "verbose"], cwd=Path(remotion_dir), check=False, capture_output=True, text=True)
+        if completed.returncode or not target.is_file():
+            raise RuntimeError(f"Remotion layout preview failed: {completed.stderr[-500:]}")
+        audit_matches = re.findall(r"\[LAYOUT_AUDIT\](\{.*\})", (completed.stdout or "") + "\n" + (completed.stderr or ""))
+        if audit_matches:
+            try:
+                target.with_suffix(".audit.json").write_text(json.dumps(json.loads(audit_matches[-1]), ensure_ascii=False, indent=2), encoding="utf-8")
+            except (ValueError, json.JSONDecodeError):
+                pass
+        else:
+            target.with_suffix(".remotion.log").write_text((completed.stdout or "") + "\n" + (completed.stderr or ""), encoding="utf-8")
         return target
     finally:
         server.close()

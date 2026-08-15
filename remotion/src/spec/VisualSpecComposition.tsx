@@ -1,8 +1,9 @@
 import React from 'react';
-import {AbsoluteFill, Img, useCurrentFrame} from 'remotion';
+import {AbsoluteFill, Img, interpolate, useCurrentFrame} from 'remotion';
 import type {RemotionPropsWithVisualSpec, VisualSpecLayer, VisualSpecScene, VisualSpecTrack} from '../types';
 import {trackValue} from './TrackEvaluator';
 import {AudioTrack} from '../components/AudioTrack';
+import {SceneLayoutRenderer} from '../layout/SceneLayoutRenderer';
 
 const Layer: React.FC<{layer: VisualSpecLayer; region: {x: number; y: number; width: number; height: number; overflow?: 'visible'|'hidden'}; frame: number; props: RemotionPropsWithVisualSpec; transitionTracks?: VisualSpecTrack[]}> = ({layer, region, frame, props, transitionTracks}) => {
   const style = layer.style ?? {};
@@ -35,6 +36,25 @@ export const VisualSpecComposition: React.FC<RemotionPropsWithVisualSpec> = (pro
   const scene = spec.scenes.find((candidate) => frame >= candidate.start_frame && frame < candidate.start_frame + candidate.duration_frames) ?? spec.scenes[spec.scenes.length - 1];
   const transition = spec.transitions?.find((candidate) => frame >= candidate.start_frame && frame < candidate.start_frame + candidate.duration_frames);
   const incomingScene = transition ? spec.scenes.find((candidate) => candidate.id === transition.to_scene) : undefined;
+  const timelineItem = props.timeline.find((item) => frame >= item.start_frame && frame < item.end_frame);
+  if (timelineItem?.layout && timelineItem.narrative && timelineItem.resolved_state) {
+    const localFrame = frame - timelineItem.start_frame;
+    const boundary = timelineItem.resolved_state.boundary_action;
+    const previous = props.timeline[Math.max(0, props.timeline.indexOf(timelineItem) - 1)];
+    const transitionFrames = Math.min(9, timelineItem.duration_frames);
+    const mediaChanged = previous?.resolved_state?.resolved_media_id !== timelineItem.resolved_state.resolved_media_id;
+    const transitionActive = mediaChanged && (boundary === 'accent' || boundary === 'scene_cut') && localFrame < transitionFrames;
+    const progress = interpolate(localFrame, [0, Math.max(1, transitionFrames - 2)], [0, 1], {extrapolateLeft:'clamp',extrapolateRight:'clamp'});
+    const flash = interpolate(localFrame, [0, 2, transitionFrames - 1], [0, boundary === 'scene_cut' ? .75 : .95, 0], {extrapolateLeft:'clamp',extrapolateRight:'clamp'});
+    const incomingMediaStyle: React.CSSProperties = transitionActive ? {opacity: .35 + progress * .65, filter: `blur(${(1 - progress) * (boundary === 'scene_cut' ? 28 : 24)}px)`, transform: boundary === 'scene_cut' ? `scale(1.06, ${1 + (1 - progress) * .12})` : `scale(${1 + (1 - progress) * .12})`, transformOrigin:'center'} : {};
+    return <AbsoluteFill style={{background:'#000'}}>
+      <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={timelineItem.resolved_state.visibility !== 'hidden'} showMedia={!transitionActive}/>
+      {transitionActive && previous?.layout && previous.narrative && <SceneLayoutRenderer layout={previous.layout} narrative={previous.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={{opacity:1-progress}} transparentBackground/>}
+      {transitionActive && <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={incomingMediaStyle} transparentBackground/>}
+      {transitionActive && <div style={{position:'absolute',left:0,top:430,width:1080,height:610,background:'#fff',opacity:flash,zIndex:10,pointerEvents:'none'}}/>}
+      <AudioTrack src={`${props.media_base_url ?? ''}/${props.audio.path}`} />
+    </AbsoluteFill>;
+  }
   return <AbsoluteFill style={{background: spec.composition.background ?? '#000'}}>
     {spec.persistent_layers?.map((layer) => { const region = spec.layout.regions[layer.region]; return region ? <Layer key={layer.id} layer={layer} region={region} frame={frame} props={props} /> : null; })}
     <Scene scene={scene} frame={frame} props={props} />

@@ -6,6 +6,8 @@ from .animation_plan import AnimationEffect
 from .transition_effect_plan import TransitionEffectPlanItem
 from .remotion_creative_plan import VisualEvent
 from .visual_spec import VisualSpec
+from .layout import ImageSemanticProfile, SceneLayoutSpec, SceneNarrative
+from .continuity import ResolvedTimelineItem
 
 
 class EntranceConfig(BaseModel):
@@ -24,6 +26,7 @@ class ImageAsset(BaseModel):
     duration_frames: int = Field(default=1, ge=1)
     motion: str = "static"
     entrance: EntranceConfig = Field(default_factory=EntranceConfig)
+    semantic_profile: ImageSemanticProfile | None = None
 
 
 class AudioConfig(BaseModel):
@@ -58,6 +61,9 @@ class TimelineItem(BaseModel):
     animation: AnimationEffect | None = None
     transition_effect: TransitionEffectPlanItem | None = None
     visual_events: list[VisualEvent] = Field(default_factory=list)
+    narrative: SceneNarrative | None = None
+    layout: SceneLayoutSpec | None = None
+    resolved_state: ResolvedTimelineItem | None = None
 
 
 class VideoOutput(BaseModel):

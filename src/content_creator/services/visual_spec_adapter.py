@@ -13,6 +13,18 @@ from content_creator.services.visual_spec_validator import validate_visual_spec
 
 def project_to_visual_spec(project: VideoProject, stage: Region | None = None, decision: VisualSpecDecision | None = None) -> VisualSpec:
     """Create a deterministic center-stage spec without invoking an LLM."""
+    # URL projects with a LayoutPlan are rendered by SceneLayoutRenderer. Keep a
+    # small valid VisualSpec shell for legacy composition selection, but never
+    # inject the reference-reel header/stage/footer template into their data.
+    if any(item.layout is not None for item in project.timeline):
+        regions = {"dynamic": Region(x=0, y=0, width=project.width, height=project.height)}
+        scenes = []
+        for index, item in enumerate(project.timeline):
+            asset = next((candidate for candidate in project.images if candidate.id == item.asset_id), None)
+            if asset is None:
+                continue
+            scenes.append(SceneSpec(id=f"scene-{index}", start_frame=item.start_frame, duration_frames=item.duration_frames, layers=[VisualLayer(id=f"dynamic-{index}", type=LayerType.image, region="dynamic", source=LayerSource(asset_id=asset.id))]))
+        return validate_visual_spec(VisualSpec(composition=CompositionSpec(width=project.width, height=project.height, fps=project.fps, duration_frames=max((scene.start_frame + scene.duration_frames for scene in scenes), default=1)), layout=LayoutSpec(preset=LayoutPreset.fullscreen, regions=regions), scenes=scenes))
     is_reference_layout = project.width == 1080 and project.height == 1920
     stage = stage or Region(x=0, y=430 if is_reference_layout else 450, width=project.width, height=610 if is_reference_layout else min(610, project.height), overflow="hidden")
     regions = {"stage": stage}

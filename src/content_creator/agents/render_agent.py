@@ -120,7 +120,11 @@ def compile_render_plan(project: VideoProject, storyboard, creative_plan: Remoti
         legacy_transition = legacy_transition_by_source.get(scene.asset_id)
         if legacy_transition is None and transition_event and transition_event.type in {item.value for item in TransitionEffectType} and transition_event.target_asset_id:
             legacy_transition = TransitionEffectPlanItem(from_asset_id=transition_event.source_asset_id or scene.asset_id, to_asset_id=transition_event.target_asset_id, type=TransitionEffectType(transition_event.type), duration_frames=transition_event.duration_frames, params=transition_event.params)
-        timeline.append(TimelineItem(asset_id=scene.asset_id, start_frame=cursor, end_frame=end, duration_frames=scene.duration_frames, transition=scene.transition, animation=legacy_animation, transition_effect=legacy_transition, visual_events=events))
+        existing = project.timeline[len(timeline)] if len(timeline) < len(project.timeline) else None
+        if existing and existing.resolved_state and existing.resolved_state.boundary_action.value != "scene_cut":
+            events = [event for event in events if event.phase != "transition"]
+            legacy_transition = None
+        timeline.append(TimelineItem(asset_id=scene.asset_id, start_frame=cursor, end_frame=end, duration_frames=scene.duration_frames, transition=scene.transition, animation=legacy_animation, transition_effect=legacy_transition, visual_events=events, narrative=existing.narrative if existing else None, layout=existing.layout if existing else None, resolved_state=existing.resolved_state.model_copy(update={"start_frame": cursor, "end_frame": end}) if existing and existing.resolved_state else None))
         cursor = end
     project_dir = Path(project.output.project_dir).resolve()
     audio_dir = project_dir / "audio"

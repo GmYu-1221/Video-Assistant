@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 _SRCSET_PART = re.compile(r"^\s*(\S+)(?:\s+(\d+(?:\.\d+)?)([wx]))?")
 _DIRECT_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov"}
 _IMAGE_EXTENSIONS = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
-_UI_TOKEN = re.compile(r"(?:^|[-_/.])(icon|avatar|logo|wordmark|button|badge|lock|protection)(?:[-_/.]|$)", re.I)
+_UI_TOKEN = re.compile(r"(?:^|[-_/.])(icon|avatar|logo|wordmark|button|badge|lock|protection|toolbar|tobar|heart|thumb|collect|comment|share|wechat|weixin|alipay|pay|reward|vip|close|coupon|follow|like|unlike)(?:[-_/.]|$)", re.I)
+_UI_SUBSTRING = re.compile(r"(?:toolbar|tobar|heart|thumb|collect|comment|share|wechat|weixin|alipay|reward|vip|coupon|follow|like|unlike|identityvip|identity|readcount|pay-help|guide-red)", re.I)
 _UI_TEXT_TOKEN = re.compile(r"(?:用户.{0,12}主页|个人主页|头像|profile picture|author avatar)", re.I)
 
 
@@ -207,7 +208,7 @@ def _candidate_from_html(candidate_id: str, source: str, key: str, fragment_html
     if not fragment_html or len(fragment_html) > MAX_HTML_BYTES:
         return None
     fragment = BeautifulSoup(fragment_html, "html.parser")
-    for node in fragment.select("script, iframe, object, embed, noscript"):
+    for node in fragment.select("script, iframe, object, embed, noscript, nav, header, footer, aside, button, [role='navigation'], [aria-label='Breadcrumbs']"):
         node.decompose()
     text = _normalize_text(fragment.get_text(" ", strip=True))
     paragraphs = [node for node in fragment.find_all(["p", "h2", "h3", "li"]) if _normalize_text(node.get_text(" ", strip=True))]
@@ -757,7 +758,7 @@ def basic_asset_filter(candidates: list[AssetCandidate], diagnostics: dict) -> l
         suffix = Path(parsed.path).suffix.lower()
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             reason = "other"
-        elif candidate.kind == AssetKind.image and (_UI_TOKEN.search(f"{parsed.path} {candidate.alt}") or _UI_TEXT_TOKEN.search(f"{candidate.alt} {candidate.caption}")):
+        elif candidate.kind == AssetKind.image and (_UI_TOKEN.search(f"{parsed.path} {candidate.alt}") or _UI_SUBSTRING.search(f"{parsed.path} {candidate.alt} {candidate.caption}") or _UI_TEXT_TOKEN.search(f"{candidate.alt} {candidate.caption}")):
             reason = "icon_avatar_logo"
         elif candidate.kind == AssetKind.video and suffix and suffix not in _DIRECT_VIDEO_EXTENSIONS:
             reason = "format"
@@ -803,15 +804,15 @@ def _ordered_candidate_pool(candidates: list[AssetCandidate], decisions: list[As
     ))
 
 
-def _local_asset_decisions(candidates: list[AssetCandidate]) -> list[AssetDecision]:
+def _local_asset_decisions(candidates: list[AssetCandidate], target_count: int = 6) -> list[AssetDecision]:
     ordered = sorted(candidates, key=lambda item: (-_candidate_preference(item), item.original_index, item.id))
-    chosen = {item.id for item in ordered[:6]}
+    chosen = {item.id for item in ordered[:target_count]}
     first_id = ordered[0].id if ordered else ""
     return [AssetDecision(asset_id=item.id, selected=item.id in chosen, role=ImageRole.hero if item.id == first_id else ImageRole.evidence, topics=item.alt.split()[:4], relevance=max(.05, min(.95, .25 + _candidate_preference(item) / 180)) if item.kind == AssetKind.image else .05, visual_quality=.6, reason="deterministic candidate-pool fallback") for item in candidates]
 
 
-def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidate], diagnostics: dict) -> list[AssetDecision]:
-    fallback = _local_asset_decisions(candidates)
+def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidate], diagnostics: dict, target_count: int = 6) -> list[AssetDecision]:
+    fallback = _local_asset_decisions(candidates, target_count)
     diagnostics["asset_agent"] = {"sent": len(candidates), "mode": "local_fallback", "selected": 0, "decisions": [], "attempts": []}
     if not candidates:
         return fallback
@@ -819,7 +820,7 @@ def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidat
     if provider.model_name == "mock":
         decisions = fallback
     else:
-        prompt = json.dumps({"task": "选择与文章最相关、适合短视频的网页素材。只能引用 input asset_id；不得生成 URL。返回 JSON。", "article": {"title": brief.title, "text": brief.text[:9000]}, "assets": [item.model_dump(mode="json") for item in candidates], "output": {"asset_decisions": [{"asset_id": "input asset id", "selected": True, "role": "hero|overview|evidence|data|diagram|demo|product|quote|result|portrait|brand|other|irrelevant", "topics": ["string"], "entities": ["string"], "relevance": "0..1", "visual_quality": "0..1", "reason": "short reason"}]}}, ensure_ascii=False)
+        prompt = json.dumps({"task": "为文章素材做完整排序并选择约 target_count 个。第一项优先选择能让观众快速理解大标题的 hero/overview 图片。只能引用 input asset_id；不得生成 URL；必须返回所有 asset_id 的完整决定。", "target_count": target_count, "article": {"title": brief.title, "text": brief.text[:9000]}, "assets": [item.model_dump(mode="json") for item in candidates], "output": {"asset_decisions": [{"asset_id": "input asset id", "selected": True, "role": "hero|overview|evidence|data|diagram|demo|product|quote|result|portrait|brand|other|irrelevant", "topics": ["string"], "entities": ["string"], "relevance": "0..1", "visual_quality": "0..1", "title_match_score": "0..1", "reason": "short reason"}]}}, ensure_ascii=False)
         decisions = fallback
         for attempt in range(2):
             try:
@@ -841,7 +842,16 @@ def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidat
                 diagnostics["asset_agent"]["attempts"].append({"attempt": attempt + 1, "status": "failed", "error": f"{type(exc).__name__}: {exc}"})
         if decisions is fallback:
             diagnostics["asset_agent"]["error"] = diagnostics["asset_agent"]["attempts"][-1]["error"]
-    diagnostics["asset_agent"].update({"selected": sum(item.selected for item in decisions), "decisions": [item.model_dump(mode="json") for item in decisions if item.selected]})
+    if sum(item.selected for item in decisions) < min(target_count, len(candidates)):
+        ranked = sorted(decisions, key=lambda item: (-item.title_match_score, -item.relevance, -item.visual_quality, item.asset_id))
+        selected_ids = {item.asset_id for item in ranked if item.selected}
+        for item in ranked:
+            if len(selected_ids) >= min(target_count, len(candidates)):
+                break
+            item.selected = True
+            item.reason = item.reason or "deterministic target-count backfill"
+            selected_ids.add(item.asset_id)
+    diagnostics["asset_agent"].update({"target_count": target_count, "selected": sum(item.selected for item in decisions), "decisions": [item.model_dump(mode="json") for item in decisions if item.selected]})
     return decisions
 
 
@@ -1004,10 +1014,22 @@ def tag_images(brief: ArticleBrief, images: list[ArticleImage]) -> tuple[Article
         return brief.model_copy(update={"summary": fallback_copy.body, "topics": fallback_tags[0].topics}), fallback_copy, fallback_tags
 
 
-def order_images(images: list[ArticleImage], tags: list[ImageTag]) -> tuple[list[ArticleImage], list[TransitionContext]]:
+def _title_match_score(title: str, image: ArticleImage, tag: ImageTag | None = None) -> float:
+    haystack = f"{image.alt} {image.caption} {image.context} {' '.join(tag.topics if tag else [])} {' '.join(tag.entities if tag else [])}".lower()
+    title = title.lower().strip()
+    if not title or not haystack:
+        return 0.0
+    tokens = [token for token in re.split(r"[^\w\u4e00-\u9fff]+", title) if len(token) >= 2]
+    matches = sum(token in haystack for token in tokens)
+    return min(1.0, matches / max(1, len(tokens)))
+
+
+def order_images(images: list[ArticleImage], tags: list[ImageTag], title: str = "", target_count: int | None = None) -> tuple[list[ArticleImage], list[TransitionContext]]:
     by_id = {tag.image_id: tag for tag in tags}
-    ranked = sorted(images, key=lambda image: (-by_id[image.id].salience, image.source_index))[:6]
-    first = min(ranked, key=lambda image: (0 if by_id[image.id].role in {ImageRole.hero, ImageRole.overview} else 1, image.source_index))
+    ranked = sorted(images, key=lambda image: (-by_id[image.id].salience, image.source_index))
+    if target_count:
+        ranked = ranked[:target_count]
+    first = max(ranked, key=lambda image: (_title_match_score(title, image, by_id.get(image.id)), 1 if by_id[image.id].role in {ImageRole.hero, ImageRole.overview} else 0, by_id[image.id].salience, -image.source_index))
     last = min(ranked, key=lambda image: (0 if by_id[image.id].role in {ImageRole.result, ImageRole.brand, ImageRole.product} else 1, -by_id[image.id].salience, image.source_index))
     middle = sorted((image for image in ranked if image.id not in {first.id, last.id}), key=lambda image: image.source_index)
     ordered = [first, *middle]

@@ -1,6 +1,6 @@
 import registryData from './font-registry.json';
 
-export const TYPOGRAPHY_ROLES = ['display', 'headline', 'body', 'caption', 'quote', 'numeric', 'artistic'] as const;
+export const TYPOGRAPHY_ROLES = ['display', 'headline', 'body', 'caption', 'metadata', 'quote', 'numeric', 'artistic'] as const;
 export type TypographyRole = (typeof TYPOGRAPHY_ROLES)[number];
 
 export type FontDefinition = {
@@ -17,6 +17,7 @@ export type FontDefinition = {
   recommended_max_lines: number;
   fallback_family: string;
   license: string;
+  license_status?: 'verified' | 'unverified';
   source: string;
   is_artistic?: boolean;
 };
@@ -45,6 +46,19 @@ export const getFontFamily = (id = DEFAULT_FONT_ID, role?: TypographyRole): stri
 
 export const getFallbackFont = (font: FontDefinition): FontDefinition => byFamily.get(font.fallback_family) ?? getFont(DEFAULT_FONT_ID);
 
+export const resolveFont = (role: TypographyRole, style: string): FontDefinition => {
+  const preferred = FONT_REGISTRY.find((font) => font.roles.includes(role) && font.styles.includes(style) && !(font.is_artistic && ['body', 'caption', 'metadata'].includes(role)));
+  return preferred ?? FONT_REGISTRY.find((font) => font.roles.includes(role) && !(font.is_artistic && ['body', 'caption', 'metadata'].includes(role))) ?? getFont(DEFAULT_FONT_ID);
+};
+
+export const resolveFontById = (id: string | undefined, role: TypographyRole): FontDefinition => {
+  const font = id ? byId.get(id) : undefined;
+  if (!font || !font.roles.includes(role) || (font.is_artistic && ['body', 'caption', 'metadata'].includes(role))) {
+    return getFont(DEFAULT_FONT_ID);
+  }
+  return font;
+};
+
 export const validateFontRegistry = (): void => {
   const ids = new Set<string>();
   const families = new Set<string>();
@@ -55,8 +69,9 @@ export const validateFontRegistry = (): void => {
     families.add(font.family);
     if (!font.supports_cjk) throw new Error(`Registered showcase font must support CJK: ${font.id}`);
     if (!font.weights.length || !font.local_path) throw new Error(`Incomplete font definition: ${font.id}`);
+    if (!['verified', 'unverified'].includes(font.license_status ?? 'unverified')) throw new Error(`Invalid license status: ${font.id}`);
     if (!byFamily.has(font.fallback_family)) throw new Error(`Missing fallback family: ${font.fallback_family}`);
-    if (font.is_artistic && font.roles.some((role) => ['body', 'caption'].includes(role))) {
+    if (font.is_artistic && font.roles.some((role) => ['body', 'caption', 'metadata'].includes(role))) {
       throw new Error(`Artistic font cannot provide body/caption roles: ${font.id}`);
     }
   }

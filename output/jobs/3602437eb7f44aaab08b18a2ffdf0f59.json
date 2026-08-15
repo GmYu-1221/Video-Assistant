@@ -1,0 +1,133 @@
+{
+  "id": "3602437eb7f44aaab08b18a2ffdf0f59",
+  "url": "https://blog.csdn.net/yolo5detector/article/details/155627584?utm_medium=distribute.pc_relevant.none-task-blog-2~default~baidujs_utm_term~default-1-155627584-blog-147628715.235^v43^control&spm=1001.2101.3001.4242.2&utm_relevant_index=3",
+  "status": "completed",
+  "stage": "字幕版本 v002 已完成",
+  "error": null,
+  "project_dir": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_100831_572358",
+  "video_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_100831_572358/versions/v002/final.mp4",
+  "browser_import_status": null,
+  "browser_import_url": "javascript:(()=>{const f=document.createElement('form');f.method='POST';f.action=\"http://127.0.0.1:8000/api/browser-import\";f.target='_blank';for(const [k,v] of [['token',\"uKTfGQmfuQxFXH1igBRBvH6723BoMGrJW8_moCqQd4I\"],['source_url',location.href],['html',document.documentElement.outerHTML]]){const i=document.createElement('input');i.type='hidden';i.name=k;i.value=v;f.appendChild(i)}document.body.appendChild(f);f.submit();setTimeout(()=>f.remove(),1000)})()",
+  "events": [
+    {
+      "status": "running",
+      "stage": "抓取文章"
+    },
+    {
+      "status": "running",
+      "stage": "发现网页素材"
+    },
+    {
+      "status": "running",
+      "stage": "过滤网页素材"
+    },
+    {
+      "status": "running",
+      "stage": "分析网页素材"
+    },
+    {
+      "status": "running",
+      "stage": "下载已选素材"
+    },
+    {
+      "status": "running",
+      "stage": "素材状态：发现 59 个，优先选择 0 个，成功下载 2 个"
+    },
+    {
+      "status": "running",
+      "stage": "补充正文截图"
+    },
+    {
+      "status": "running",
+      "stage": "分析图片与生成文案"
+    },
+    {
+      "status": "running",
+      "stage": "选择背景音乐"
+    },
+    {
+      "status": "running",
+      "stage": "Director 编排连续性状态"
+    },
+    {
+      "status": "running",
+      "stage": "编排动态布局视频"
+    },
+    {
+      "status": "running",
+      "stage": "渲染视频"
+    },
+    {
+      "status": "running",
+      "stage": "正式渲染开始..."
+    },
+    {
+      "status": "running",
+      "stage": "正在打包 Remotion 项目..."
+    },
+    {
+      "status": "running",
+      "stage": "正在渲染并编码视频..."
+    },
+    {
+      "status": "running",
+      "stage": "视频渲染已完成"
+    },
+    {
+      "status": "completed",
+      "stage": "已完成"
+    },
+    {
+      "status": "revising",
+      "stage": "根据反馈生成字幕版本 v002"
+    },
+    {
+      "status": "revising",
+      "stage": "Layout Director 正在重新设计字体与字幕"
+    },
+    {
+      "status": "revising",
+      "stage": "渲染字幕版本 v002"
+    },
+    {
+      "status": "revising",
+      "stage": "正式渲染开始..."
+    },
+    {
+      "status": "revising",
+      "stage": "正在打包 Remotion 项目..."
+    },
+    {
+      "status": "revising",
+      "stage": "正在渲染并编码视频..."
+    },
+    {
+      "status": "revising",
+      "stage": "视频渲染已完成"
+    },
+    {
+      "status": "completed",
+      "stage": "字幕版本 v002 已完成"
+    }
+  ],
+  "versions": [
+    {
+      "id": "v001",
+      "video_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_100831_572358/versions/v001/final.mp4",
+      "project_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_100831_572358/versions/v001/project.json",
+      "created_at": "2026-08-15T02:10:42.784794+00:00",
+      "source_version": null,
+      "feedback_id": null
+    },
+    {
+      "id": "v002",
+      "video_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_100831_572358/versions/v002/final.mp4",
+      "project_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260815_100831_572358/versions/v002/project.json",
+      "created_at": "2026-08-15T02:15:04.132859+00:00",
+      "source_version": "v001",
+      "feedback_id": "cb9a2246077540fd8b8f7df9d112c6a4"
+    }
+  ],
+  "current_version": "v002",
+  "feedback_status": "completed"
+}

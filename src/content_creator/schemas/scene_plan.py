@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from .transition import TransitionConfig
 from .creative_intent import CreativeIntent
+from .layout import SceneNarrative, SceneLayoutSpec
 
 class EntrancePlan(BaseModel):
     type: str = "fade"
@@ -20,3 +21,5 @@ class ScenePlan(BaseModel):
     creative_intent: CreativeIntent | None = None
     transition_intent: CreativeIntent | None = None
     timing: str | None = None
+    narrative: SceneNarrative | None = None
+    layout: SceneLayoutSpec | None = None
