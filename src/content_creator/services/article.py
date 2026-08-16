@@ -37,6 +37,16 @@ _IMAGE_EXTENSIONS = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
 _UI_TOKEN = re.compile(r"(?:^|[-_/.])(icon|avatar|logo|wordmark|button|badge|lock|protection|toolbar|tobar|heart|thumb|collect|comment|share|wechat|weixin|alipay|pay|reward|vip|close|coupon|follow|like|unlike)(?:[-_/.]|$)", re.I)
 _UI_SUBSTRING = re.compile(r"(?:toolbar|tobar|heart|thumb|collect|comment|share|wechat|weixin|alipay|reward|vip|coupon|follow|like|unlike|identityvip|identity|readcount|pay-help|guide-red)", re.I)
 _UI_TEXT_TOKEN = re.compile(r"(?:用户.{0,12}主页|个人主页|头像|profile picture|author avatar)", re.I)
+_ARTICLE_UI_PHRASES = {
+    "notifications", "notification settings", "fork", "star", "code", "issues",
+    "pull requests", "actions", "projects", "security and quality", "insights",
+    "branches", "tags", "open more actions menu", "folders and files", "last commit",
+    "latest commit", "history", "repository files navigation", "table of contents",
+    "about", "resources", "watchers", "releases", "packages", "used by",
+    "contributors", "languages", "uh oh", "there was an error while loading",
+    "you must be signed in to change notification settings",
+}
+_ARTICLE_UI_ATTR = re.compile(r"(?:^|[-_])(nav|navigation|breadcrumb|sidebar|toolbar|header|footer|repo[-_]?nav|file[-_]?list|repository[-_]?files|action[-_]?menu)(?:$|[-_])", re.I)
 
 
 class BrowserImportRequired(ValueError):
@@ -138,6 +148,17 @@ def extract_article_html(url: str, html: str, *, canonical_url: str | None = Non
     if not _quality_ok(selected.body):
         raise ValueError(f"未能从网页提取足够的正文内容（候选 {len(candidates)} 个，最终 {len(selected.body)} 字）")
     diagnostics["candidate_total"] = len(candidates)
+    _, cleanup_stats = _clean_article_fragment(html)
+    diagnostics["html_cleanup"] = {
+        "raw_chars": len(_normalize_text(soup.get_text(" ", strip=True))),
+        "cleaned_chars": len(selected.body),
+        "raw_paragraph_count": len(soup.find_all(["p", "h2", "h3", "li", "pre", "blockquote"])),
+        "cleaned_paragraph_count": len([line for line in selected.body.splitlines() if _normalize_text(line)]),
+        "ui_nodes_removed": cleanup_stats["ui_nodes_removed"],
+        "structural_nodes_removed": cleanup_stats["structural_nodes_removed"],
+        "ui_token_hits": cleanup_stats["ui_token_hits"],
+        "selected_html_is_clean": True,
+    }
     selected = selected.model_copy(update={"canonical_url": canonical, "effective_base_url": base, "requested_url": url})
     selected = selected.model_copy(update={"diagnostics": diagnostics})
     return selected, soup
@@ -196,6 +217,63 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", html_escape.unescape(value or "")).strip()
 
 
+def _article_ui_match(node) -> tuple[bool, list[str]]:
+    """Identify page chrome without treating every short README line as UI."""
+    text = _normalize_text(node.get_text(" ", strip=True))
+    lowered = text.casefold()
+    attrs = " ".join(str(node.get(name, "")) for name in ("id", "class", "aria-label", "data-testid"))
+    attr_match = bool(_ARTICLE_UI_ATTR.search(attrs))
+    hits = [
+        phrase for phrase in _ARTICLE_UI_PHRASES
+        if (re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", lowered) if " " not in phrase else phrase in lowered)
+    ]
+    exact_ui = lowered in _ARTICLE_UI_PHRASES and (
+        node.name in {"a", "button", "span", "li"} or attr_match or "error" in lowered
+    )
+    short_stat = len(text) <= 100 and bool(re.search(r"(?:fork|star|watchers|releases|packages|used by)\b", lowered))
+    links = node.find_all("a")
+    link_text_chars = sum(len(_normalize_text(link.get_text(" ", strip=True))) for link in links)
+    link_cluster = (
+        len(links) >= 4
+        and len(text) <= 1200
+        and link_text_chars / max(len(text), 1) >= .55
+        and not node.find("p")
+    )
+    # A long paragraph may legitimately mention one of these words. Only
+    # remove phrase matches when the node itself is a short UI item or carries
+    # a navigation/file-list semantic attribute.
+    remove = attr_match or exact_ui or short_stat or link_cluster or (len(text) <= 180 and len(hits) >= 2)
+    return remove, hits
+
+
+def _clean_article_fragment(fragment_html: str, *, strip_network_attrs: bool = False) -> tuple[BeautifulSoup, dict]:
+    """Strip executable/network markup and obvious page chrome from HTML."""
+    fragment = BeautifulSoup(fragment_html or "", "html.parser")
+    stats = {"ui_nodes_removed": 0, "ui_token_hits": [], "structural_nodes_removed": 0}
+    structural = fragment.select("script, iframe, object, embed, noscript, nav, header, footer, aside, button, [role='navigation'], [aria-label='Breadcrumbs']")
+    for node in structural:
+        node.decompose()
+        stats["structural_nodes_removed"] += 1
+    # Classify before mutating. GitHub-like controls often split "Star" and
+    # "104k" into siblings; removing only the label would leave the count.
+    classified = [(node, *_article_ui_match(node)) for node in fragment.find_all(True)]
+    for node, remove, hits in classified:
+        if not node.parent:
+            continue
+        if remove and node.name not in {"article", "main"}:
+            node.decompose()
+            stats["ui_nodes_removed"] += 1
+            stats["ui_token_hits"].extend(hits)
+    for node in fragment.find_all(True):
+        for attribute in list(node.attrs):
+            if attribute.lower().startswith("on"):
+                del node.attrs[attribute]
+            elif strip_network_attrs and attribute.lower() in {"src", "srcset", "data-src", "data-original", "href", "action", "poster"}:
+                del node.attrs[attribute]
+    stats["ui_token_hits"] = sorted(set(stats["ui_token_hits"]))
+    return fragment, stats
+
+
 def _decode_static_script_string(value: str) -> str:
     # Decode only inert string escapes. Never evaluate JavaScript or JSON code.
     value = value.replace("\\/", "/").replace("\\'", "'").replace('\\"', '"').replace("\\n", "\n").replace("\\r", "\n").replace("\\t", "\t").replace("\\\\", "\\")
@@ -207,9 +285,7 @@ def _decode_static_script_string(value: str) -> str:
 def _candidate_from_html(candidate_id: str, source: str, key: str, fragment_html: str, title: str, section: int) -> ArticleTextCandidate | None:
     if not fragment_html or len(fragment_html) > MAX_HTML_BYTES:
         return None
-    fragment = BeautifulSoup(fragment_html, "html.parser")
-    for node in fragment.select("script, iframe, object, embed, noscript, nav, header, footer, aside, button, [role='navigation'], [aria-label='Breadcrumbs']"):
-        node.decompose()
+    fragment, _ = _clean_article_fragment(fragment_html)
     text = _normalize_text(fragment.get_text(" ", strip=True))
     paragraphs = [node for node in fragment.find_all(["p", "h2", "h3", "li"]) if _normalize_text(node.get_text(" ", strip=True))]
     if len(text) < 40:
@@ -307,9 +383,18 @@ def _candidate_score(candidate: ArticleTextCandidate) -> float:
         score -= 12
     if candidate.paragraph_count < 2:
         score -= 8
-    link_text = sum(len(_normalize_text(link.get_text(" ", strip=True))) for link in BeautifulSoup(candidate.html, "html.parser").find_all("a"))
+    parsed = BeautifulSoup(candidate.html, "html.parser")
+    link_text = sum(len(_normalize_text(link.get_text(" ", strip=True))) for link in parsed.find_all("a"))
     if candidate.char_count and link_text / candidate.char_count > .35:
         score -= 15
+    ui_hits = 0
+    for node in parsed.find_all(True):
+        _, hits = _article_ui_match(node)
+        ui_hits += len(hits)
+    if ui_hits:
+        score -= min(18.0, ui_hits * 2.5)
+    if candidate.paragraph_count and candidate.char_count / candidate.paragraph_count < 24:
+        score -= 4
     return score
 
 
@@ -569,12 +654,10 @@ def _build_screenshot_document(selected_html: str, body: str, title: str) -> tup
     raw = selected_html if selected_html.strip() else "".join(f"<p>{html_escape.escape(part)}</p>" for part in _body_paragraphs(body))
     soup = BeautifulSoup(raw, "html.parser")
     raw_chars = len(soup.get_text(" ", strip=True))
-    for node in soup.select("script, iframe, object, embed, link, style, noscript, svg, img, picture, source, video, audio, form, input, button, select, textarea"):
+    cleaned_fragment, clean_stats = _clean_article_fragment(str(soup), strip_network_attrs=True)
+    soup = cleaned_fragment
+    for node in soup.select("link, style, svg, img, picture, source, video, audio, form, input, button, select, textarea"):
         node.decompose()
-    for node in soup.find_all(True):
-        for attribute in list(node.attrs):
-            if attribute.lower().startswith("on") or attribute.lower() in {"src", "srcset", "data-src", "data-original", "href", "action", "poster"}:
-                del node.attrs[attribute]
     candidates = soup.select("article, main, [role=main]")
     fragment = max(candidates, key=lambda node: len(node.get_text(" ", strip=True))) if candidates else (soup.body or soup)
     content = str(fragment)
@@ -588,7 +671,15 @@ def _build_screenshot_document(selected_html: str, body: str, title: str) -> tup
       h1{{font-size:42px;line-height:1.3;margin:0 0 38px}} h2,h3{{line-height:1.3;margin:34px 0 20px}} p,li,pre,blockquote{{margin:0 0 22px}}
       pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f4f4;padding:20px}} a{{color:inherit;text-decoration:none}}
     </style></head><body><article id=\"video-assistant-article\">{f'<h1>{safe_title}</h1>' if safe_title else ''}{content}</article></body></html>"""
-    return document, source, {"raw_chars": raw_chars, "cleaned_chars": len(cleaned_text), "paragraph_count": paragraph_count}
+    return document, source, {
+        "raw_chars": raw_chars,
+        "cleaned_chars": len(cleaned_text),
+        "paragraph_count": paragraph_count,
+        "cleaned_paragraph_count": paragraph_count,
+        "ui_nodes_removed": clean_stats["ui_nodes_removed"],
+        "structural_nodes_removed": clean_stats["structural_nodes_removed"],
+        "ui_token_hits": clean_stats["ui_token_hits"],
+    }
 
 
 def _body_paragraphs(body: str) -> list[str]:

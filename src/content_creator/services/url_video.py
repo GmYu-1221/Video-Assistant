@@ -62,6 +62,10 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     project_dir = root / "projects" / project_id
     project_dir.mkdir(parents=True, exist_ok=False)
     diagnostics: dict = {"url": url, "browser_imported": imported_html is not None, "article_extraction": extraction.diagnostics | {"requested_url": extraction.requested_url, "canonical_url": extraction.canonical_url, "effective_base_url": extraction.effective_base_url, "extraction_method": extraction.extraction_method, "extraction_confidence": extraction.extraction_confidence, "selected_candidate_ids": extraction.selected_candidate_ids, "final_body_chars": len(extraction.body)}}
+    cleanup = extraction.diagnostics.get("html_cleanup", {})
+    removed_ui = int(cleanup.get("ui_nodes_removed", 0)) + int(cleanup.get("structural_nodes_removed", 0))
+    if removed_ui:
+        progress(f"正文识别：已过滤 {removed_ui} 个页面 UI 节点，可用正文 {len(extraction.body)} 字")
     asset_target_count = _asset_target_count(len(brief.text))
     diagnostics["asset_target_count"] = asset_target_count
 
@@ -78,7 +82,12 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         (project_dir / "asset_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     source_brief = brief
-    (project_dir / "article_source.json").write_text(source_brief.model_dump_json(indent=2), encoding="utf-8")
+    article_source = source_brief.model_dump(mode="json") | {
+        "extraction_method": extraction.extraction_method,
+        "selected_candidate_ids": extraction.selected_candidate_ids,
+        "extraction_diagnostics": extraction.diagnostics,
+    }
+    (project_dir / "article_source.json").write_text(json.dumps(article_source, ensure_ascii=False, indent=2), encoding="utf-8")
     (project_dir / "article.json").write_text(brief.model_dump_json(indent=2), encoding="utf-8")
     progress("发现网页素材")
     candidates, discovery = discover_asset_candidates(soup, brief)
@@ -111,6 +120,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         persist_diagnostics()
         progress("准备正文截图引擎" if not chromium_available() else "补充正文截图")
         try:
+            screenshot_count = asset_target_count - len(article_images)
             article_images.extend(capture_article_screenshots(
                 brief.effective_base_url or brief.url,
                 project_dir,
@@ -121,6 +131,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
                 body=extraction.body,
                 title=extraction.title,
             ))
+            progress(f"正文截图：成功补充 {screenshot_count} 张，当前素材 {len(article_images)} 张")
         except Exception as exc:
             diagnostics["screenshot_fallback"]["error"] = str(exc)
             persist_diagnostics()

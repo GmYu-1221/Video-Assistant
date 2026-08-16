@@ -166,6 +166,36 @@ def test_screenshot_document_uses_selected_html_and_removes_network_capable_mark
     assert "Video Assistant Noto" in document
 
 
+def test_github_page_chrome_is_removed_but_readme_body_is_kept():
+    html = """<main>
+      <div class='repo-nav'><span>Notifications</span><span>Fork 16.7k</span><span>Star 104k</span></div>
+      <div class='file-list'><h2>Folders and files</h2><span>Last commit</span><span>History</span></div>
+      <div class='markdown-body'><h1>DeepSeek-V3</h1>
+        <p>DeepSeek-V3 is a strong mixture-of-experts language model with efficient training.</p>
+        <p>The model uses multi-head latent attention and a multi-token prediction objective.</p>
+      </div>
+    </main>"""
+    candidates = _deduplicate_text_candidates(_discover_text_candidates(html, BeautifulSoup(html, "html.parser"), "DeepSeek-V3"))
+    assert candidates
+    selected = max(candidates, key=lambda item: item.char_count)
+    assert "Notifications" not in selected.text
+    assert "Folders and files" not in selected.text
+    assert "DeepSeek-V3 is a strong" in selected.text
+
+
+def test_screenshot_document_reports_ui_cleanup_and_keeps_readme_text():
+    html = """<main><div class='repo-nav'><span>Notifications</span><span>Fork 16.7k</span></div>
+      <div class='markdown-body'><h2>Introduction</h2><p>这是 README 正文，包含足够的技术说明和背景信息。</p>
+      <p>第二段正文用于截图兜底，不是页面导航。</p></div></main>"""
+    document, source, stats = _build_screenshot_document(html, "", "DeepSeek-V3")
+    assert source == "selected_html"
+    assert stats["ui_nodes_removed"] >= 1
+    assert stats["ui_token_hits"]
+    assert "Notifications" not in document
+    assert "Fork 16.7k" not in document
+    assert "这是 README 正文" in document
+
+
 def test_screenshot_document_uses_extracted_body_when_html_is_empty():
     document, source, stats = _build_screenshot_document("", "第一段正文。\n\n第二段正文。", "文章标题")
     assert source == "extracted_body"
