@@ -9,13 +9,14 @@ from datetime import datetime
 from pathlib import Path
 
 from content_creator.schemas import AudioConfig, BoundaryAction, CopyAction, ImageSemanticProfile, ImageTag, LayoutAction, LayoutPlan, TimelineItem, VideoCopy, VideoOutput, VideoProject
-from content_creator.services.article import _brief_from_extraction, _title_match_score, augment_soup_with_selected_html, basic_asset_filter, capture_article_screenshots, chromium_available, discover_asset_candidates, download_selected_assets, extract_article_html, fetch_article_with_extraction, log_asset_diagnostics, order_images, select_assets_with_agent, tag_images
+from content_creator.services.article import _brief_from_extraction, _is_verified_title_card, _title_match_score, augment_soup_with_selected_html, basic_asset_filter, capture_article_screenshots, chromium_available, discover_asset_candidates, download_selected_assets, extract_article_html, fetch_article_with_extraction, log_asset_diagnostics, order_images, select_assets_with_agent, tag_images
 from content_creator.services.assets import scan_and_process
 from content_creator.services.music import analyze_audio, load_catalog, select_track
 from content_creator.services.timeline import build_timeline
 from content_creator.agents.render_agent import compile_render_plan
-from content_creator.services.layout.validator import detect_layout_monotony, validate_scene_layout
-from content_creator.services.layout.qa import validate_rendered_layout
+from content_creator.services.layout.validator import detect_layout_monotony, validate_persistent_title, validate_scene_layout
+from content_creator.services.layout.qa import validate_rendered_layout, validate_rendered_persistent_title
+from content_creator.services.layout.persistent_title import build_persistent_title
 from content_creator.agents.visual_critic import critique_scene
 from content_creator.services.renderer.remotion import render_layout_still
 from content_creator.services.timeline_state import default_url_actions, resolve_timeline
@@ -175,7 +176,28 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     if len(selected) < min(4, asset_target_count):
         raise ValueError(f"文章可用视觉素材少于最低要求：{len(selected)}/{min(4, asset_target_count)}")
     tag_by_id = {tag.image_id: tag for tag in tags}
-    diagnostics["selected_asset_order"] = [{"image_id": image.id, "source_url": image.source_url, "title_match_score": _title_match_score(source_brief.title, image, tag_by_id.get(image.id)), "role": tag_by_id.get(image.id).role.value if tag_by_id.get(image.id) else "other"} for image in selected]
+    opening_tag = tag_by_id.get(selected[0].id)
+    opening_has_verified_headline = _is_verified_title_card(selected[0], opening_tag)
+    opening_reason = "verified_prominent_headline_title_match" if opening_has_verified_headline else "prominent_headline_unavailable"
+    diagnostics["selected_asset_order"] = [{
+        "image_id": image.id,
+        "source_url": image.source_url,
+        "title_match_score": _title_match_score(source_brief.title, image, tag_by_id.get(image.id)),
+        "role": tag_by_id.get(image.id).role.value if tag_by_id.get(image.id) else "other",
+        "contains_prominent_headline": tag_by_id.get(image.id).contains_prominent_headline if tag_by_id.get(image.id) else None,
+        "embedded_headline_text": tag_by_id.get(image.id).embedded_headline_text if tag_by_id.get(image.id) else "",
+        "headline_prominence": tag_by_id.get(image.id).headline_prominence if tag_by_id.get(image.id) else 0,
+        "headline_title_match_score": tag_by_id.get(image.id).headline_title_match_score if tag_by_id.get(image.id) else 0,
+        "headline_readability": tag_by_id.get(image.id).headline_readability if tag_by_id.get(image.id) else 0,
+        "headline_analysis_status": tag_by_id.get(image.id).headline_analysis_status if tag_by_id.get(image.id) else "unavailable",
+        "opening_selection_reason": opening_reason if image.id == selected[0].id else "",
+    } for image in selected]
+    diagnostics["opening_image"] = {
+        "image_id": selected[0].id,
+        "reason": opening_reason,
+        "embedded_headline_text": opening_tag.embedded_headline_text if opening_tag else "",
+        "headline_analysis_status": opening_tag.headline_analysis_status if opening_tag else "unavailable",
+    }
     diagnostics["scene_count"] = len(selected)
     selected_dir = project_dir / "selected_images"
     selected_dir.mkdir()
@@ -183,7 +205,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         shutil.copy2(image.local_path, selected_dir / f"{index:03d}.jpg")
     (project_dir / "article.json").write_text(brief.model_dump_json(indent=2), encoding="utf-8")
     title_match_scores = {image.id: _title_match_score(source_brief.title, image, tag_by_id.get(image.id)) for image in selected}
-    (project_dir / "image_tags.json").write_text(json.dumps({"images": [image.model_dump(mode="json") for image in article_images], "tags": [tag.model_dump(mode="json") for tag in tags], "selected_ids": [image.id for image in selected], "selected_asset_order": [image.id for image in selected], "title_match_scores": title_match_scores, "opening_image_reason": "title_match_score_then_hero_overview_relevance", "transitions": [context.model_dump(mode="json") for context in contexts]}, ensure_ascii=False, indent=2), encoding="utf-8")
+    (project_dir / "image_tags.json").write_text(json.dumps({"images": [image.model_dump(mode="json") for image in article_images], "tags": [tag.model_dump(mode="json") for tag in tags], "selected_ids": [image.id for image in selected], "selected_asset_order": [image.id for image in selected], "title_match_scores": title_match_scores, "opening_image_reason": opening_reason, "opening_image_id": selected[0].id, "transitions": [context.model_dump(mode="json") for context in contexts]}, ensure_ascii=False, indent=2), encoding="utf-8")
     progress("选择背景音乐")
     repo_root = Path(__file__).resolve().parents[3]
     track = select_track(load_catalog(repo_root), brief.mood, brief.topics)
@@ -201,7 +223,25 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     for index, asset in enumerate(assets):
         source = selected_by_index.get(index)
         tag = tag_by_id.get(source.id) if source else None
-        profile = ImageSemanticProfile(role=tag.role.value if tag else "other", narrative_function="evidence" if tag and tag.role.value in {"evidence", "data", "diagram"} else "context", contains_text=None, is_screenshot=bool(source and source.source_url.startswith("screenshot://")), is_data_chart=tag.role.value in {"data", "diagram"} if tag else None, importance=tag.salience if tag else .5, information_density=.75 if tag and tag.role.value in {"data", "diagram"} else .35, source_caption=source.caption if source else "", generated_description=source.alt if source else "")
+        profile = ImageSemanticProfile(
+            role=tag.role.value if tag else "other",
+            narrative_function="evidence" if tag and tag.role.value in {"evidence", "data", "diagram"} else "context",
+            contains_text=True if tag and tag.contains_prominent_headline else None,
+            is_screenshot=bool(source and source.source_url.startswith("screenshot://")),
+            is_data_chart=tag.role.value in {"data", "diagram"} if tag else None,
+            importance=tag.salience if tag else .5,
+            information_density=.75 if tag and tag.role.value in {"data", "diagram"} else .35,
+            source_caption=source.caption if source else "",
+            generated_description=source.alt if source else "",
+            contains_prominent_headline=tag.contains_prominent_headline if tag else None,
+            embedded_headline_text=tag.embedded_headline_text if tag else "",
+            headline_prominence=tag.headline_prominence if tag else 0,
+            headline_title_match_score=tag.headline_title_match_score if tag else 0,
+            headline_bbox=tag.headline_bbox if tag else None,
+            headline_readability=tag.headline_readability if tag else 0,
+            headline_analysis_status=tag.headline_analysis_status if tag else "unavailable",
+            headline_exclusion_reason=tag.headline_exclusion_reason if tag else "",
+        )
         enriched_assets.append(asset.model_copy(update={"semantic_profile": profile}))
     assets = enriched_assets
     diagnostics["project_compile"] = {"project_images": len(assets), "relative_paths": [asset.relative_path for asset in assets], "source_asset_ids": [image.id for image in selected], "scene_count": len(selected)}
@@ -214,13 +254,19 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     profiles = {asset.id: asset.semantic_profile for asset in assets}
     preference_summary = TypographyPreferenceStore(root).summary_for(brief)
     bundle = resolve_timeline(actions, profiles, title=brief.title, body=brief.text, summary=brief.summary, layout_context=article_context(brief), layout_preferences=preference_summary)
+    persistent_title = build_persistent_title(brief.title, bundle.layout_diagnostics.get("font_palette"))
+    persistent_title_issues = validate_persistent_title(persistent_title)
+    persistent_title_rendered = None if persistent_title_issues else validate_rendered_persistent_title(persistent_title, repo_root / "remotion" / "public")
+    if persistent_title_issues or not persistent_title_rendered or not persistent_title_rendered.passed:
+        codes = [issue.code for issue in persistent_title_issues] + ([issue.code for issue in persistent_title_rendered.issues] if persistent_title_rendered else [])
+        raise ValueError("固定顶部标题校验失败：" + ", ".join(codes))
     missing_state = [state.segment_id for state in bundle.resolved if not state.resolved_layout_id or not state.resolved_copy_id]
     if missing_state:
         raise ValueError(f"URL 布局状态不完整，无法安全渲染：{', '.join(missing_state)}")
-    (project_dir / "scene_narrative_plan.json").write_text(json.dumps({"narratives": [item.model_dump(mode="json") for item in bundle.narratives.values()]}, ensure_ascii=False, indent=2), encoding="utf-8")
-    layout_plan = LayoutPlan(global_style="editorial", scenes=list(bundle.layouts.values()))
+    (project_dir / "scene_narrative_plan.json").write_text(json.dumps({"persistent_title": persistent_title.model_dump(mode="json"), "narratives": [item.model_dump(mode="json") for item in bundle.narratives.values()]}, ensure_ascii=False, indent=2), encoding="utf-8")
+    layout_plan = LayoutPlan(global_style="editorial", persistent_title=persistent_title, scenes=list(bundle.layouts.values()))
     (project_dir / "layout_plan.json").write_text(layout_plan.model_dump_json(indent=2), encoding="utf-8")
-    qa = {"layout_director": bundle.layout_diagnostics, "preference_memory": preference_summary, "invalidation_matrix": {"all_hold": "none", "media_replace": ["geometry", "crop", "subject", "contrast"], "copy_replace_or_hide": ["typography", "wrapping", "overflow", "contrast", "visibility"], "layout_adapt": ["changed_blocks", "collision"], "layout_replace": ["full_chromium_audit", "visual_critic"]}, "segments": []}
+    qa = {"layout_director": bundle.layout_diagnostics, "preference_memory": preference_summary, "persistent_title": {"spec": persistent_title.model_dump(mode="json"), "hard_issues": [], "rendered": persistent_title_rendered.model_dump(mode="json")}, "invalidation_matrix": {"all_hold": "none", "media_replace": ["geometry", "crop", "subject", "contrast"], "copy_replace_or_hide": ["typography", "wrapping", "overflow", "contrast", "visibility"], "layout_adapt": ["changed_blocks", "collision"], "layout_replace": ["full_chromium_audit", "visual_critic"]}, "segments": []}
     updated_timeline = []
     for action, state in zip(actions, bundle.resolved):
         narrative = bundle.segment_narratives[state.segment_id]
@@ -283,7 +329,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         "render_path": "url_layout_renderer",
     }
     persist_diagnostics()
-    project = VideoProject(project_id=project_id, fps=REFERENCE_FPS, width=REFERENCE_WIDTH, height=REFERENCE_HEIGHT, images=assets, audio=AudioConfig(path=f"audio/{copied_audio.name}", source_path=f"audio/{copied_audio.name}", duration=max(item.end_frame for item in timeline) / REFERENCE_FPS, sample_rate=analysis.sample_rate, bpm=analysis.bpm), timeline=updated_timeline, output=output, video_copy=copy)
+    project = VideoProject(project_id=project_id, fps=REFERENCE_FPS, width=REFERENCE_WIDTH, height=REFERENCE_HEIGHT, images=assets, audio=AudioConfig(path=f"audio/{copied_audio.name}", source_path=f"audio/{copied_audio.name}", duration=max(item.end_frame for item in timeline) / REFERENCE_FPS, sample_rate=analysis.sample_rate, bpm=analysis.bpm), timeline=updated_timeline, output=output, video_copy=copy, persistent_title=persistent_title)
     progress("编排动态布局视频")
     project = compile_render_plan(project, _storyboard_from_timeline(project), creative_plan=None)
     # Rendered previews are durable QA evidence and are generated with the

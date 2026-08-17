@@ -39,7 +39,7 @@ def default_url_actions(timeline, assets) -> list[DirectorTimelineAction]:
     for index, item in enumerate(timeline):
         if index == 0:
             media, copy, layout, boundary, scene = StateAction.replace, CopyAction.replace, LayoutAction.replace, BoundaryAction.continuous, "scene-000"
-            sources, purpose = ["article:title"], "opening"
+            sources, purpose = ["article:summary"], "opening"
         else:
             scene_cut = index % 3 == 0
             boundary = BoundaryAction.scene_cut if scene_cut else BoundaryAction.accent if index % 2 else BoundaryAction.continuous
@@ -107,11 +107,13 @@ def _variants(text: str) -> tuple[str, str, str]:
         clean = "文章核心信息"
     variants = build_variants(clean)
     if variants:
-        return variants
+        full, short, micro = variants
+        return full, short.rstrip("，,；;：:"), micro.rstrip("，,；;：:")
     sentences = _sentences(clean) or [clean]
     full = "".join(sentences)[:800]
-    short = "".join(sentences[:2])[:400]
-    micro = sentences[0][:180]
+    short = "".join(sentences[:2])[:180]
+    micro_source = sentences[0]
+    micro = micro_source[:36].rstrip("，,；;：:。.!！？?") + ("…" if len(micro_source) > 36 else "")
     return full, short, micro
 
 
@@ -131,9 +133,10 @@ def freeze_narratives(partial: list[PartialTimelineItem], *, title: str, body: s
             # title/explanation hierarchy instead of repeating one short line.
             sources: list[tuple[str, str, int | None]] = []
             if purpose == "opening":
-                sources.append((title, "title", None))
                 if summary:
                     sources.append((summary, "summary", None))
+                if sentences:
+                    sources.append((sentences[0], "body", 0))
             elif purpose == "conclusion" and sentences:
                 sources.append((sentences[-1], "body", len(sentences) - 1))
                 if len(sentences) > 1:
@@ -162,10 +165,15 @@ def freeze_narratives(partial: list[PartialTimelineItem], *, title: str, body: s
                 )
                 contents.append(content)
                 used_sources.add(normalized_source)
-            # A title-only page may not have a usable second unit; this is a
-            # truthful one-block narrative rather than duplicated variants.
+            # The article title is rendered by the global persistent layer.
+            # Dynamic copy falls back to article-grounded body/summary only.
             if not contents:
-                contents = [NarrativeContent(semantic_unit_id=f"semantic-{item.segment_id}", content_id="primary", full=title, short=title, micro=title, source_kind="title", source_hash=sha256(title.encode()).hexdigest())]
+                fallback = summary or body
+                if not fallback.strip():
+                    raise ValueError("没有可用于动态字幕的正文或摘要")
+                full, short, micro = _variants(fallback)
+                source_hash = sha256(fallback.strip().encode()).hexdigest()
+                contents = [NarrativeContent(semantic_unit_id=f"semantic-{item.segment_id}", content_id="primary", full=full, short=short, micro=micro, source_kind="summary" if summary else "body", source_hash=source_hash)]
             digest = sha256(f"{item.segment_id}:{contents[0].source_hash}".encode()).hexdigest()[:12]
             copy_id = f"copy-{digest}"
             unit_id = f"semantic-{digest}"
@@ -181,9 +189,11 @@ def freeze_narratives(partial: list[PartialTimelineItem], *, title: str, body: s
 
 
 def _bind_layout(layout: SceneLayoutSpec, narrative: SceneNarrative, media_id: str) -> SceneLayoutSpec:
-    primary = narrative.contents[0]
     media = [block.model_copy(update={"asset_id": media_id}) for block in layout.media_blocks]
-    text = [block.model_copy(update={"content_id": primary.content_id, "semantic_unit_id": primary.semantic_unit_id, "content_hash": primary.content_hash(block.variant_id)}) for block in layout.text_blocks]
+    text = []
+    for index, block in enumerate(layout.text_blocks):
+        content = narrative.contents[min(index, len(narrative.contents) - 1)]
+        text.append(block.model_copy(update={"content_id": content.content_id, "semantic_unit_id": content.semantic_unit_id, "content_hash": content.content_hash(block.variant_id)}))
     return layout.model_copy(update={"scene_id": narrative.scene_id, "media_blocks": media, "text_blocks": text})
 
 

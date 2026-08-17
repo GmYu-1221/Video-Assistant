@@ -618,7 +618,7 @@ def capture_article_screenshots(source_url: str, project_dir: str | Path, start_
                 if diagnostics is not None:
                     diagnostics["screenshot_fallback"]["clips"].append(item["clip"])
                     diagnostics["screenshot_fallback"]["items"].append(item)
-                result.append(ArticleImage(id=f"article-{start_index + len(result):03d}", source_url=source_url, local_path=str(target), width=SCREENSHOT_SIZE[0], height=SCREENSHOT_SIZE[1], source_index=start_index + len(result), alt="文章正文截图", caption="", context="正文截图", sha256=digest))
+                result.append(ArticleImage(id=f"article-{start_index + len(result):03d}", source_url=f"screenshot://article/{start_index + len(result)}", local_path=str(target), width=SCREENSHOT_SIZE[0], height=SCREENSHOT_SIZE[1], source_index=start_index + len(result), alt="文章正文截图", caption="", context="正文截图", sha256=digest))
             browser.close()
             if len(result) < count:
                 raise ValueError(f"正文截图内容重复，尝试 {len(anchors)} 个段落位置后仅生成 {len(result)} 张")
@@ -1072,10 +1072,88 @@ def _public_route(route) -> None:
         route.abort()
 
 
-def _fallback_tag(image: ArticleImage) -> ImageTag:
+def _fallback_tag(image: ArticleImage, *, headline_status: str = "unavailable") -> ImageTag:
     text = f"{image.alt} {image.caption} {image.context}".lower()
     role = ImageRole.data if any(word in text for word in ("chart", "data", "数据", "图表")) else ImageRole.demo if any(word in text for word in ("demo", "界面", "截图", "screen")) else ImageRole.hero if image.source_index == 0 else ImageRole.evidence
-    return ImageTag(image_id=image.id, role=role, topics=[word for word in image.alt.split()[:4]], salience=0.9 if role == ImageRole.hero else 0.6, visual_quality=min(1.0, image.width * image.height / 2_000_000), section_index=image.source_index)
+    return ImageTag(image_id=image.id, role=role, topics=[word for word in image.alt.split()[:4]], salience=0.9 if role == ImageRole.hero else 0.6, visual_quality=min(1.0, image.width * image.height / 2_000_000), section_index=image.source_index, headline_analysis_status=headline_status, headline_exclusion_reason="image pixels were not analyzed" if headline_status == "unavailable" else "image headline analysis failed")
+
+
+def _with_headline_status(tags: list[ImageTag], status: str) -> list[ImageTag]:
+    if status == "verified":
+        return [tag.model_copy(update={"headline_analysis_status": "verified"}) for tag in tags]
+    return [tag.model_copy(update={
+        "contains_prominent_headline": None,
+        "embedded_headline_text": "",
+        "headline_prominence": 0.0,
+        "headline_title_match_score": 0.0,
+        "headline_bbox": None,
+        "headline_readability": 0.0,
+        "headline_analysis_status": status,
+        "headline_exclusion_reason": "image pixels were not analyzed" if status == "unavailable" else "image headline analysis failed",
+    }) for tag in tags]
+
+
+def analyze_prominent_headlines(brief: ArticleBrief, images: list[ArticleImage], tags: list[ImageTag]) -> list[ImageTag]:
+    """Inspect actual pixels in bounded batches without shrinking the image pool."""
+    provider = get_agent_provider("asset")
+    multimodal = getattr(provider, "complete_multimodal", None)
+    if provider.model_name == "mock" or not callable(multimodal):
+        return _with_headline_status(tags, "unavailable")
+    if tags and all(tag.headline_analysis_status == "verified" for tag in tags):
+        return tags
+    by_id = {tag.image_id: tag for tag in tags}
+    resolved: dict[str, ImageTag] = {}
+
+    def inspect(batch: list[ArticleImage]) -> None:
+        prompt = json.dumps({
+            "task": "按所列顺序检查实际图片像素，只判断图片中是否存在可作为视频开场的醒目主题大标题。正文截图允许入选，但普通正文段落、导航 UI、错误提示、logo、水印、按钮、代码和图表标签不算主题大标题。必须逐项返回且只能返回输入 image_id。embedded_headline_text 必须是图片中可见原文，bbox 为归一化 [x,y,width,height]。",
+            "article_title": brief.title,
+            "images_in_supplied_order": [{"image_id": image.id, "source_hint": "article_screenshot" if image.source_url.startswith("screenshot://") else "downloaded_image", "alt": image.alt, "caption": image.caption} for image in batch],
+            "output": {"image_headlines": [{"image_id": "input id", "contains_prominent_headline": True, "embedded_headline_text": "exact visible text", "headline_prominence": .9, "headline_title_match_score": .9, "headline_bbox": [.1, .1, .8, .3], "headline_readability": .9, "headline_exclusion_reason": "empty when eligible, otherwise specific reason"}]},
+        }, ensure_ascii=False)
+        raw = multimodal(prompt, [image.local_path for image in batch]).strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.I).strip()
+        items = json.loads(raw)["image_headlines"]
+        expected = {image.id for image in batch}
+        if {str(item.get("image_id", "")) for item in items} != expected:
+            raise ValueError("headline analysis returned incomplete or unknown image IDs")
+        for item in items:
+            image_id = str(item["image_id"])
+            prominent = item.get("contains_prominent_headline") is True or str(item.get("contains_prominent_headline", "")).lower() == "true"
+            if not prominent:
+                item = item | {
+                    "contains_prominent_headline": False,
+                    "embedded_headline_text": "",
+                    "headline_prominence": 0.0,
+                    "headline_title_match_score": 0.0,
+                    "headline_bbox": None,
+                    "headline_readability": 0.0,
+                }
+            data = by_id[image_id].model_dump(mode="json") | item | {"headline_analysis_status": "verified"}
+            resolved[image_id] = ImageTag.model_validate(data)
+
+    for start in range(0, len(images), 4):
+        batch = images[start:start + 4]
+        try:
+            inspect(batch)
+        except Exception as batch_exc:
+            for image in batch:
+                try:
+                    inspect([image])
+                except Exception as item_exc:
+                    base = by_id[image.id]
+                    resolved[image.id] = base.model_copy(update={
+                        "contains_prominent_headline": None,
+                        "embedded_headline_text": "",
+                        "headline_prominence": 0.0,
+                        "headline_title_match_score": 0.0,
+                        "headline_bbox": None,
+                        "headline_readability": 0.0,
+                        "headline_analysis_status": "failed",
+                        "headline_exclusion_reason": f"{type(batch_exc).__name__}: batch failed; {type(item_exc).__name__}: item retry failed"[:300],
+                    })
+    return [resolved.get(image.id, by_id[image.id]) for image in images]
 
 
 def tag_images(brief: ArticleBrief, images: list[ArticleImage]) -> tuple[ArticleBrief, VideoCopy, list[ImageTag]]:
@@ -1085,24 +1163,28 @@ def tag_images(brief: ArticleBrief, images: list[ArticleImage]) -> tuple[Article
     if provider.model_name == "mock":
         return brief.model_copy(update={"summary": fallback_copy.body, "topics": fallback_tags[0].topics}), fallback_copy, fallback_tags
     payload = {"title": brief.title, "site": brief.site_name, "text": brief.text[:9000], "images": [{"id": image.id, "alt": image.alt, "caption": image.caption, "context": image.context[:800], "size": [image.width, image.height]} for image in images]}
-    prompt = json.dumps({"task": "阅读文章并生成短视频文案和图片标签。只返回 JSON。", "article": payload, "output": {"summary": "<=1200 chars", "topics": ["string"], "mood": "string", "video_copy": {"headline": "<=80 chars, <=2 lines", "subtitle": "<=40 chars, <=2 lines", "body": "<=400 chars, <=8 lines"}, "image_tags": [{"image_id": "input id", "role": "hero|overview|evidence|data|demo|product|quote|result|brand|other", "topics": ["string"], "entities": ["string"], "salience": "0..1", "visual_quality": "0..1", "section_index": "int"}]}}, ensure_ascii=False)
+    prompt = json.dumps({"task": "阅读文章并分析每张实际图片。只返回 JSON。必须区分图片内部醒目的主题标题与 logo、水印、按钮、导航、代码、图表标签或零散 UI 文字。只有图片像素中确实存在清晰、完整、与文章标题相关的大字时，contains_prominent_headline 才能为 true。headline_bbox 使用归一化 [x,y,width,height]。", "article": payload, "output": {"summary": "<=1200 chars", "topics": ["string"], "mood": "string", "video_copy": {"headline": "<=80 chars, <=2 lines", "subtitle": "<=40 chars, <=2 lines", "body": "<=400 chars, <=8 lines"}, "image_tags": [{"image_id": "input id", "role": "hero|overview|evidence|data|diagram|demo|product|quote|result|portrait|brand|other|irrelevant", "topics": ["string"], "entities": ["string"], "salience": "0..1", "visual_quality": "0..1", "section_index": "int", "contains_prominent_headline": "true|false", "embedded_headline_text": "exact visible headline or empty", "headline_prominence": "0..1", "headline_title_match_score": "0..1", "headline_bbox": ["x 0..1", "y 0..1", "width 0..1", "height 0..1"], "headline_readability": "0..1", "headline_exclusion_reason": "why visible text is not a usable title card"}]}}, ensure_ascii=False)
     try:
         multimodal = getattr(provider, "complete_multimodal", None)
         if callable(multimodal):
             try:
                 raw = multimodal(prompt, [image.local_path for image in images])
+                headline_status = "verified"
             except Exception:
                 raw = provider.complete_json(prompt)
+                headline_status = "failed"
         else:
             raw = provider.complete_json(prompt)
+            headline_status = "unavailable"
         result = json.loads(raw)
-        tags = [ImageTag.model_validate(item) for item in result["image_tags"]]
+        tags = _with_headline_status([ImageTag.model_validate(item) for item in result["image_tags"]], headline_status)
         if {tag.image_id for tag in tags} != {image.id for image in images}:
             raise ValueError("incomplete image tags")
         updated = brief.model_copy(update={"summary": str(result.get("summary", ""))[:1200], "topics": list(result.get("topics", []))[:12], "mood": str(result.get("mood", "informative"))[:40]})
-        return updated, VideoCopy.model_validate(result["video_copy"]), tags
+        return updated, VideoCopy.model_validate(result["video_copy"]), analyze_prominent_headlines(brief, images, tags)
     except Exception:
-        return brief.model_copy(update={"summary": fallback_copy.body, "topics": fallback_tags[0].topics}), fallback_copy, fallback_tags
+        failed_tags = [_fallback_tag(image, headline_status="failed") for image in images]
+        return brief.model_copy(update={"summary": fallback_copy.body, "topics": failed_tags[0].topics}), fallback_copy, analyze_prominent_headlines(brief, images, failed_tags)
 
 
 def _title_match_score(title: str, image: ArticleImage, tag: ImageTag | None = None) -> float:
@@ -1112,15 +1194,43 @@ def _title_match_score(title: str, image: ArticleImage, tag: ImageTag | None = N
         return 0.0
     tokens = [token for token in re.split(r"[^\w\u4e00-\u9fff]+", title) if len(token) >= 2]
     matches = sum(token in haystack for token in tokens)
-    return min(1.0, matches / max(1, len(tokens)))
+    metadata_score = min(1.0, matches / max(1, len(tokens)))
+    trusted_visual_score = tag.headline_title_match_score if tag and tag.headline_analysis_status == "verified" and tag.role not in {ImageRole.brand, ImageRole.data, ImageRole.diagram, ImageRole.irrelevant} else 0.0
+    return max(metadata_score, trusted_visual_score)
+
+
+def _is_verified_title_card(image: ArticleImage, tag: ImageTag | None) -> bool:
+    if not tag:
+        return False
+    if tag.role in {ImageRole.brand, ImageRole.data, ImageRole.diagram, ImageRole.irrelevant}:
+        return False
+    return bool(
+        tag.headline_analysis_status == "verified"
+        and tag.contains_prominent_headline
+        and tag.embedded_headline_text.strip()
+        and tag.headline_prominence >= .55
+        and tag.headline_readability >= .6
+        and tag.headline_title_match_score >= .45
+    )
 
 
 def order_images(images: list[ArticleImage], tags: list[ImageTag], title: str = "", target_count: int | None = None) -> tuple[list[ArticleImage], list[TransitionContext]]:
     by_id = {tag.image_id: tag for tag in tags}
+    if not images:
+        return [], []
     ranked = sorted(images, key=lambda image: (-by_id[image.id].salience, image.source_index))
+    first = max(images, key=lambda image: (
+        1 if _is_verified_title_card(image, by_id.get(image.id)) else 0,
+        by_id[image.id].headline_title_match_score if _is_verified_title_card(image, by_id.get(image.id)) else _title_match_score(title, image, by_id.get(image.id)),
+        by_id[image.id].headline_prominence if _is_verified_title_card(image, by_id.get(image.id)) else 0,
+        by_id[image.id].headline_readability if _is_verified_title_card(image, by_id.get(image.id)) else 0,
+        1 if by_id[image.id].role in {ImageRole.hero, ImageRole.overview} else 0,
+        by_id[image.id].salience,
+        -image.source_index,
+    ))
     if target_count:
-        ranked = ranked[:target_count]
-    first = max(ranked, key=lambda image: (_title_match_score(title, image, by_id.get(image.id)), 1 if by_id[image.id].role in {ImageRole.hero, ImageRole.overview} else 0, by_id[image.id].salience, -image.source_index))
+        remaining = [image for image in ranked if image.id != first.id][:max(0, target_count - 1)]
+        ranked = [first, *remaining]
     last = min(ranked, key=lambda image: (0 if by_id[image.id].role in {ImageRole.result, ImageRole.brand, ImageRole.product} else 1, -by_id[image.id].salience, image.source_index))
     middle = sorted((image for image in ranked if image.id not in {first.id, last.id}), key=lambda image: image.source_index)
     ordered = [first, *middle]

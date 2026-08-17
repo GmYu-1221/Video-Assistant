@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 
 from content_creator.schemas import ArticleBrief, ArticleImage, AssetCandidate, AssetDecision, AssetKind, ImageRole, ImageTag, MusicTrack
 from content_creator.services import article as article_service
-from content_creator.services.article import BrowserImportRequired, _assert_public_url, _build_screenshot_document, _clean_imported_article_document, _deduplicate_text_candidates, _discover_text_candidates, _hamming_distance, _merge_text_candidates, _perceptual_hash, _select_article_candidates, _screenshot_anchors, basic_asset_filter, capture_article_screenshots, chromium_available, discover_asset_candidates, download_selected_assets, extract_article_html, order_images, parse_article_html, select_assets_with_agent
+from content_creator.services.article import BrowserImportRequired, _assert_public_url, _build_screenshot_document, _clean_imported_article_document, _deduplicate_text_candidates, _discover_text_candidates, _hamming_distance, _is_verified_title_card, _merge_text_candidates, _perceptual_hash, _select_article_candidates, _screenshot_anchors, analyze_prominent_headlines, basic_asset_filter, capture_article_screenshots, chromium_available, discover_asset_candidates, download_selected_assets, extract_article_html, order_images, parse_article_html, select_assets_with_agent
 from content_creator.services.music.catalog import select_track
 
 
@@ -30,6 +30,59 @@ def test_tag_order_places_hero_first_and_result_last():
     assert ordered[0].id == images[1].id
     assert ordered[-1].id == images[3].id
     assert contexts[-1].relation.value == "climax"
+
+
+def test_verified_title_card_is_selected_first_even_with_lower_salience():
+    images = [_image(index) for index in range(3)]
+    tags = [
+        ImageTag(image_id=images[0].id, role=ImageRole.hero, salience=.95),
+        ImageTag(image_id=images[1].id, role=ImageRole.overview, salience=.55, contains_prominent_headline=True, embedded_headline_text="Qwen3.8-Max 登场", headline_prominence=.9, headline_title_match_score=.92, headline_bbox=(.05, .15, .9, .35), headline_readability=.94, headline_analysis_status="verified"),
+        ImageTag(image_id=images[2].id, role=ImageRole.result, salience=.5),
+    ]
+    ordered, _ = order_images(images, tags, title="Qwen3.8-Max 正式发布", target_count=3)
+    assert ordered[0].id == images[1].id
+    assert _is_verified_title_card(images[1], tags[1])
+
+
+def test_verified_article_screenshot_can_be_prominent_headline_opener():
+    images = [_image(0), _image(1).model_copy(update={"source_url": "screenshot://article/1"})]
+    tags = [
+        ImageTag(image_id=images[0].id, role=ImageRole.hero, salience=.6),
+        ImageTag(image_id=images[1].id, role=ImageRole.overview, salience=.99, contains_prominent_headline=True, embedded_headline_text="正文截图大字", headline_prominence=1, headline_title_match_score=1, headline_bbox=(0, 0, 1, .5), headline_readability=1, headline_analysis_status="verified"),
+    ]
+    ordered, _ = order_images(images, tags, title="正文截图大字")
+    assert ordered[0].id == images[1].id
+    assert _is_verified_title_card(images[1], tags[1])
+
+
+def test_unverified_headline_metadata_does_not_claim_title_card():
+    image = _image(0)
+    tag = ImageTag(image_id=image.id, role=ImageRole.hero, contains_prominent_headline=True, embedded_headline_text="Metadata guess", headline_prominence=1, headline_title_match_score=1, headline_readability=1, headline_analysis_status="unavailable")
+    assert not _is_verified_title_card(image, tag)
+
+
+def test_prominent_headline_analysis_batches_actual_images(monkeypatch):
+    images = [_image(index) for index in range(9)]
+    images[0] = images[0].model_copy(update={"source_url": "screenshot://article/0"})
+    tags = [ImageTag(image_id=image.id, role=ImageRole.demo if index == 0 else ImageRole.evidence) for index, image in enumerate(images)]
+    calls = []
+
+    class Provider:
+        model_name = "gemini-3.6-flash"
+
+        def complete_multimodal(self, prompt, paths):
+            payload = json.loads(prompt)
+            ids = [item["image_id"] for item in payload["images_in_supplied_order"]]
+            calls.append((ids, paths))
+            return json.dumps({"image_headlines": [{"image_id": image_id, "contains_prominent_headline": image_id == images[0].id, "embedded_headline_text": "DeepSeek-V3" if image_id == images[0].id else "", "headline_prominence": .9 if image_id == images[0].id else 0, "headline_title_match_score": .95 if image_id == images[0].id else 0, "headline_bbox": [.1, .1, .8, .3] if image_id == images[0].id else [0, 0, 0, 0], "headline_readability": .9 if image_id == images[0].id else 0, "headline_exclusion_reason": "" if image_id == images[0].id else "no prominent headline"} for image_id in ids]})
+
+    monkeypatch.setattr(article_service, "get_agent_provider", lambda _name: Provider())
+    brief = ArticleBrief(url="https://example.com", canonical_url="https://example.com", title="DeepSeek-V3 项目介绍", text="正文")
+    analyzed = analyze_prominent_headlines(brief, images, tags)
+    assert [len(ids) for ids, _ in calls] == [4, 4, 1]
+    assert analyzed[0].headline_analysis_status == "verified"
+    assert _is_verified_title_card(images[0], analyzed[0])
+    assert all(tag.headline_analysis_status == "verified" for tag in analyzed)
 
 
 def test_music_selection_prefers_matching_mood_and_topic():
@@ -237,6 +290,7 @@ def test_local_screenshot_fallback_never_navigates_to_source_url(tmp_path):
     assert fallback["network_navigation"] is False
     assert fallback["source"] == "selected_html"
     assert all(Path(asset.local_path).is_file() for asset in assets)
+    assert all(asset.source_url.startswith("screenshot://article/") for asset in assets)
     assert all(clip["x"] >= 0 and clip["y"] >= 0 and clip["right"] <= fallback["page_size"]["scrollWidth"] and clip["bottom"] <= fallback["page_size"]["scrollHeight"] for clip in fallback["clips"])
 
 

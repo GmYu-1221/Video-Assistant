@@ -1,96 +1,70 @@
-# Video-Assistant Architecture
+# Video-Assistant 架构
 
-## Runtime Flow
+## 运行时流程
 
 ```text
-User request
+用户请求
   -> Director Agent
-  -> DirectorPlan (creative_intent, transition_intent)
-  -> one Remotion Creative Agent
-     -> AnimationPlan
-     -> TransitionEffectPlan
+  -> DirectorPlan（creative_intent、transition_intent）
+  -> 一个 Remotion Creative Agent
+     -> RemotionCreativePlan（VisualEvent 列表）
   -> render_data.json
   -> Remotion Renderer
      -> EffectRenderer
-     -> TransitionEffectRenderer or legacy TransitionFactory
+     -> TransitionEffectRenderer 或基线 TransitionFactory
   -> MP4
 ```
 
-The Director owns interpretation. It describes scene movement in
-`creative_intent` and scene-boundary movement in `transition_intent`. It does
-not select Remotion component names, registered effect identifiers, or TSX
-parameters.
+Director 负责解释意图：它在 `creative_intent` 中描述场景内的运动，在 `transition_intent` 中描述场景边界的转场。它不选择 Remotion 组件名、注册效果标识符或 TSX 参数。
 
-There is one Remotion Creative Agent, not separate animation or transition
-agents. It calls `get_agent_provider("remotion")` once per plan run and uses
-the same provider for both plan outputs. It reads the installed project skills
-under `.agents/skills/` (`remotion-best-practices`, `remotion-docs`,
-`remotion-markup`, and `remotion-render`) and receives the registered
-capabilities in its prompt.
+只有一个 Remotion Creative Agent，而不是独立的动画或转场 Agent。它每次计划运行调用一次 `get_agent_provider("remotion")`，同一 Provider 用于所有输出。它读取 `.agents/skills/` 下安装的项目技能（`video-assistant-visual-events`、`remotion-motion-design`、`stretch-motion-design`、`elastic-blur-motion-design`、`blur-transition-design`、`zoom-motion-design`、`remotion-best-practices`、`remotion-docs`、`remotion-markup`、`remotion-render`），并在提示词中收到已注册能力清单。
 
-## Plan Contracts
+## 计划契约
 
-`AnimationPlan` attaches a plan to a scene's `animation` field:
+入场/场景动画以视觉事件形式挂到场景上：
 
 ```json
-{"type":"particle_flip_reveal","duration_frames":24,"params":{"particle_density":240,"rotation_axis":"Y"}}
+{"type":"particle_flip_reveal","phase":"entrance","start_frame":0,"duration_frames":24,"params":{"particle_density":240,"rotation_axis":"Y"}}
 ```
 
-`TransitionEffectPlan` attaches a plan to the outgoing scene's
-`transition_effect` field:
+创意转场也以视觉事件形式挂到出场景上：
 
 ```json
-{"type":"glass_shatter_transition","duration_frames":18,"params":{"fragment_count":48,"impact_origin":"center","motion_blur":true}}
+{"type":"glass_shatter_transition","phase":"transition","start_frame":30,"duration_frames":45,"source_asset_id":"image-001","target_asset_id":"image-002","params":{"fragment_count":48,"impact_origin":"center","motion_blur":true}}
 ```
 
-`render_data.json` is the renderer contract. A `timeline` item can contain
-both `animation` and `transition_effect`.
+`render_data.json` 是渲染器契约。一个 `timeline` 项可以同时包含动画与转场事件。
 
-## Renderer Priority
+## 渲染器优先级
 
-`Composition.tsx` applies the following rule at each non-final scene boundary:
+`Composition.tsx` 在每个非最终场景边界应用以下规则：
 
-1. When `timeline.transition_effect` exists, call `TransitionEffectRenderer`.
-2. Otherwise call the legacy `TransitionFactory` with `timeline.transition`.
+1. 当存在创意转场事件时，调用 `TransitionEffectRenderer`。
+2. 否则调用基线 `TransitionFactory` 处理 `timeline.transition`。
 
-This keeps `fade`, `crossfade`, `wipe`, `slide`, and all other existing base
-transitions compatible. An AI-selected creative transition cannot silently
-fall through to the baseline transition.
+这样 `fade`、`crossfade`、`wipe`、`slide` 等所有既有基线转场保持兼容，AI 选择的创意转场也不会静默回落到基线转场。
 
-`TransitionEffectRenderer` is independent from scene `EffectRenderer` and
-dispatches through `TransitionEffectRegistry`. The initial registry entry,
-`glass_shatter_transition`, renders the outgoing scene as clipped fragment
-layers with opacity breakup, displacement, rotation, optional blur, and an
-incoming-scene reveal.
+`TransitionEffectRenderer` 与场景 `EffectRenderer` 相互独立，通过 `TransitionEffectRegistry` 分发。注册表当前包含：`card_flip_transition`（卡片翻转转场）、`glass_shatter_transition`（玻璃破碎，出场景被裁剪为碎片图层，带不透明度分解、位移、旋转、可选模糊与入场景揭示）、`shake_transition`（抖动冲击）、`gaussian_blur_transition` / `directional_blur_transition` / `pixel_blur_transition` / `bokeh_blur_transition` / `water_ripple_transition`（五类模糊转场）以及 `zoom_through_transition`（放大穿过转场）。
 
-## Adding a Scene Animation
+## 添加一个场景动画
 
-1. Implement the TSX effect under `remotion/src/effects/` using frame-driven
-   Remotion APIs.
-2. Register it in the scene `EffectRegistry`.
-3. Add its enum value and capability metadata to the Python animation schema
-   and Remotion Creative Agent prompt.
-4. Validate its parameters and add an LLM-to-`render_data.json` test.
+1. 在 `remotion/src/effects/` 下用帧驱动的 Remotion API 实现 TSX 效果。
+2. 在场景 `EffectRegistry` 中注册。
+3. 在 Python 动画 Schema 与 Remotion Creative Agent 提示词中加入枚举值与能力元数据。
+4. 校验参数，并添加 LLM 到 `render_data.json` 的测试。
 
-## Adding a Transition Effect
+## 添加一个转场效果
 
-1. Implement a Remotion transition presentation under
-   `remotion/src/transitions/presentations/`.
-2. Add a typed `TransitionEffectPlan` entry and register it in
-   `TransitionEffectRegistry` in `TransitionEffectRenderer.tsx`.
-3. Add the corresponding Python enum and capability metadata in
-   `transition_effect_plan.py` and `remotion_agent.py`.
-4. Add parameter validation, LLM-plan, render-data, and renderer-dispatch
-   tests.
+1. 在 `remotion/src/transitions/presentations/` 下实现 Remotion 转场呈现。
+2. 添加类型化的转场事件条目，并在 `TransitionEffectRenderer.tsx` 的 `TransitionEffectRegistry` 中注册。
+3. 在 `transition_effect_plan.py` 与 `remotion_agent.py` 中添加对应的 Python 枚举与能力元数据。
+4. 添加参数校验、LLM 计划、渲染数据和渲染器分发测试。
 
-Do not add a new LLM agent for an effect. Extend the existing Remotion Creative
-Agent and its capability registry instead.
+不要为一个效果新增 LLM Agent。扩展现有 Remotion Creative Agent 及其能力注册表即可。
 
-## Developer Notes
+## 开发者注意事项
 
-- `TransitionConfig` remains the safe baseline timeline mechanism; it is not a
-  Director creative-decision format.
-- Unknown LLM-selected registered types are validation errors. Invalid JSON,
-  unavailable providers, and network failures use a logged safe fallback.
-- The CLI `show` output distinguishes `Transition` (baseline) from `Creative
-  Transition` (Director intent), so they are not conflated before rendering.
+- `TransitionConfig` 仍是安全的基线时间轴机制，不是 Director 的创意决策格式。
+- LLM 选择了未注册类型属于校验错误。非法 JSON、Provider 不可用和网络失败使用记录日志的安全降级。
+- CLI 的 `show` 输出区分 `Transition`（基线）与 `Creative Transition`（导演意图），渲染前不会混淆两者。
+- 入场事件结束后图片必须保持静止（scale 1、rotate 0、translate 0、opacity 1、blur 0）；转场事件拥有目标素材的揭示，目标场景不再叠加入场事件。

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from content_creator.schemas import ImageSemanticProfile, LayoutIssue, SceneLayoutSpec, SceneNarrative, TypographyRole
+from content_creator.schemas import ImageSemanticProfile, LayoutIssue, PersistentTitleSpec, Rect, SceneLayoutSpec, SceneNarrative, TypographyRole
 
 SAFE = 60
 MIN_FONT = {TypographyRole.display: 64, TypographyRole.headline: 48, TypographyRole.body: 32, TypographyRole.caption: 28, TypographyRole.metadata: 24, TypographyRole.quote: 40, TypographyRole.numeric: 56}
 MAX_LINES = {TypographyRole.display: 3, TypographyRole.headline: 3, TypographyRole.body: 8, TypographyRole.caption: 3, TypographyRole.metadata: 2, TypographyRole.quote: 4, TypographyRole.numeric: 3}
+PERSISTENT_TITLE_BBOX = Rect(x=60, y=80, width=960, height=280)
 
 
 def intersects(a, b) -> bool:
@@ -31,11 +32,25 @@ def validate_scene_layout(spec: SceneLayoutSpec, narrative: SceneNarrative, prof
             issues.append(LayoutIssue(code="semantic_unit_mismatch", severity="critical", block_id=text.block_id, message="layout repair cannot switch semantic units"))
         if text.content_hash != content[text.content_id].content_hash(text.variant_id):
             issues.append(LayoutIssue(code="content_hash_mismatch", severity="critical", block_id=text.block_id, message="layout must not rewrite narrative content"))
+        value = content[text.content_id].value(text.variant_id)
+        if any(phrase not in value for phrase in text.emphasis):
+            issues.append(LayoutIssue(code="invalid_emphasis", severity="critical", block_id=text.block_id, message="emphasis must reference exact immutable copy text"))
         if text.max_lines > MAX_LINES[text.typography_role]:
             issues.append(LayoutIssue(code="too_many_lines", block_id=text.block_id, message="role line limit exceeded"))
         # The renderer uses the role minimum; agent cannot express a smaller font.
         if text.typography_role not in MIN_FONT:
             issues.append(LayoutIssue(code="unknown_typography_role", severity="critical", block_id=text.block_id, message="unregistered typography role"))
+        if intersects(text.bbox, PERSISTENT_TITLE_BBOX):
+            issues.append(LayoutIssue(code="persistent_title_collision", severity="critical", block_id=text.block_id, message="dynamic copy must not overlap the persistent top title"))
+    if narrative.scene_purpose == "opening" and len(narrative.contents) > 1:
+        top = [block for block in spec.text_blocks if block.content_id == narrative.contents[0].content_id and block.bbox.y >= 360 and block.bbox.y + block.bbox.height <= 430]
+        bottom = [block for block in spec.text_blocks if block.content_id == narrative.contents[1].content_id and block.bbox.y >= 1040]
+        if not top or top[0].alignment != "center" or top[0].caption_style_intent.value != "reference_emphasis":
+            issues.append(LayoutIssue(code="opening_summary_hierarchy", severity="critical", message="opening summary must be a centered reference-emphasis line above the media stage"))
+        if not bottom:
+            issues.append(LayoutIssue(code="opening_explanation_missing", severity="critical", message="opening must retain an article-grounded explanation below the media stage"))
+        if any(block.typography_role == TypographyRole.display for block in spec.text_blocks):
+            issues.append(LayoutIssue(code="fabricated_image_headline", severity="critical", message="opening dynamic copy cannot fabricate an additional display headline over the image"))
     overlay = {frozenset(pair) for pair in spec.overlay_policy.allowed_pairs}
     for i, left in enumerate(blocks):
         for right in blocks[i + 1:]:
@@ -51,6 +66,17 @@ def validate_scene_layout(spec: SceneLayoutSpec, narrative: SceneNarrative, prof
                 issues.append(LayoutIssue(code="subject_occlusion", severity="critical", block_id=text.block_id, message="text covers known image subject"))
             if (profile.contains_text or profile.is_screenshot or profile.is_data_chart) and any(intersects(text.bbox, media.bbox) for media in spec.media_blocks):
                 issues.append(LayoutIssue(code="dense_media_overlay", block_id=text.block_id, message="text must not overlay a screenshot, chart, or image containing text"))
+    return issues
+
+
+def validate_persistent_title(title: PersistentTitleSpec) -> list[LayoutIssue]:
+    issues: list[LayoutIssue] = []
+    if title.bbox != PERSISTENT_TITLE_BBOX:
+        issues.append(LayoutIssue(code="persistent_title_geometry", severity="critical", block_id="persistent-title", message="persistent title geometry changed"))
+    if title.max_lines > MAX_LINES[TypographyRole.headline]:
+        issues.append(LayoutIssue(code="persistent_title_lines", severity="critical", block_id="persistent-title", message="persistent title exceeds headline line limit"))
+    if title.outline.value != "dark_strong" or title.color.upper() != "#DCE74A":
+        issues.append(LayoutIssue(code="persistent_title_reference_style", severity="critical", block_id="persistent-title", message="persistent title must use the frozen yellow strong-outline style"))
     return issues
 
 

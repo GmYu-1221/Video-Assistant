@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "updated_at": "2026-08-16T13:35:29.654660+00:00",
-  "feedback_count": 14,
+  "updated_at": "2026-08-17T01:52:54.207547+00:00",
+  "feedback_count": 15,
   "font_scores": {
-    "lxgw-wenkai": -0.9409,
-    "noto-sans-sc": -1.5592,
-    "source-han-serif": -2.6326,
-    "zcool-kuaile": -1.7373,
-    "zcool-qingke-huangyou": -1.5384
+    "lxgw-wenkai": -0.9127,
+    "noto-sans-sc": -2.5124,
+    "source-han-serif": -2.5536,
+    "zcool-kuaile": -1.6852,
+    "zcool-qingke-huangyou": -2.4922
   }
 }

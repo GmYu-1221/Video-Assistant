@@ -16,7 +16,7 @@ def critique_scene(*, rendered_ok: bool, hard_issues: list[LayoutIssue], preview
     paths = [path for path in preview_paths or [] if Path(path).is_file()]
     if provider.model_name == "mock" or not paths or not baseline_ok:
         return unavailable
-    prompt = json.dumps({"task": "Judge a single video scene preview. Return JSON only: pass, quality_score 0..1, issues[]. Inspect readability, subject occlusion, whitespace, hierarchy, awkward line breaks, and PPT-like composition.", "scene_purpose": scene_purpose, "output": {"pass": True, "quality_score": .8, "issues": [{"code": "short_code", "severity": "info|warning|error|critical", "block_id": "optional", "message": "short", "repair_hint": "short"}]}}, ensure_ascii=False)
+    prompt = json.dumps({"task": "Judge a single Chinese mobile-video scene preview. Return JSON only: pass, quality_score 0..1, issues[]. Inspect readability, subject occlusion, whitespace, hierarchy, awkward line breaks, and PPT-like composition. For the opening, verify that any prominent display headline belongs to the original image, is readable and title-relevant; the fixed yellow title must not redundantly overpower it; the white summary and bottom explanation must be useful and balanced; outlines must not look cheap or too thick. For later scenes, require stylistic continuity without repeating the full opening treatment.", "scene_purpose": scene_purpose, "output": {"pass": True, "quality_score": .8, "issues": [{"code": "short_code", "severity": "info|warning|error|critical", "block_id": "optional", "message": "short", "repair_hint": "short"}]}}, ensure_ascii=False)
     try:
         raw = provider.complete_multimodal(prompt, paths)
         parsed = VisualCriticResult.model_validate(json.loads(raw))

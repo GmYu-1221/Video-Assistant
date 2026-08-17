@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
 class ImageRole(str, Enum):
@@ -154,6 +154,21 @@ class ImageTag(BaseModel):
     salience: float = Field(default=0.5, ge=0, le=1)
     visual_quality: float = Field(default=0.5, ge=0, le=1)
     section_index: int = Field(default=0, ge=0)
+    contains_prominent_headline: bool | None = None
+    embedded_headline_text: str = Field(default="", max_length=500)
+    headline_prominence: float = Field(default=0.0, ge=0, le=1)
+    headline_title_match_score: float = Field(default=0.0, ge=0, le=1)
+    headline_bbox: tuple[float, float, float, float] | None = None
+    headline_readability: float = Field(default=0.0, ge=0, le=1)
+    headline_analysis_status: str = Field(default="unavailable", pattern=r"^(verified|unavailable|failed)$")
+    headline_exclusion_reason: str = Field(default="", max_length=300)
+
+    @field_validator("headline_bbox")
+    @classmethod
+    def normalized_headline_bbox(cls, value):
+        if value is not None and (any(item < 0 or item > 1 for item in value) or value[2] <= 0 or value[3] <= 0 or value[0] + value[2] > 1 or value[1] + value[3] > 1):
+            raise ValueError("headline_bbox must be normalized x,y,width,height inside the image")
+        return value
 
 
 class TransitionContext(BaseModel):

@@ -4,6 +4,7 @@ import type {RemotionPropsWithVisualSpec, VisualSpecLayer, VisualSpecScene, Visu
 import {trackValue} from './TrackEvaluator';
 import {AudioTrack} from '../components/AudioTrack';
 import {SceneLayoutRenderer} from '../layout/SceneLayoutRenderer';
+import {PersistentTitleRenderer} from '../layout/PersistentTitleRenderer';
 
 const Layer: React.FC<{layer: VisualSpecLayer; region: {x: number; y: number; width: number; height: number; overflow?: 'visible'|'hidden'}; frame: number; props: RemotionPropsWithVisualSpec; transitionTracks?: VisualSpecTrack[]}> = ({layer, region, frame, props, transitionTracks}) => {
   const style = layer.style ?? {};
@@ -52,6 +53,7 @@ export const VisualSpecComposition: React.FC<RemotionPropsWithVisualSpec> = (pro
       {transitionActive && previous?.layout && previous.narrative && <SceneLayoutRenderer layout={previous.layout} narrative={previous.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={{opacity:1-progress}} transparentBackground/>}
       {transitionActive && <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={incomingMediaStyle} transparentBackground/>}
       {transitionActive && <div style={{position:'absolute',left:0,top:430,width:1080,height:610,background:'#fff',opacity:flash,zIndex:10,pointerEvents:'none'}}/>}
+      <PersistentTitleRenderer title={props.persistent_title}/>
       <AudioTrack src={`${props.media_base_url ?? ''}/${props.audio.path}`} />
     </AbsoluteFill>;
   }

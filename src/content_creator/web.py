@@ -248,7 +248,7 @@ class JobManager:
             )
             write_version_snapshot(revised, version_dir, source_project_dir=project_dir)
             (version_dir / "layout_plan.json").write_text(artifacts["layout_plan"].model_dump_json(indent=2), encoding="utf-8")
-            (version_dir / "scene_narrative_plan.json").write_text(json.dumps({"narratives": [item.narrative.model_dump(mode="json") for item in revised.timeline if item.narrative]}, ensure_ascii=False, indent=2), encoding="utf-8")
+            (version_dir / "scene_narrative_plan.json").write_text(json.dumps({"persistent_title": revised.persistent_title.model_dump(mode="json") if revised.persistent_title else None, "narratives": [item.narrative.model_dump(mode="json") for item in revised.timeline if item.narrative]}, ensure_ascii=False, indent=2), encoding="utf-8")
             qa = artifacts["layout_qa"]
             for item, record in zip(revised.timeline, qa["segments"]):
                 frame = min(item.end_frame - 1, item.start_frame + max(12, item.duration_frames // 2))

@@ -6,7 +6,7 @@ from .animation_plan import AnimationEffect
 from .transition_effect_plan import TransitionEffectPlanItem
 from .remotion_creative_plan import VisualEvent
 from .visual_spec import VisualSpec
-from .layout import ImageSemanticProfile, SceneLayoutSpec, SceneNarrative
+from .layout import ImageSemanticProfile, PersistentTitleSpec, SceneLayoutSpec, SceneNarrative
 from .continuity import ResolvedTimelineItem
 
 
@@ -82,4 +82,5 @@ class VideoProject(BaseModel):
     timeline: list[TimelineItem] = Field(min_length=1)
     output: VideoOutput
     video_copy: VideoCopy = Field(default_factory=VideoCopy)
+    persistent_title: PersistentTitleSpec | None = None
     visual_spec: VisualSpec | None = None

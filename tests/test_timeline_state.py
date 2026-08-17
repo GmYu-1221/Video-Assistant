@@ -58,3 +58,13 @@ def test_semantic_variants_share_one_unit_and_hold_layout_rebinds_copy():
     second = bundle.segment_narratives["s1"].contents[0]
     assert all(second.variant_id(variant).startswith(second.semantic_unit_id) for variant in ContentVariant)
     assert bundle.resolved[0].resolved_layout_id == bundle.resolved[1].resolved_layout_id
+
+
+def test_opening_dynamic_narrative_does_not_repeat_persistent_title():
+    bundle = resolve_timeline([initial()], {"a": ImageSemanticProfile()}, title="固定文章标题", body="第一条有效事实。第二条有效事实。", summary="文章摘要说明。")
+    narrative = bundle.segment_narratives["s0"]
+    assert all(content.source_kind != "title" for content in narrative.contents)
+    assert all("固定文章标题" not in content.full for content in narrative.contents)
+    blocks = bundle.segment_layouts["s0"].text_blocks
+    assert any(block.bbox.y >= 360 and block.bbox.y + block.bbox.height <= 430 for block in blocks)
+    assert any(block.bbox.y >= 1040 for block in blocks)

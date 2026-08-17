@@ -10,8 +10,9 @@ from content_creator.agents.layout_director import create_layout_plan
 from content_creator.schemas import ArticleBrief, ContentVariant, CopyDensityIntent, ImageSemanticProfile, LayoutPlan, TimelineItem, VideoProject
 from content_creator.services.layout.copy_density import detect_copy_density_intent, expand_project_narratives
 from content_creator.services.layout.fallback import solve_plan
-from content_creator.services.layout.qa import validate_rendered_layout
-from content_creator.services.layout.validator import normalized_layout_fingerprint, validate_scene_layout
+from content_creator.services.layout.qa import validate_rendered_layout, validate_rendered_persistent_title
+from content_creator.services.layout.persistent_title import build_persistent_title
+from content_creator.services.layout.validator import normalized_layout_fingerprint, validate_persistent_title, validate_scene_layout
 
 
 VERSION_ARTIFACTS = (
@@ -54,7 +55,10 @@ def _repair_rendered_overflow(layout, narrative, rendered):
 
 
 def project_font_ids(project: VideoProject) -> list[str]:
-    return sorted({block.font_id for item in project.timeline if item.layout for block in item.layout.text_blocks})
+    fonts = {block.font_id for item in project.timeline if item.layout for block in item.layout.text_blocks}
+    if project.persistent_title:
+        fonts.add(project.persistent_title.font_id)
+    return sorted(fonts)
 
 
 def project_layout_fingerprints(project: VideoProject) -> list[list[Any]]:
@@ -148,6 +152,15 @@ def revise_typography(
         avoid_fonts=previous_fonts,
     )
     directed_by_segment = {scene.scene_id: scene for scene in directed.scenes}
+    revised_persistent_title = project.persistent_title
+    persistent_title_rendered = None
+    if project.persistent_title:
+        revised_persistent_title = build_persistent_title(project.persistent_title.content, diagnostics.get("font_palette"))
+        title_issues = validate_persistent_title(revised_persistent_title)
+        persistent_title_rendered = None if title_issues else validate_rendered_persistent_title(revised_persistent_title, remotion_public)
+        if title_issues or not persistent_title_rendered or not persistent_title_rendered.passed:
+            codes = [issue.code for issue in title_issues] + ([issue.code for issue in persistent_title_rendered.issues] if persistent_title_rendered else [])
+            raise ValueError("固定顶部标题修订校验失败：" + ", ".join(codes))
     directed_fonts = {block.font_id for scene in directed.scenes for block in scene.text_blocks}
     unchanged_geometry = all(
         normalized_layout_fingerprint(directed_by_segment[segment_id]) == normalized_layout_fingerprint(original.layout)
@@ -216,7 +229,7 @@ def revise_typography(
         })
 
     # These fields are the immutable envelope for a typography-only revision.
-    revised = project.model_copy(update={"timeline": revised_timeline})
+    revised = project.model_copy(update={"timeline": revised_timeline, "persistent_title": revised_persistent_title})
     for before, after in zip(project.timeline, revised.timeline):
         if (
             before.asset_id != after.asset_id
@@ -230,6 +243,12 @@ def revise_typography(
             raise ValueError("typography revision attempted to mutate frozen media, timing, motion or transition state")
     if project.audio != revised.audio or project.images != revised.images:
         raise ValueError("typography revision attempted to mutate frozen assets or audio")
+    if project.persistent_title and revised.persistent_title and (
+        project.persistent_title.content != revised.persistent_title.content
+        or project.persistent_title.content_hash != revised.persistent_title.content_hash
+        or project.persistent_title.bbox != revised.persistent_title.bbox
+    ):
+        raise ValueError("typography revision attempted to mutate frozen persistent title content or geometry")
     copy_metrics = {"before": project_copy_metrics(project), "after": project_copy_metrics(revised)}
     if density_intent == CopyDensityIntent.increase and (copy_metrics["after"]["character_count"] <= copy_metrics["before"]["character_count"] or copy_metrics["after"]["block_count"] <= copy_metrics["before"]["block_count"]):
         raise ValueError("没有更多可用正文：修订后的实际字幕内容没有增加")
@@ -240,6 +259,7 @@ def revise_typography(
         "source_font_ids": sorted(previous_fonts),
         "font_ids": project_font_ids(revised),
         "copy_density": density_diagnostics | copy_metrics,
+        "persistent_title": {"spec": revised_persistent_title.model_dump(mode="json"), "rendered": persistent_title_rendered.model_dump(mode="json")} if revised_persistent_title and persistent_title_rendered else None,
         "segments": qa_segments,
     }
-    return revised, {"layout_plan": LayoutPlan(global_style="editorial", scenes=layouts), "layout_qa": qa}
+    return revised, {"layout_plan": LayoutPlan(global_style="editorial", persistent_title=revised_persistent_title, scenes=layouts), "layout_qa": qa}
