@@ -69,12 +69,32 @@ def _fallback_plan(brief: ArticleBrief, target_count: int) -> ViralCopyPlan:
         sources = [brief.summary]
     units: list[ViralCopyUnit] = []
     desired = min(24, max(1, target_count * 2))
-    for source_index, source in enumerate(sources):
+    # Sample across the whole article. A fast reel should cover the opening,
+    # representative evidence, and conclusion rather than narrating only the
+    # first paragraphs when the model is unavailable.
+    if len(sources) > desired:
+        if desired == 1:
+            selected_indices = [0]
+        elif desired == 2:
+            selected_indices = [0, len(sources) - 1]
+        else:
+            middle_count = desired - 2
+            middle = [round(i * (len(sources) - 1) / (middle_count + 1)) for i in range(1, middle_count + 1)]
+            selected_indices = [0, *middle, len(sources) - 1]
+        selected_indices = list(dict.fromkeys(selected_indices))
+    else:
+        selected_indices = list(range(len(sources)))
+    # If shortening a mixed Chinese/technical sentence creates an English-only
+    # fragment, continue with another grounded sentence instead of letting the
+    # bad micro variant fail much later during final render validation.
+    priority_indices = [*selected_indices, *(index for index in range(len(sources)) if index not in selected_indices)]
+    for source_index in priority_indices:
+        source = sources[source_index]
         variants = build_variants(source)
-        if variants is None:
+        if variants is None or validate_localized_display_text(list(variants)):
             continue
         unit_index = len(units)
-        purpose = "opening" if unit_index == 0 else "conclusion" if unit_index == desired - 1 else "explanation" if unit_index % 2 else "evidence"
+        purpose = "opening" if unit_index == 0 else "explanation" if unit_index % 2 else "evidence"
         normalized = re.sub(r"\s+", " ", source).strip()
         units.append(ViralCopyUnit(
             semantic_unit_id=f"viral-unit-{unit_index:03d}", content_id=f"viral-content-{unit_index:03d}",
@@ -84,6 +104,8 @@ def _fallback_plan(brief: ArticleBrief, target_count: int) -> ViralCopyPlan:
         ))
         if len(units) >= desired:
             break
+    if units:
+        units[-1] = units[-1].model_copy(update={"purpose": "conclusion" if len(units) > 1 else "opening"})
     if not units:
         source = brief.summary or brief.text
         variants = build_variants(source)
@@ -157,7 +179,7 @@ def create_viral_copy_plan(brief: ArticleBrief, image_tags: list[ImageTag], targ
         return fallback, diagnostics | {"mode": "deterministic_fallback"}
     paragraphs = article_sentences(brief.text)
     prompt = json.dumps({
-        "task": "使用 Viral Writer 的 11 个洞见维度，为 URL 竖屏短视频生成简体中文标题候选和冻结正文语义单元。只返回符合 schema 的 JSON。不要提问、保存 Markdown、生成配图建议或执行文件操作。允许金句、类比、情绪和互动钩子；禁止虚构数字、人物、产品能力、案例或外部事实。普通英文说明必须翻译成中文，技术名、代码、命令和 URL 可保留。full/short/micro 必须是同一语义且长度严格递减。包含数字、URL 或可验证事实的单元必须列出支持它的 source_paragraph_indices。",
+        "task": "使用 Viral Writer 的 11 个洞见维度，为 URL 竖屏短视频生成简体中文标题候选和冻结正文语义单元。只返回符合 schema 的 JSON。不要提问、保存 Markdown、生成配图建议或执行文件操作。采用快节奏剪辑：只保留核心观点、关键证据和结论，删除重复观点和次要章节，覆盖文章首尾及有代表性的中段，不要为了数量复制素材或文案。允许金句、类比、情绪和互动钩子；禁止虚构数字、人物、产品能力、案例或外部事实。普通英文说明必须翻译成中文，技术名、代码、命令和 URL 可保留。full/short/micro 必须是同一语义且长度严格递减，优先让 short/micro 在约 3.5 秒内可读。包含数字、URL 或可验证事实的单元必须列出支持它的 source_paragraph_indices。",
         "platform": "抖音短视频", "target_audience": "根据主题推断", "target_segment_count": target_count,
         "article": {"title": brief.title, "summary": brief.summary, "topics": brief.topics, "mood": brief.mood, "paragraphs": [{"source_index": index, "text": text} for index, text in enumerate(paragraphs)]},
         "image_semantics": [{"image_id": tag.image_id, "role": tag.role.value, "topics": tag.topics, "entities": tag.entities, "headline_text": tag.embedded_headline_text, "headline_title_match_score": tag.headline_title_match_score} for tag in image_tags],

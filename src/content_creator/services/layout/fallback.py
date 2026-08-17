@@ -21,7 +21,7 @@ def _free_regions(profile: ImageSemanticProfile | None) -> list[Rect]:
     return [Rect(x=60, y=60, width=960, height=360), Rect(x=60, y=1500, width=960, height=360)]
 
 
-def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None, *, global_style: str = "editorial", font_palette: list[str] | None = None, copy_density_intent: CopyDensityIntent = CopyDensityIntent.preserve) -> SceneLayoutSpec:
+def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None, *, global_style: str = "editorial", font_palette: list[str] | None = None, copy_density_intent: CopyDensityIntent = CopyDensityIntent.preserve, fast_pace: bool = False) -> SceneLayoutSpec:
     dense = bool(profile and (profile.contains_text or profile.is_screenshot or profile.is_data_chart))
     # URL video contract: media geometry is fixed. Layout freedom belongs to
     # typography only, and `contain` guarantees that the full image is visible.
@@ -44,7 +44,7 @@ def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None,
         text_bbox = Rect(x=80, y=1120, width=920, height=420 if dense else 300)
     else:
         text_bbox = Rect(x=80, y=1120, width=920, height=300)
-    first_variant = ContentVariant.micro if copy_density_intent == CopyDensityIntent.reduce else ContentVariant.short if len(narrative.contents) > 1 or dense else ContentVariant.micro
+    first_variant = ContentVariant.micro if copy_density_intent == CopyDensityIntent.reduce or fast_pace else ContentVariant.short if len(narrative.contents) > 1 or dense else ContentVariant.micro
     opening_has_support = is_opening and len(narrative.contents) > 1 and copy_density_intent != CopyDensityIntent.reduce
     if opening_has_support:
         first_variant = ContentVariant.micro
@@ -81,7 +81,7 @@ def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None,
             validate_font_for_role(support_font, TypographyRole.body.value)
         except ValueError:
             support_font = DEFAULT_FONT_ID
-        support_variant = ContentVariant.full
+        support_variant = ContentVariant.short if fast_pace else ContentVariant.full
         support_bbox = Rect(x=80, y=1110, width=920, height=690) if is_opening else Rect(x=80, y=1390, width=920, height=450)
         text_blocks.append(TextBlock(block_id="support-copy", content_id=support.content_id, semantic_unit_id=support.semantic_unit_id, variant_id=support_variant, content_hash=support.content_hash(support_variant), bbox=support_bbox, alignment="center" if is_opening else "left", typography_role=TypographyRole.body, font_id=support_font, style_intent=StyleIntent.readable_serif if global_style == "editorial" else StyleIntent.modern_sans, weight="regular", color="#FFFFFF", max_lines=8, shadow=TextShadow.soft, caption_style_intent=CaptionStyleIntent.reference_emphasis if is_opening else CaptionStyleIntent.explanatory))
     return SceneLayoutSpec(
@@ -97,4 +97,5 @@ def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None,
 def solve_plan(items: list[tuple[SceneNarrative, ImageSemanticProfile | None]], global_style: str = "editorial", *, context: dict | None = None, preferences: dict | None = None, avoid_fonts: set[str] | None = None, font_palette: list[str] | None = None) -> LayoutPlan:
     palette = font_palette or choose_font_palette(context, preferences, avoid=avoid_fonts)
     intent = CopyDensityIntent((context or {}).get("copy_density_intent", CopyDensityIntent.preserve.value))
-    return LayoutPlan(global_style=global_style, scenes=[solve_scene(narrative, profile, global_style=global_style, font_palette=palette, copy_density_intent=intent) for narrative, profile in items])
+    fast_pace = (context or {}).get("pace") == "fast"
+    return LayoutPlan(global_style=global_style, scenes=[solve_scene(narrative, profile, global_style=global_style, font_palette=palette, copy_density_intent=intent, fast_pace=fast_pace) for narrative, profile in items])

@@ -119,3 +119,21 @@ def test_malformed_model_response_falls_back(monkeypatch):
     plan, diagnostics = viral_writer.create_viral_copy_plan(brief(), [], 1)
     assert diagnostics["mode"] == "deterministic_fallback"
     assert len(plan.title_candidates) == 5
+
+
+def test_fallback_skips_mixed_sentence_whose_micro_variant_becomes_english():
+    article = ArticleBrief(
+        url="https://example.com/technical", canonical_url="https://example.com/technical",
+        title="中文技术说明", summary="这是文章摘要。",
+        text=(
+            "这是第一段中文说明，介绍项目的核心目标和主要用途。\n"
+            "parameters 与 output.schema 的规范。\n"
+            "这是中间的关键证据，说明配置变更会在下一次请求生效。\n"
+            "这是最终结论，提醒使用者以官方最新文档为准。"
+        ),
+    )
+    plan = viral_writer._fallback_plan(article, 2)
+    values = [value for unit in plan.content_units for value in (unit.full, unit.short, unit.micro)]
+    assert viral_writer.validate_localized_display_text(values) == []
+    assert all("parameters 与 output." not in value for value in values)
+    assert plan.content_units[-1].purpose == "conclusion"

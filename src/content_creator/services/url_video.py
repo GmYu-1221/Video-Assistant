@@ -31,25 +31,27 @@ from content_creator.agents.viral_writer import create_viral_copy_plan, ordered_
 REFERENCE_WIDTH = 1080
 REFERENCE_HEIGHT = 1920
 REFERENCE_FPS = 30
-URL_SEGMENT_MIN_SECONDS = 3.0
-URL_SEGMENT_MAX_SECONDS = 5.0
+URL_SEGMENT_MIN_SECONDS = 2.5
+URL_SEGMENT_MAX_SECONDS = 3.5
+URL_COPY_CHARS_PER_SECOND = 8.0
+URL_SEGMENT_BUFFER_SECONDS = 0.8
 BACKGROUND_VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
 
 
 def _asset_target_count(body_char_count: int) -> int:
     """Scale visual beats with article length; bounds are operator-configurable."""
     try:
-        per_asset = max(100, int(os.getenv("URL_ASSET_CHARS_PER_IMAGE", "650")))
+        per_asset = max(100, int(os.getenv("URL_ASSET_CHARS_PER_IMAGE", "1200")))
     except ValueError:
-        per_asset = 650
+        per_asset = 1200
     try:
         minimum = max(1, int(os.getenv("URL_ASSET_TARGET_MIN", "1")))
     except ValueError:
         minimum = 1
     try:
-        maximum = max(minimum, int(os.getenv("URL_ASSET_TARGET_MAX", "12")))
+        maximum = max(minimum, int(os.getenv("URL_ASSET_TARGET_MAX", "8")))
     except ValueError:
-        maximum = max(minimum, 12)
+        maximum = max(minimum, 8)
     return min(maximum, max(minimum, math.ceil(body_char_count / per_asset)))
 
 
@@ -104,12 +106,12 @@ def _retime_resolved_bundle(bundle, profiles: dict, *, bpm: float, fps: int) -> 
         # rather than adding headline and explanation as if they were serial.
         visible_chars = max((len("".join(value.split())) for value in displayed), default=0)
         density = getattr(profiles.get(state.resolved_media_id), "information_density", .5) or .5
-        requested_seconds = visible_chars / 6.0 + 1.5 + (.75 if density >= .7 else 0)
-        # Keep every image readable without allowing one asset to dominate the
-        # URL reel.  Beat alignment is applied first, then clamped again so a
-        # beat period (for example at 90 BPM) cannot push a segment past 5s.
+        dense_buffer = .25 if density >= .7 else 0.0
+        requested_seconds = visible_chars / URL_COPY_CHARS_PER_SECOND + URL_SEGMENT_BUFFER_SECONDS + dense_buffer
+        # Use the nearest musical beat, then clamp again. This keeps the fast
+        # pace contract strict even when the beat period does not divide it.
         requested_seconds = max(URL_SEGMENT_MIN_SECONDS, min(URL_SEGMENT_MAX_SECONDS, requested_seconds))
-        beat_aligned = math.ceil(requested_seconds / beat_seconds) * beat_seconds
+        beat_aligned = round(requested_seconds / beat_seconds) * beat_seconds
         seconds = max(URL_SEGMENT_MIN_SECONDS, min(URL_SEGMENT_MAX_SECONDS, beat_aligned))
         frames = max(1, round(seconds * fps))
         transition = state.transition.model_copy(update={"duration_frames": min(state.transition.duration_frames, max(1, frames // 3))})
@@ -124,6 +126,8 @@ def _retime_resolved_bundle(bundle, profiles: dict, *, bpm: float, fps: int) -> 
             "requested_seconds": round(requested_seconds, 3),
             "actual_seconds": round(frames / fps, 3),
             "beat_seconds": round(beat_seconds, 3),
+            "reading_speed_chars_per_second": URL_COPY_CHARS_PER_SECOND,
+            "buffer_seconds": URL_SEGMENT_BUFFER_SECONDS,
         })
         cursor = end
     bundle.actions = actions
@@ -351,10 +355,19 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     (project_dir / "image_tags.json").write_text(json.dumps({"images": [image.model_dump(mode="json") for image in article_images], "tags": [tag.model_dump(mode="json") for tag in tags], "selected_ids": [image.id for image in selected], "selected_asset_order": [image.id for image in selected], "title_match_scores": title_match_scores, "opening_image_reason": opening_reason, "opening_image_id": selected[0].id, "transitions": [context.model_dump(mode="json") for context in contexts]}, ensure_ascii=False, indent=2), encoding="utf-8")
     progress("选择背景音乐")
     repo_root = Path(__file__).resolve().parents[3]
-    track = select_track(load_catalog(repo_root), brief.mood, brief.topics)
+    music_dir = os.getenv("URL_MUSIC_DIR", str(repo_root / "input" / "music"))
+    music_catalog = load_catalog(repo_root, music_dir)
+    track = select_track(music_catalog, brief.mood, brief.topics)
     source_audio = repo_root / track.path
     if not source_audio.is_file():
         raise ValueError("曲库中没有可用的背景音乐")
+    diagnostics["background_music"] = {
+        "library_dir": str(Path(music_dir).expanduser().resolve()),
+        "candidate_count": len(music_catalog),
+        "selected_track_id": track.id,
+        "selected_source": str(source_audio.resolve()),
+        "selection_mode": "mood_topic_energy",
+    }
     audio_dir = project_dir / "audio"
     audio_dir.mkdir()
     copied_audio = audio_dir / source_audio.name
@@ -405,6 +418,9 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     profiles = {asset.id: asset.semantic_profile for asset in assets}
     preference_summary = TypographyPreferenceStore(root).summary_for(brief)
     layout_context = article_context(brief)
+    layout_context["pace"] = "fast"
+    layout_context["target_segment_count"] = asset_target_count
+    layout_context["segment_duration_range_seconds"] = [URL_SEGMENT_MIN_SECONDS, URL_SEGMENT_MAX_SECONDS]
     if sufficiency == "compact" or len(assets) == 1:
         layout_context["copy_density_intent"] = "reduce"
     bundle = resolve_timeline(actions, profiles, title=brief.title, body=brief.text, summary=brief.summary, layout_context=layout_context, layout_preferences=preference_summary, copy_plan=viral_copy_plan)
@@ -414,17 +430,21 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     diagnostics["video_scope"] = {
         "content_classification": sufficiency,
         "semantic_unit_count": len({content.semantic_unit_id for narrative in bundle.narratives.values() for content in narrative.contents}),
+        "uncompressed_target_count": math.ceil(len(brief.text) / 650) if brief.text else 1,
         "desired_asset_count": asset_target_count,
         "actual_asset_count": len(assets),
         "final_segment_count": len(bundle.resolved),
         "target_duration_seconds": round(actual_duration, 3),
         "actual_duration_seconds": round(actual_duration, 3),
         "shortened": len(assets) < asset_target_count or sufficiency == "compact",
+        "compression_reason": "fast_pace_core_points" if len(brief.text) > 0 else "no_body_text",
+        "reading_speed_chars_per_second": URL_COPY_CHARS_PER_SECOND,
+        "segment_duration_range_seconds": [URL_SEGMENT_MIN_SECONDS, URL_SEGMENT_MAX_SECONDS],
+        "omitted_semantic_unit_count": max(0, len(viral_copy_plan.content_units) - len({content.semantic_unit_id for narrative in bundle.narratives.values() for content in narrative.contents})),
         "reduction_reasons": [reason for reason in ["compact_article" if sufficiency == "compact" else None, "limited_visual_assets" if len(assets) < asset_target_count else None] if reason],
         "segments": timing_diagnostics,
     }
-    if diagnostics["video_scope"]["shortened"]:
-        progress(f"正文和素材较少，已调整为 {len(bundle.resolved)} 个镜头、{actual_duration:.1f} 秒")
+    progress(f"已提炼为 {len(bundle.resolved)} 个镜头、预计 {actual_duration:.1f} 秒")
     persistent_title, persistent_title_rendered, title_attempts = _select_persistent_title(
         brief.title,
         bundle.layout_diagnostics.get("font_palette"),
