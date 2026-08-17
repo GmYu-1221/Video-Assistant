@@ -17,7 +17,7 @@ from content_creator.services.layout.validator import normalized_layout_fingerpr
 
 VERSION_ARTIFACTS = (
     "director_timeline.json", "scene_narrative_plan.json", "layout_plan.json",
-    "layout_qa.json", "session.json", "final_artifact_validation.json",
+    "layout_qa.json", "session.json", "viral_copy_plan.json", "final_artifact_validation.json",
 )
 
 

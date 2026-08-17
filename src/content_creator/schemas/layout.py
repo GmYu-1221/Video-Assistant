@@ -119,7 +119,7 @@ class NarrativeContent(BaseModel):
     full: str = Field(min_length=1, max_length=800)
     short: str = Field(min_length=1, max_length=400)
     micro: str = Field(min_length=1, max_length=180)
-    source_kind: Literal["title", "summary", "body", "existing"] = "existing"
+    source_kind: Literal["title", "summary", "body", "existing", "generated"] = "existing"
     source_index: int | None = Field(default=None, ge=0)
     source_hash: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
 

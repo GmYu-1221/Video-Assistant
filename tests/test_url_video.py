@@ -53,7 +53,7 @@ def test_url_projects_force_reference_canvas(tmp_path, monkeypatch):
     monkeypatch.setattr(url_video, "compile_render_plan", lambda project, *_args, **_kwargs: project)
     project, _ = url_video.create_url_project("https://example.com/article", tmp_path / "output")
     assert (project.width, project.height, project.fps) == (1080, 1920, 30)
-    assert project.video_copy.headline == "标题"
+    assert project.video_copy.headline == "示例文章"
     assert stages == ["discovery", "filter", "agent", "download"]
     assert (Path(project.output.project_dir) / "asset_manifest.json").is_file()
 

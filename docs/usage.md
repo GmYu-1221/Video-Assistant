@@ -7,6 +7,7 @@ Video-Assistant 是一个本地优先的视频生成工具，提供三种使用�
 - **命令行批量生成**：本地图片目录 + 本地 BGM，按节拍生成横屏或竖屏视频。
 - **交互式 Director Workspace**：在终端里与导演助手对话，迭代修改导演方案后渲染。
 - **Web 文章转视频**：输入公开文章 URL，自动提取正文与图片，生成竖屏短视频，并支持字幕版本反馈。
+- **Viral Writer 文案策划**：URL 管线读取项目级 `.agents/skills/viral-writer`，生成五个中文标题候选和抖音短视频正文语义单元；模型失败时回退原文抽取。
 
 它使用 Pillow 处理图片、librosa 分析 BGM 节拍，由规则管线或 Director Agent 生成导演方案，再由 Remotion 输出 MP4。
 

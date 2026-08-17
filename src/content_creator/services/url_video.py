@@ -25,6 +25,7 @@ from content_creator.services.renderer.remotion import render_layout_still
 from content_creator.services.timeline_state import default_url_actions, resolve_timeline
 from content_creator.services.layout.preferences import TypographyPreferenceStore, article_context
 from content_creator.services.article_localization import build_localized_video_copy, localize_article_copy, validate_localized_display_text
+from content_creator.agents.viral_writer import create_viral_copy_plan, ordered_title_texts
 
 REFERENCE_WIDTH = 1080
 REFERENCE_HEIGHT = 1920
@@ -127,18 +128,27 @@ def _retime_resolved_bundle(bundle, profiles: dict, *, bpm: float, fps: int) -> 
     return timing
 
 
-def _select_persistent_title(title: str, font_palette: list[str] | None, remotion_public: Path):
-    candidates = build_persistent_title_candidates(title, font_palette)
-    preflight = [(item, persistent_title_preflight_fits(item.content, item.font_id)) for item in candidates]
-    candidates_to_audit = [item for item, passed in preflight if passed] or candidates
+def _select_persistent_title(title: str, font_palette: list[str] | None, remotion_public: Path, alternatives: list[str] | None = None):
+    source_titles = []
+    for value in [title, *(alternatives or [])]:
+        if value and value not in source_titles:
+            source_titles.append(value)
+    sourced_candidates = [
+        (source_title, candidate)
+        for source_title in source_titles
+        for candidate in build_persistent_title_candidates(source_title, font_palette)
+    ]
+    preflight = [(source_title, item, persistent_title_preflight_fits(item.content, item.font_id)) for source_title, item in sourced_candidates]
+    candidates_to_audit = [(source_title, item) for source_title, item, passed in preflight if passed] or sourced_candidates
     attempts = []
-    for candidate in candidates_to_audit:
+    for source_title, candidate in candidates_to_audit:
         issues = validate_persistent_title(candidate)
         rendered = None if issues else validate_rendered_persistent_title(candidate, remotion_public)
         codes = [issue.code for issue in issues] + ([issue.code for issue in rendered.issues] if rendered else [])
         attempts.append({
+            "source_title": source_title,
             "content": candidate.content,
-            "preflight_passed": next(passed for item, passed in preflight if item.content_hash == candidate.content_hash),
+            "preflight_passed": next(passed for source, item, passed in preflight if source == source_title and item.content_hash == candidate.content_hash),
             "issues": codes,
         })
         if not issues and rendered and rendered.passed:
@@ -276,6 +286,19 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     progress("翻译中文说明文案")
     brief, localized_copy, localization_diagnostics = localize_article_copy(brief)
     copy = build_localized_video_copy(brief, localized_copy, preferred=copy)
+    progress("Viral Writer 正在策划标题和正文")
+    viral_copy_plan, viral_copy_diagnostics = create_viral_copy_plan(brief, tags, asset_target_count)
+    viral_title_options = ordered_title_texts(viral_copy_plan)
+    brief = brief.model_copy(update={"title": viral_copy_plan.final_title})
+    localized_copy = localized_copy.model_copy(update={"title": viral_copy_plan.final_title})
+    copy = copy.model_copy(update={"headline": viral_copy_plan.final_title[:80]})
+    diagnostics["viral_writer"] = viral_copy_diagnostics | {
+        "selected_title_id": viral_copy_plan.selected_title_id,
+        "selected_title": viral_copy_plan.final_title,
+        "title_candidate_count": len(viral_copy_plan.title_candidates),
+        "content_unit_count": len(viral_copy_plan.content_units),
+    }
+    (project_dir / "viral_copy_plan.json").write_text(viral_copy_plan.model_dump_json(indent=2), encoding="utf-8")
     localized_hashes = [sha256(paragraph.encode("utf-8")).hexdigest() for paragraph in localized_copy.paragraphs]
     diagnostics["localized_copy"] = localization_diagnostics | {
         "localized_paragraph_hashes": localized_hashes,
@@ -298,7 +321,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     diagnostics["selected_asset_order"] = [{
         "image_id": image.id,
         "source_url": image.source_url,
-        "title_match_score": _title_match_score(source_brief.title, image, tag_by_id.get(image.id)),
+        "title_match_score": _title_match_score(brief.title, image, tag_by_id.get(image.id)),
         "role": tag_by_id.get(image.id).role.value if tag_by_id.get(image.id) else "other",
         "contains_prominent_headline": tag_by_id.get(image.id).contains_prominent_headline if tag_by_id.get(image.id) else None,
         "embedded_headline_text": tag_by_id.get(image.id).embedded_headline_text if tag_by_id.get(image.id) else "",
@@ -320,7 +343,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     for index, image in enumerate(selected):
         shutil.copy2(image.local_path, selected_dir / f"{index:03d}.jpg")
     (project_dir / "article.json").write_text(brief.model_dump_json(indent=2), encoding="utf-8")
-    title_match_scores = {image.id: _title_match_score(source_brief.title, image, tag_by_id.get(image.id)) for image in selected}
+    title_match_scores = {image.id: _title_match_score(brief.title, image, tag_by_id.get(image.id)) for image in selected}
     (project_dir / "image_tags.json").write_text(json.dumps({"images": [image.model_dump(mode="json") for image in article_images], "tags": [tag.model_dump(mode="json") for tag in tags], "selected_ids": [image.id for image in selected], "selected_asset_order": [image.id for image in selected], "title_match_scores": title_match_scores, "opening_image_reason": opening_reason, "opening_image_id": selected[0].id, "transitions": [context.model_dump(mode="json") for context in contexts]}, ensure_ascii=False, indent=2), encoding="utf-8")
     progress("选择背景音乐")
     repo_root = Path(__file__).resolve().parents[3]
@@ -380,7 +403,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     layout_context = article_context(brief)
     if sufficiency == "compact" or len(assets) == 1:
         layout_context["copy_density_intent"] = "reduce"
-    bundle = resolve_timeline(actions, profiles, title=brief.title, body=brief.text, summary=brief.summary, layout_context=layout_context, layout_preferences=preference_summary)
+    bundle = resolve_timeline(actions, profiles, title=brief.title, body=brief.text, summary=brief.summary, layout_context=layout_context, layout_preferences=preference_summary, copy_plan=viral_copy_plan)
     timing_diagnostics = _retime_resolved_bundle(bundle, profiles, bpm=analysis.bpm, fps=REFERENCE_FPS)
     actions = bundle.actions
     actual_duration = sum(item.duration_frames for item in bundle.resolved) / REFERENCE_FPS
@@ -402,7 +425,18 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         brief.title,
         bundle.layout_diagnostics.get("font_palette"),
         repo_root / "remotion" / "public",
+        alternatives=viral_title_options[1:],
     )
+    selected_source_title = next((attempt["source_title"] for attempt in reversed(title_attempts) if not attempt["issues"]), viral_copy_plan.final_title)
+    selected_candidate = next((item for item in viral_copy_plan.title_candidates if item.text == selected_source_title), viral_copy_plan.selected_title)
+    viral_copy_plan = viral_copy_plan.model_copy(update={"selected_title_id": selected_candidate.candidate_id, "final_title": persistent_title.content})
+    brief = brief.model_copy(update={"title": persistent_title.content})
+    localized_copy = localized_copy.model_copy(update={"title": persistent_title.content})
+    copy = copy.model_copy(update={"headline": persistent_title.content[:80]})
+    diagnostics["viral_writer"].update({"selected_title_id": viral_copy_plan.selected_title_id, "selected_title": persistent_title.content, "persistent_title_attempts": title_attempts})
+    (project_dir / "viral_copy_plan.json").write_text(viral_copy_plan.model_dump_json(indent=2), encoding="utf-8")
+    (project_dir / "localized_copy.json").write_text(localized_copy.model_dump_json(indent=2), encoding="utf-8")
+    (project_dir / "article.json").write_text(brief.model_dump_json(indent=2), encoding="utf-8")
     bundle.layout_diagnostics["persistent_title_candidates"] = title_attempts
     missing_state = [state.segment_id for state in bundle.resolved if not state.resolved_layout_id or not state.resolved_copy_id]
     if missing_state:
@@ -469,7 +503,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         "scene_count": len(updated_timeline),
         "scenes_with_multiple_text_blocks": scenes_with_multiple_text_blocks,
         "repeated_copy_groups": duplicate_groups,
-        "video_copy_source": "localized_copy",
+        "video_copy_source": "viral_writer" if diagnostics.get("viral_writer", {}).get("mode") == "model_success" else "localized_copy_fallback",
         "render_path": "url_layout_renderer",
     }
     persist_diagnostics()

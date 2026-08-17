@@ -12,7 +12,7 @@ from hashlib import sha256
 from content_creator.schemas import (
     BoundaryAction, ContentVariant, CopyAction, DirectorTimelineAction,
     ImageSemanticProfile, LayoutAction, NarrativeContent, PartialTimelineItem,
-    ResolvedTimelineItem, SceneLayoutSpec, SceneNarrative, StateAction,
+    ResolvedTimelineItem, SceneLayoutSpec, SceneNarrative, StateAction, ViralCopyPlan,
 )
 from content_creator.services.layout.fallback import solve_scene
 from content_creator.services.layout.validator import validate_scene_layout
@@ -117,7 +117,62 @@ def _variants(text: str) -> tuple[str, str, str]:
     return full, short, micro
 
 
-def freeze_narratives(partial: list[PartialTimelineItem], *, title: str, body: str, summary: str) -> tuple[dict[str, SceneNarrative], dict[str, str | None]]:
+def _freeze_viral_narratives(partial: list[PartialTimelineItem], plan: ViralCopyPlan) -> tuple[dict[str, SceneNarrative], dict[str, str | None]]:
+    narratives: dict[str, SceneNarrative] = {}
+    segment_copy: dict[str, str | None] = {}
+    unused = list(plan.content_units)
+    current_copy: str | None = None
+    visible = False
+    remaining_replacements = sum(item.copy_action == CopyAction.replace for item in partial)
+    for index, item in enumerate(partial):
+        if item.copy_action == CopyAction.replace:
+            purpose = item.scene_purpose or ("opening" if index == 0 else "conclusion" if index == len(partial) - 1 else "evidence")
+            preferred = [unit for unit in unused if unit.purpose == purpose]
+            if purpose == "opening":
+                preferred += [unit for unit in unused if unit.purpose in {"explanation", "evidence"} and unit not in preferred]
+            elif purpose == "conclusion":
+                preferred += [unit for unit in unused if unit.purpose in {"evidence", "explanation"} and unit not in preferred]
+            else:
+                preferred += [unit for unit in unused if unit.purpose in {"explanation", "evidence"} and unit not in preferred]
+            preferred += [unit for unit in unused if unit not in preferred]
+            # Reserve at least one immutable semantic unit for every later
+            # copy replacement. Rich sources still receive two text levels.
+            available_for_current = len(unused) - max(0, remaining_replacements - 1)
+            selected = preferred[:2 if available_for_current >= 2 else 1]
+            if not selected:
+                raise ValueError("Viral Writer copy plan has no unused semantic unit")
+            contents = [NarrativeContent(
+                semantic_unit_id=unit.semantic_unit_id,
+                content_id=unit.content_id,
+                full=unit.full,
+                short=unit.short,
+                micro=unit.micro,
+                source_kind="generated" if unit.origin == "creative" else "body",
+                source_index=unit.source_paragraph_indices[0] if unit.source_paragraph_indices else None,
+                source_hash=unit.source_hash,
+            ) for unit in selected]
+            for unit in selected:
+                unused.remove(unit)
+            digest = sha256(f"{item.segment_id}:{contents[0].semantic_unit_id}".encode()).hexdigest()[:12]
+            copy_id = f"viral-copy-{digest}"
+            narratives[copy_id] = SceneNarrative(
+                copy_id=copy_id, scene_id=item.scene_id, asset_id=item.resolved_media_id,
+                scene_purpose=purpose, contents=contents,
+            )
+            current_copy, visible = copy_id, True
+            remaining_replacements -= 1
+        elif item.copy_action == CopyAction.hide:
+            visible = False
+        elif current_copy is None:
+            raise ValueError("copy hold references uninitialized state")
+        segment_copy[item.segment_id] = current_copy if visible else None
+    return narratives, segment_copy
+
+
+def freeze_narratives(partial: list[PartialTimelineItem], *, title: str, body: str, summary: str, copy_plan: ViralCopyPlan | None = None) -> tuple[dict[str, SceneNarrative], dict[str, str | None]]:
+    replacement_count = sum(item.copy_action == CopyAction.replace for item in partial)
+    if copy_plan is not None and len(copy_plan.content_units) >= replacement_count:
+        return _freeze_viral_narratives(partial, copy_plan)
     sentences = _sentences(body)
     narratives: dict[str, SceneNarrative] = {}
     segment_copy: dict[str, str | None] = {}
@@ -197,9 +252,9 @@ def _bind_layout(layout: SceneLayoutSpec, narrative: SceneNarrative, media_id: s
     return layout.model_copy(update={"scene_id": narrative.scene_id, "media_blocks": media, "text_blocks": text})
 
 
-def resolve_timeline(actions: list[DirectorTimelineAction], media_profiles: dict[str, ImageSemanticProfile | None], *, title: str, body: str, summary: str, layout_context: dict | None = None, layout_preferences: dict | None = None) -> ResolvedBundle:
+def resolve_timeline(actions: list[DirectorTimelineAction], media_profiles: dict[str, ImageSemanticProfile | None], *, title: str, body: str, summary: str, layout_context: dict | None = None, layout_preferences: dict | None = None, copy_plan: ViralCopyPlan | None = None) -> ResolvedBundle:
     partial = validate_and_partially_resolve(actions, set(media_profiles))
-    narratives, segment_copy = freeze_narratives(partial, title=title, body=body, summary=summary)
+    narratives, segment_copy = freeze_narratives(partial, title=title, body=body, summary=summary, copy_plan=copy_plan)
     request_narratives: dict[str, SceneNarrative] = {}
     request_items: list[tuple[SceneNarrative, ImageSemanticProfile | None]] = []
     active_copy: SceneNarrative | None = None
