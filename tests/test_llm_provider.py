@@ -66,6 +66,20 @@ def test_provider_initialization_and_missing_configuration(monkeypatch):
     assert MockLLMProvider('{"x":1}').complete("test") == '{"x":1}'
 
 
+def test_provider_uses_bounded_timeout_and_no_implicit_retries(monkeypatch):
+    captured = {}
+
+    class Client:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("content_creator.services.llm.openai_compatible.OpenAI", Client)
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "17")
+    OpenAICompatibleProvider(api_key="test-key", model_name="text-model", base_url="https://gateway.example/v1")
+    assert captured["timeout"] == 17.0
+    assert captured["max_retries"] == 0
+
+
 def test_provider_falls_back_when_gateway_does_not_support_json_mode():
     requests: list[dict] = []
 

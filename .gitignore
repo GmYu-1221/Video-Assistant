@@ -8,3 +8,4 @@ output/projects/*
 output/jobs/*
 !output/projects/.gitkeep
 input/bgm.*
+input/music/*

@@ -1,4 +1,5 @@
 import base64
+import os
 from pathlib import Path
 
 from openai import OpenAI
@@ -13,6 +14,8 @@ class OpenAICompatibleProvider:
         model_name: str,
         base_url: str | None = None,
         client: OpenAI | None = None,
+        timeout_seconds: float | None = None,
+        max_retries: int = 0,
     ) -> None:
         if not api_key:
             raise ValueError("OPENAI_API_KEY is not configured")
@@ -20,7 +23,21 @@ class OpenAICompatibleProvider:
             raise ValueError("An LLM model name is required")
         self.model_name = model_name
         self.base_url = base_url
-        self._client = client or OpenAI(api_key=api_key, base_url=base_url)
+        if client is not None:
+            self._client = client
+        else:
+            configured_timeout = timeout_seconds
+            if configured_timeout is None:
+                try:
+                    configured_timeout = float(os.getenv("LLM_TIMEOUT_SECONDS", "90"))
+                except ValueError:
+                    configured_timeout = 90.0
+            self._client = OpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                timeout=max(1.0, configured_timeout),
+                max_retries=max(0, max_retries),
+            )
 
     def complete(self, prompt: str) -> str:
         return self._complete(prompt)

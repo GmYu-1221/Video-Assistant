@@ -72,17 +72,17 @@ def test_asset_target_allows_one_asset_by_default(monkeypatch):
     assert url_video._asset_target_count(120) == 1
 
 
-def test_single_segment_is_retimed_between_three_and_six_seconds():
+def test_single_segment_is_retimed_between_three_and_five_seconds():
     bundle, profiles = _bundle(1, 8)
     diagnostics = url_video._retime_resolved_bundle(bundle, profiles, bpm=120, fps=30)
     duration = bundle.resolved[0].duration_frames / 30
-    assert 3 <= duration <= 6
+    assert 3 <= duration <= 5
     assert diagnostics[0]["visible_character_count"] == 8
     assert bundle.actions[0].duration_frames == bundle.resolved[0].duration_frames
 
 
-def test_multiple_segments_are_retimed_without_exceeding_seven_seconds():
+def test_multiple_segments_are_retimed_without_exceeding_five_seconds():
     bundle, profiles = _bundle(3, 120, density=.9)
     url_video._retime_resolved_bundle(bundle, profiles, bpm=90, fps=30)
-    assert all(3 <= item.duration_frames / 30 <= 7 for item in bundle.resolved)
+    assert all(3 <= item.duration_frames / 30 <= 5 for item in bundle.resolved)
     assert [item.start_frame for item in bundle.resolved] == [0, bundle.resolved[0].end_frame, bundle.resolved[1].end_frame]

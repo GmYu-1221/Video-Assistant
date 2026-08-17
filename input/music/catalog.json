@@ -1,10 +1,1123 @@
 [
   {
+    "id": "audionautix-dance-allgoodinthewood",
+    "path": "input/music/tracks/audionautix/dance/AllGoodInTheWood.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: AllGoodInTheWood by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-bootsbootsboots",
+    "path": "input/music/tracks/audionautix/dance/BootsBootsBoots.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: BootsBootsBoots by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-dancedubber",
+    "path": "input/music/tracks/audionautix/dance/DanceDubber.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: DanceDubber by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-doghouse",
+    "path": "input/music/tracks/audionautix/dance/DogHouse.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: DogHouse by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-ecstasyx",
+    "path": "input/music/tracks/audionautix/dance/EcstasyX.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: EcstasyX by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-forestrhythm",
+    "path": "input/music/tracks/audionautix/dance/ForestRhythm.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: ForestRhythm by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-getamoveon",
+    "path": "input/music/tracks/audionautix/dance/GetAMoveOn.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: GetAMoveOn by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-hotmess",
+    "path": "input/music/tracks/audionautix/dance/HotMess.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: HotMess by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-icecold",
+    "path": "input/music/tracks/audionautix/dance/IceCold.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: IceCold by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-innerjourney",
+    "path": "input/music/tracks/audionautix/dance/InnerJourney.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: InnerJourney by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-nightrave",
+    "path": "input/music/tracks/audionautix/dance/NightRave.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: NightRave by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-occupythedancefloor",
+    "path": "input/music/tracks/audionautix/dance/OccupyTheDanceFloor.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: OccupyTheDanceFloor by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-pyramids",
+    "path": "input/music/tracks/audionautix/dance/Pyramids.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: Pyramids by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-thebighouse",
+    "path": "input/music/tracks/audionautix/dance/TheBigHouse.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: TheBigHouse by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-thump",
+    "path": "input/music/tracks/audionautix/dance/Thump.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: Thump by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-transportation",
+    "path": "input/music/tracks/audionautix/dance/Transportation.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: Transportation by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-trapbed",
+    "path": "input/music/tracks/audionautix/dance/TrapBed.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: TrapBed by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-unitedwegroove",
+    "path": "input/music/tracks/audionautix/dance/UnitedWeGroove.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: UnitedWeGroove by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-dance-vanishinghorizon",
+    "path": "input/music/tracks/audionautix/dance/VanishingHorizon.mp3",
+    "moods": [
+      "dance",
+      "energetic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.78,
+    "bpm": null,
+    "license_note": "Music: VanishingHorizon by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-acryliconcanvas",
+    "path": "input/music/tracks/audionautix/electronic/AcrylicOnCanvas.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: AcrylicOnCanvas by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-algorithm",
+    "path": "input/music/tracks/audionautix/electronic/Algorithm.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Algorithm by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-azimuth",
+    "path": "input/music/tracks/audionautix/electronic/Azimuth.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Azimuth by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-bigcartheft",
+    "path": "input/music/tracks/audionautix/electronic/BigCarTheft.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: BigCarTheft by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-blackfly",
+    "path": "input/music/tracks/audionautix/electronic/BlackFly.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: BlackFly by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-boom",
+    "path": "input/music/tracks/audionautix/electronic/Boom.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Boom by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-continuum",
+    "path": "input/music/tracks/audionautix/electronic/Continuum.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Continuum by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-countermove",
+    "path": "input/music/tracks/audionautix/electronic/Countermove.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Countermove by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-cycles",
+    "path": "input/music/tracks/audionautix/electronic/Cycles.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Cycles by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-dubsteplight",
+    "path": "input/music/tracks/audionautix/electronic/DubstepLight.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: DubstepLight by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-ion",
+    "path": "input/music/tracks/audionautix/electronic/Ion.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Ion by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-lexicon",
+    "path": "input/music/tracks/audionautix/electronic/Lexicon.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Lexicon by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-marauder",
+    "path": "input/music/tracks/audionautix/electronic/Marauder.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Marauder by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-metaphor",
+    "path": "input/music/tracks/audionautix/electronic/Metaphor.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Metaphor by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-niptheslipple",
+    "path": "input/music/tracks/audionautix/electronic/NipTheSlipple.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: NipTheSlipple by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-rubixcube",
+    "path": "input/music/tracks/audionautix/electronic/RubixCube.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: RubixCube by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-seductressdubstep",
+    "path": "input/music/tracks/audionautix/electronic/SeductressDubstep.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: SeductressDubstep by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-sk8board",
+    "path": "input/music/tracks/audionautix/electronic/Sk8board.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Sk8board by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-techtalk",
+    "path": "input/music/tracks/audionautix/electronic/TechTalk.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: TechTalk by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-thoughtbot",
+    "path": "input/music/tracks/audionautix/electronic/ThoughtBot.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: ThoughtBot by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-electronic-threshold",
+    "path": "input/music/tracks/audionautix/electronic/Threshold.mp3",
+    "moods": [
+      "electronic",
+      "tech"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": null,
+    "license_note": "Music: Threshold by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-soundtrack-corporationmotivation",
+    "path": "input/music/tracks/audionautix/soundtrack/CorporationMotivation.mp3",
+    "moods": [
+      "soundtrack",
+      "cinematic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.62,
+    "bpm": null,
+    "license_note": "Music: CorporationMotivation by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-soundtrack-deepspace",
+    "path": "input/music/tracks/audionautix/soundtrack/DeepSpace.mp3",
+    "moods": [
+      "soundtrack",
+      "cinematic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.62,
+    "bpm": null,
+    "license_note": "Music: DeepSpace by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-soundtrack-destinationunknown",
+    "path": "input/music/tracks/audionautix/soundtrack/DestinationUnknown.mp3",
+    "moods": [
+      "soundtrack",
+      "cinematic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.62,
+    "bpm": null,
+    "license_note": "Music: DestinationUnknown by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-soundtrack-harshalienmachine",
+    "path": "input/music/tracks/audionautix/soundtrack/HarshAlienMachine.mp3",
+    "moods": [
+      "soundtrack",
+      "cinematic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.62,
+    "bpm": null,
+    "license_note": "Music: HarshAlienMachine by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-soundtrack-hightension",
+    "path": "input/music/tracks/audionautix/soundtrack/HighTension.mp3",
+    "moods": [
+      "soundtrack",
+      "cinematic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.62,
+    "bpm": null,
+    "license_note": "Music: HighTension by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-soundtrack-inmotion",
+    "path": "input/music/tracks/audionautix/soundtrack/InMotion.mp3",
+    "moods": [
+      "soundtrack",
+      "cinematic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.62,
+    "bpm": null,
+    "license_note": "Music: InMotion by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-soundtrack-introaction",
+    "path": "input/music/tracks/audionautix/soundtrack/IntroAction.mp3",
+    "moods": [
+      "soundtrack",
+      "cinematic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.62,
+    "bpm": null,
+    "license_note": "Music: IntroAction by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-soundtrack-latinhousebed",
+    "path": "input/music/tracks/audionautix/soundtrack/LatinHouseBed.mp3",
+    "moods": [
+      "soundtrack",
+      "cinematic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.62,
+    "bpm": null,
+    "license_note": "Music: LatinHouseBed by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-soundtrack-sportsaction",
+    "path": "input/music/tracks/audionautix/soundtrack/SportsAction.mp3",
+    "moods": [
+      "soundtrack",
+      "cinematic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.62,
+    "bpm": null,
+    "license_note": "Music: SportsAction by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-soundtrack-suspenseaction",
+    "path": "input/music/tracks/audionautix/soundtrack/SuspenseAction.mp3",
+    "moods": [
+      "soundtrack",
+      "cinematic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.62,
+    "bpm": null,
+    "license_note": "Music: SuspenseAction by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "audionautix-soundtrack-thebigdecision",
+    "path": "input/music/tracks/audionautix/soundtrack/TheBigDecision.mp3",
+    "moods": [
+      "soundtrack",
+      "cinematic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.62,
+    "bpm": null,
+    "license_note": "Music: TheBigDecision by Jason Shaw (Audionautix.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-aggressor",
+    "path": "input/music/tracks/incompetech/Aggressor.mp3",
+    "moods": [
+      "electronic",
+      "action",
+      "driving",
+      "dark"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.82,
+    "bpm": 150,
+    "license_note": "Music: Aggressor by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-brain-dance",
+    "path": "input/music/tracks/incompetech/Brain Dance.mp3",
+    "moods": [
+      "electronic",
+      "grooving",
+      "driving"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.65,
+    "bpm": 124,
+    "license_note": "Music: Brain Dance by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-chee-zee-lab",
+    "path": "input/music/tracks/incompetech/Chee Zee Lab.mp3",
+    "moods": [
+      "electronic",
+      "driving",
+      "humorous",
+      "intense"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.65,
+    "bpm": 120,
+    "license_note": "Music: Chee Zee Lab by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-cloud-dancer",
+    "path": "input/music/tracks/incompetech/Cloud Dancer.mp3",
+    "moods": [
+      "electronic",
+      "grooving",
+      "bouncy",
+      "bright"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.9,
+    "bpm": 214,
+    "license_note": "Music: Cloud Dancer by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-club-diver",
+    "path": "input/music/tracks/incompetech/Club Diver.mp3",
+    "moods": [
+      "electronic",
+      "aggressive",
+      "dark",
+      "driving",
+      "grooving",
+      "intense",
+      "unnerving"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.82,
+    "bpm": 140,
+    "license_note": "Music: Club Diver by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-cyborg-ninja",
+    "path": "input/music/tracks/incompetech/Cyborg Ninja.mp3",
+    "moods": [
+      "electronic",
+      "action",
+      "bouncy",
+      "driving"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.9,
+    "bpm": 160,
+    "license_note": "Music: Cyborg Ninja by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-deep-and-dirty",
+    "path": "input/music/tracks/incompetech/Deep and Dirty.mp3",
+    "moods": [
+      "electronic",
+      "driving",
+      "grooving"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.82,
+    "bpm": 140,
+    "license_note": "Music: Deep and Dirty by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-edm-detection-mode",
+    "path": "input/music/tracks/incompetech/EDM Detection Mode.mp3",
+    "moods": [
+      "electronic",
+      "driving"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.65,
+    "bpm": 128,
+    "license_note": "Music: EDM Detection Mode by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-exotics",
+    "path": "input/music/tracks/incompetech/Exotics.mp3",
+    "moods": [
+      "electronic",
+      "intense",
+      "mysterious",
+      "mystical",
+      "aggressive"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": 132,
+    "license_note": "Music: Exotics by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-furious-freak",
+    "path": "input/music/tracks/incompetech/Furious Freak.mp3",
+    "moods": [
+      "electronic",
+      "driving",
+      "intense",
+      "bright"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.9,
+    "bpm": 160,
+    "license_note": "Music: Furious Freak by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-future-cha-cha",
+    "path": "input/music/tracks/incompetech/Future Cha Cha.mp3",
+    "moods": [
+      "electronic",
+      "bouncy",
+      "driving"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.82,
+    "bpm": 140,
+    "license_note": "Music: Future Cha Cha by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-harmful-or-fatal",
+    "path": "input/music/tracks/incompetech/Harmful or Fatal.mp3",
+    "moods": [
+      "electronic",
+      "aggressive",
+      "driving",
+      "intense",
+      "dark",
+      "action"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": 135,
+    "license_note": "Music: Harmful or Fatal by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-in-a-heartbeat",
+    "path": "input/music/tracks/incompetech/In a Heartbeat.mp3",
+    "moods": [
+      "electronic",
+      "aggressive",
+      "unnerving",
+      "action",
+      "driving",
+      "dark",
+      "intense"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": 130,
+    "license_note": "Music: In a Heartbeat by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-industrial-revolution",
+    "path": "input/music/tracks/incompetech/Industrial Revolution.mp3",
+    "moods": [
+      "electronic",
+      "dark",
+      "driving",
+      "epic",
+      "intense",
+      "mysterious"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.82,
+    "bpm": 140,
+    "license_note": "Music: Industrial Revolution by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-kick-shock",
+    "path": "input/music/tracks/incompetech/Kick Shock.mp3",
+    "moods": [
+      "electronic",
+      "action",
+      "aggressive",
+      "bright",
+      "driving",
+      "grooving"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": 138,
+    "license_note": "Music: Kick Shock by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-laser-groove",
+    "path": "input/music/tracks/incompetech/Laser Groove.mp3",
+    "moods": [
+      "electronic",
+      "grooving",
+      "bright",
+      "relaxed"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.82,
+    "bpm": 140,
+    "license_note": "Music: Laser Groove by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-mechanolith",
+    "path": "input/music/tracks/incompetech/Mechanolith.mp3",
+    "moods": [
+      "electronic",
+      "action",
+      "aggressive",
+      "dark",
+      "driving",
+      "epic"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.82,
+    "bpm": 141,
+    "license_note": "Music: Mechanolith by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-militaire-electronic",
+    "path": "input/music/tracks/incompetech/Militaire Electronic.mp3",
+    "moods": [
+      "electronic",
+      "action",
+      "aggressive",
+      "driving",
+      "intense"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.65,
+    "bpm": 122,
+    "license_note": "Music: Militaire Electronic by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-nano-hoedown",
+    "path": "input/music/tracks/incompetech/Nano Hoedown.mp3",
+    "moods": [
+      "electronic",
+      "bouncy",
+      "bright",
+      "intense"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.82,
+    "bpm": 150,
+    "license_note": "Music: Nano Hoedown by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-reformat",
+    "path": "input/music/tracks/incompetech/Reformat.mp3",
+    "moods": [
+      "electronic",
+      "intense",
+      "bouncy"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.82,
+    "bpm": 140,
+    "license_note": "Music: Reformat by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-shiny-tech",
+    "path": "input/music/tracks/incompetech/Shiny Tech.mp3",
+    "moods": [
+      "electronic",
+      "driving",
+      "action",
+      "intense",
+      "uplifting",
+      "bright"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.72,
+    "bpm": 138,
+    "license_note": "Music: Shiny Tech by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-tech-live",
+    "path": "input/music/tracks/incompetech/Tech Live.mp3",
+    "moods": [
+      "electronic",
+      "bouncy",
+      "grooving"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.65,
+    "bpm": 124,
+    "license_note": "Music: Tech Live by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-trips-it",
+    "path": "input/music/tracks/incompetech/Trips It.mp3",
+    "moods": [
+      "electronic",
+      "driving",
+      "intense"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.82,
+    "bpm": 148,
+    "license_note": "Music: Trips It by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
+    "id": "incompetech-unity",
+    "path": "input/music/tracks/incompetech/Unity.mp3",
+    "moods": [
+      "electronic",
+      "action",
+      "driving",
+      "intense"
+    ],
+    "topics": [
+      "tech"
+    ],
+    "energy": 0.82,
+    "bpm": 140,
+    "license_note": "Music: Unity by Kevin MacLeod (incompetech.com) — CC BY 4.0"
+  },
+  {
     "id": "default",
     "path": "input/bgm.wav",
-    "moods": ["informative", "tech", "news"],
+    "moods": [
+      "informative",
+      "tech",
+      "news"
+    ],
     "topics": [],
     "energy": 0.55,
+    "bpm": null,
     "license_note": "Project default track"
   }
 ]

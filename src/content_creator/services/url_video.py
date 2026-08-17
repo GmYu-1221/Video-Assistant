@@ -7,6 +7,7 @@ import os
 import random
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -30,6 +31,8 @@ from content_creator.agents.viral_writer import create_viral_copy_plan, ordered_
 REFERENCE_WIDTH = 1080
 REFERENCE_HEIGHT = 1920
 REFERENCE_FPS = 30
+URL_SEGMENT_MIN_SECONDS = 3.0
+URL_SEGMENT_MAX_SECONDS = 5.0
 BACKGROUND_VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
 
 
@@ -87,7 +90,6 @@ def _select_background_video(source_dir: str | Path, project_dir: str | Path, *,
 def _retime_resolved_bundle(bundle, profiles: dict, *, bpm: float, fps: int) -> list[dict]:
     """Fit URL segments to real rendered copy while preserving Director actions."""
     beat_seconds = 60.0 / max(bpm, 1.0)
-    single_segment = len(bundle.resolved) == 1
     cursor = 0
     timing: list[dict] = []
     actions = []
@@ -103,10 +105,12 @@ def _retime_resolved_bundle(bundle, profiles: dict, *, bpm: float, fps: int) -> 
         visible_chars = max((len("".join(value.split())) for value in displayed), default=0)
         density = getattr(profiles.get(state.resolved_media_id), "information_density", .5) or .5
         requested_seconds = visible_chars / 6.0 + 1.5 + (.75 if density >= .7 else 0)
-        maximum = 6.0 if single_segment else 7.0
-        requested_seconds = max(3.0, min(maximum, requested_seconds))
+        # Keep every image readable without allowing one asset to dominate the
+        # URL reel.  Beat alignment is applied first, then clamped again so a
+        # beat period (for example at 90 BPM) cannot push a segment past 5s.
+        requested_seconds = max(URL_SEGMENT_MIN_SECONDS, min(URL_SEGMENT_MAX_SECONDS, requested_seconds))
         beat_aligned = math.ceil(requested_seconds / beat_seconds) * beat_seconds
-        seconds = max(3.0, min(maximum, beat_aligned))
+        seconds = max(URL_SEGMENT_MIN_SECONDS, min(URL_SEGMENT_MAX_SECONDS, beat_aligned))
         frames = max(1, round(seconds * fps))
         transition = state.transition.model_copy(update={"duration_frames": min(state.transition.duration_frames, max(1, frames // 3))})
         end = cursor + frames
@@ -512,7 +516,11 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     project = compile_render_plan(project, _storyboard_from_timeline(project), creative_plan=None)
     # Rendered previews are durable QA evidence and are generated with the
     # exact same composition, bundled fonts, and media URL strategy as final.
+    # Render all Chromium stills first, then critique scenes concurrently. A
+    # serial preview -> network critic loop makes a long article look frozen
+    # at 85% and multiplies model latency by the number of scenes.
     previews_root = project_dir / "layout" / "previews"
+    preview_jobs: list[tuple[int, TimelineItem, dict]] = []
     for index, item in enumerate(project.timeline):
         scene_record = qa["segments"][index]
         scene_dir = previews_root / item.resolved_state.segment_id
@@ -520,6 +528,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         frames = {"settled": min(item.end_frame - 1, item.start_frame + 12), "middle": item.start_frame + item.duration_frames // 2}
         if any(block.typography_role.value == "caption" for block in item.layout.text_blocks):
             frames["caption"] = min(item.end_frame - 1, item.start_frame + max(12, item.duration_frames // 3))
+        progress(f"布局预览：{index + 1}/{len(project.timeline)} 个镜头")
         try:
             for label, frame in frames.items():
                 path = render_layout_still(project, repo_root / "remotion", scene_dir / f"{label}.png", frame)
@@ -527,12 +536,35 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
                 audit_path = path.with_suffix(".audit.json")
                 if audit_path.is_file():
                     scene_record.setdefault("remotion_dom_audits", []).append(json.loads(audit_path.read_text(encoding="utf-8")))
-            rendered = scene_record.get("rendered") or {}
-            critic = critique_scene(rendered_ok=bool(rendered.get("passed")), hard_issues=[], preview_paths=preview_paths, scene_purpose=item.narrative.scene_purpose)
             scene_record["preview_paths"] = preview_paths
-            scene_record["visual_critic"] = critic.model_dump(mode="json")
         except Exception as exc:
             scene_record["preview_error"] = str(exc)
+        preview_jobs.append((index, item, scene_record))
+
+    try:
+        concurrency = max(1, min(4, int(os.getenv("URL_VISUAL_CRITIC_CONCURRENCY", "3"))))
+    except ValueError:
+        concurrency = 3
+
+    def run_critic(job):
+        index, item, scene_record = job
+        rendered = scene_record.get("rendered") or {}
+        return index, critique_scene(
+            rendered_ok=bool(rendered.get("passed")),
+            hard_issues=[],
+            preview_paths=scene_record.get("preview_paths", []),
+            scene_purpose=item.narrative.scene_purpose,
+        )
+
+    progress(f"视觉检查：0/{len(preview_jobs)} 个镜头（并发 {concurrency}）")
+    with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="layout-critic") as critic_pool:
+        futures = [critic_pool.submit(run_critic, job) for job in preview_jobs]
+        completed_critics = 0
+        for future in as_completed(futures):
+            index, critic = future.result()
+            qa["segments"][index]["visual_critic"] = critic.model_dump(mode="json")
+            completed_critics += 1
+            progress(f"视觉检查：{completed_critics}/{len(futures)} 个镜头")
     (project_dir / "layout_qa.json").write_text(json.dumps(qa, ensure_ascii=False, indent=2), encoding="utf-8")
     session_data = {"source": brief.model_dump(mode="json"), "music_track": track.model_dump(mode="json"), "transition_contexts": [item.model_dump(mode="json") for item in contexts], "project": project.model_dump(mode="json")}
     (project_dir / "session.json").write_text(json.dumps(session_data, ensure_ascii=False, indent=2), encoding="utf-8")
