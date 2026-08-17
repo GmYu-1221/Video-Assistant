@@ -1,7 +1,10 @@
 import json
 from pathlib import Path
 
-from content_creator.web import FeedbackRequest, Job, JobManager, JobVersion, _job_payload, create_app
+from pydantic import ValidationError
+
+from content_creator.schemas import NarrativeContent
+from content_creator.web import FeedbackRequest, Job, JobManager, JobVersion, _job_payload, _public_error_message, create_app
 
 
 def test_web_app_exposes_single_url_job_api(tmp_path):
@@ -14,6 +17,16 @@ def test_web_app_exposes_single_url_job_api(tmp_path):
     assert "/api/jobs/{job_id}/feedback" in routes
     assert "/api/browser-import" in routes
     assert "/api/browser-asset-upload" in routes
+
+
+def test_public_validation_error_does_not_expose_input_or_pydantic_url():
+    try:
+        NarrativeContent(semantic_unit_id="unit", content_id="copy", full="正文", short="短文", micro="x" * 181)
+    except ValidationError as exc:
+        message = _public_error_message(exc)
+    assert "micro" in message
+    assert "input_value" not in message
+    assert "pydantic.dev" not in message
 
 
 def test_browser_import_waiting_payload_and_resume(tmp_path, monkeypatch):

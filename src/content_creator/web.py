@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from content_creator.services.renderer import render_project
 from content_creator.services.renderer.remotion import render_layout_still
@@ -29,6 +29,17 @@ from content_creator.services.layout.copy_density import detect_copy_density_int
 from content_creator.services.layout.revision import load_version_project, project_copy_metrics, project_font_ids, project_layout_fingerprints, revise_typography, write_version_snapshot
 from content_creator.agents.visual_critic import critique_scene
 from content_creator.schemas import ArticleBrief
+
+
+def _public_error_message(exc: Exception) -> str:
+    if isinstance(exc, ValidationError):
+        fields = []
+        for error in exc.errors(include_url=False, include_input=False)[:4]:
+            location = ".".join(str(part) for part in error.get("loc", ())) or "data"
+            fields.append(f"{location}：{error.get('msg', '数据不合法')}")
+        return "生成数据校验失败：" + "；".join(fields)
+    message = str(exc).strip() or type(exc).__name__
+    return message.split(" For further information visit ", 1)[0]
 
 
 @dataclass
@@ -198,7 +209,7 @@ class JobManager:
             job.event(f"需要浏览器导入页面内容（HTTP {exc.status_code}）")
         except Exception as exc:
             job.status = "failed"
-            job.error = str(exc)
+            job.error = _public_error_message(exc)
             job.event("生成失败")
 
     def submit_feedback(self, job_id: str, payload: FeedbackRequest) -> Job:
@@ -283,7 +294,7 @@ class JobManager:
         except Exception as exc:
             job.status = "completed"
             job.feedback_status = "failed"
-            job.error = str(exc)
+            job.error = _public_error_message(exc)
             job.event("字幕修订失败，已保留原视频")
 
 

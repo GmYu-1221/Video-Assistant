@@ -25,6 +25,32 @@ def test_video_copy_does_not_accept_english_preferred_copy() -> None:
     assert copy.headline == "中文标题"
 
 
+def test_passthrough_normalizes_mixed_github_seo_title() -> None:
+    title = (
+        "GitHub - aquamarine5/ChaoxingSignFaker: 伪造学习通的签到活动🙋"
+        "学习通签到神器。Falsifying the signing activity in only one device · GitHub"
+    )
+    brief = ArticleBrief(
+        url="https://github.com/aquamarine5/ChaoxingSignFaker",
+        canonical_url="https://github.com/aquamarine5/ChaoxingSignFaker",
+        title=title,
+        text="这是已经中文化的项目正文，包含足够信息用于直接通过本地化流程。",
+        summary="中文摘要说明。",
+    )
+    localized, copy, diagnostics = article_localization.localize_article_copy(brief)
+    assert localized.title == "ChaoxingSignFaker：伪造学习通的签到活动"
+    assert copy.title == localized.title
+    assert diagnostics["title_normalized"] is True
+
+
+def test_passthrough_keeps_normal_chinese_title_unchanged() -> None:
+    brief = ArticleBrief(url="https://example.com/a", canonical_url="https://example.com/a", title="人工智能正在改变创作方式", text="这是一段中文正文内容。")
+    localized, copy, diagnostics = article_localization.localize_article_copy(brief)
+    assert localized.title == brief.title
+    assert copy.title == brief.title
+    assert diagnostics["title_normalized"] is False
+
+
 def test_batched_translation_retries_only_untranslated_paragraphs(monkeypatch) -> None:
     class Provider:
         model_name = "gemini-3.6-flash"

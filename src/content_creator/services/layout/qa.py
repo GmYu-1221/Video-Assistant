@@ -100,12 +100,14 @@ def validate_rendered_layout(spec: SceneLayoutSpec, narrative: SceneNarrative, r
 
 
 def validate_rendered_persistent_title(title: PersistentTitleSpec, remotion_public: str | Path) -> RenderedLayoutValidationResult:
+    # Only the full variant is rendered. Keep unused variants schema-safe so a
+    # legal 181-500 character title can reach Chromium for the real audit.
     content = NarrativeContent(
         semantic_unit_id="persistent-title-unit",
         content_id="persistent-title-content",
         full=title.content,
-        short=title.content,
-        micro=title.content,
+        short=title.content[:400],
+        micro=title.content[:180],
         source_kind="title",
         source_hash=title.content_hash,
     )

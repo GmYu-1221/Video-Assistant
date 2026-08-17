@@ -1,0 +1,64 @@
+{
+  "id": "b830608516fa42369e7ef3844e2411e9",
+  "url": "https://github.com/aquamarine5/ChaoxingSignFaker",
+  "status": "failed",
+  "stage": "生成失败",
+  "error": "中文文案翻译失败：text-23: explanatory text is not Simplified Chinese",
+  "project_dir": null,
+  "video_path": null,
+  "browser_import_status": null,
+  "browser_import_url": "javascript:(()=>{const f=document.createElement('form');f.method='POST';f.action=\"http://127.0.0.1:8000/api/browser-import\";f.target='_blank';for(const [k,v] of [['token',\"uKTfGQmfuQxFXH1igBRBvH6723BoMGrJW8_moCqQd4I\"],['source_url',location.href],['html',document.documentElement.outerHTML]]){const i=document.createElement('input');i.type='hidden';i.name=k;i.value=v;f.appendChild(i)}document.body.appendChild(f);f.submit();setTimeout(()=>f.remove(),1000)})()",
+  "events": [
+    {
+      "status": "running",
+      "stage": "抓取文章"
+    },
+    {
+      "status": "running",
+      "stage": "正文识别：已过滤 60 个页面 UI 节点，可用正文 1322 字"
+    },
+    {
+      "status": "running",
+      "stage": "发现网页素材"
+    },
+    {
+      "status": "running",
+      "stage": "过滤网页素材"
+    },
+    {
+      "status": "running",
+      "stage": "分析网页素材"
+    },
+    {
+      "status": "running",
+      "stage": "下载已选素材"
+    },
+    {
+      "status": "running",
+      "stage": "素材状态：发现 11 个，优先选择 4 个，成功下载 1 个"
+    },
+    {
+      "status": "running",
+      "stage": "补充正文截图"
+    },
+    {
+      "status": "running",
+      "stage": "正文截图：成功补充 3 张，当前素材 4 张"
+    },
+    {
+      "status": "running",
+      "stage": "分析图片与生成文案"
+    },
+    {
+      "status": "running",
+      "stage": "翻译中文说明文案"
+    },
+    {
+      "status": "failed",
+      "stage": "生成失败"
+    }
+  ],
+  "versions": [],
+  "current_version": null,
+  "feedback_status": null
+}

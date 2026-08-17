@@ -16,7 +16,7 @@ from content_creator.services.timeline import build_timeline
 from content_creator.agents.render_agent import compile_render_plan
 from content_creator.services.layout.validator import detect_layout_monotony, validate_persistent_title, validate_scene_layout
 from content_creator.services.layout.qa import validate_rendered_layout, validate_rendered_persistent_title
-from content_creator.services.layout.persistent_title import build_persistent_title
+from content_creator.services.layout.persistent_title import build_persistent_title_candidates, persistent_title_preflight_fits
 from content_creator.agents.visual_critic import critique_scene
 from content_creator.services.renderer.remotion import render_layout_still
 from content_creator.services.timeline_state import default_url_actions, resolve_timeline
@@ -43,6 +43,25 @@ def _asset_target_count(body_char_count: int) -> int:
     except ValueError:
         maximum = max(minimum, 12)
     return min(maximum, max(minimum, math.ceil(body_char_count / per_asset)))
+
+
+def _select_persistent_title(title: str, font_palette: list[str] | None, remotion_public: Path):
+    candidates = build_persistent_title_candidates(title, font_palette)
+    preflight = [(item, persistent_title_preflight_fits(item.content, item.font_id)) for item in candidates]
+    candidates_to_audit = [item for item, passed in preflight if passed] or candidates
+    attempts = []
+    for candidate in candidates_to_audit:
+        issues = validate_persistent_title(candidate)
+        rendered = None if issues else validate_rendered_persistent_title(candidate, remotion_public)
+        codes = [issue.code for issue in issues] + ([issue.code for issue in rendered.issues] if rendered else [])
+        attempts.append({
+            "content": candidate.content,
+            "preflight_passed": next(passed for item, passed in preflight if item.content_hash == candidate.content_hash),
+            "issues": codes,
+        })
+        if not issues and rendered and rendered.passed:
+            return candidate, rendered, attempts
+    raise ValueError("顶部标题在三行区域内无法容纳")
 
 
 def create_url_project(url: str, output_root: str | Path, on_progress=None, *, imported_html: str | None = None) -> tuple[VideoProject, dict]:
@@ -254,12 +273,12 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     profiles = {asset.id: asset.semantic_profile for asset in assets}
     preference_summary = TypographyPreferenceStore(root).summary_for(brief)
     bundle = resolve_timeline(actions, profiles, title=brief.title, body=brief.text, summary=brief.summary, layout_context=article_context(brief), layout_preferences=preference_summary)
-    persistent_title = build_persistent_title(brief.title, bundle.layout_diagnostics.get("font_palette"))
-    persistent_title_issues = validate_persistent_title(persistent_title)
-    persistent_title_rendered = None if persistent_title_issues else validate_rendered_persistent_title(persistent_title, repo_root / "remotion" / "public")
-    if persistent_title_issues or not persistent_title_rendered or not persistent_title_rendered.passed:
-        codes = [issue.code for issue in persistent_title_issues] + ([issue.code for issue in persistent_title_rendered.issues] if persistent_title_rendered else [])
-        raise ValueError("固定顶部标题校验失败：" + ", ".join(codes))
+    persistent_title, persistent_title_rendered, title_attempts = _select_persistent_title(
+        brief.title,
+        bundle.layout_diagnostics.get("font_palette"),
+        repo_root / "remotion" / "public",
+    )
+    bundle.layout_diagnostics["persistent_title_candidates"] = title_attempts
     missing_state = [state.segment_id for state in bundle.resolved if not state.resolved_layout_id or not state.resolved_copy_id]
     if missing_state:
         raise ValueError(f"URL 布局状态不完整，无法安全渲染：{', '.join(missing_state)}")

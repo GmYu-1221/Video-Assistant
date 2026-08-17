@@ -1,10 +1,12 @@
 import pytest
 from pydantic import ValidationError
 
-from content_creator.schemas import (CaptionStyleIntent, ContentVariant, ImageSemanticProfile, NarrativeContent, Rect, SceneNarrative, TextBlock, TextOutline, TypographyRole)
-from content_creator.services.layout.persistent_title import build_persistent_title
+from content_creator.schemas import (CaptionStyleIntent, ContentVariant, ImageSemanticProfile, NarrativeContent, Rect, RenderedLayoutValidationResult, SceneNarrative, TextBlock, TextOutline, TypographyRole)
+from content_creator.services.layout import qa as layout_qa
+from content_creator.services.layout.persistent_title import build_persistent_title, build_persistent_title_candidates
 from content_creator.services.layout.fallback import solve_scene
 from content_creator.services.layout.validator import validate_persistent_title, validate_scene_layout
+from content_creator.services import url_video
 
 
 def _narrative():
@@ -43,6 +45,52 @@ def test_persistent_title_is_hashed_and_uses_fixed_top_region():
 def test_repository_title_keeps_product_name_but_adds_chinese_explanation():
     title = build_persistent_title("GitHub - deepseek-ai/DeepSeek-V3")
     assert title.content == "DeepSeek-V3 项目介绍"
+
+
+def test_normalized_repository_title_retains_chinese_fallback_candidate():
+    candidates = build_persistent_title_candidates("ChaoxingSignFaker：伪造学习通的签到活动")
+    assert [item.content for item in candidates] == [
+        "ChaoxingSignFaker：伪造学习通的签到活动",
+        "ChaoxingSignFaker 项目介绍",
+    ]
+
+
+def test_persistent_title_audit_keeps_long_full_and_bounds_unused_variants(monkeypatch):
+    captured = {}
+
+    def fake_validate(layout, narrative, _public):
+        captured["layout"] = layout
+        captured["narrative"] = narrative
+        return RenderedLayoutValidationResult(scene_id=layout.scene_id, fonts_ready=True, passed=True)
+
+    monkeypatch.setattr(layout_qa, "validate_rendered_layout", fake_validate)
+    title = build_persistent_title("超长标题" * 50)
+    result = layout_qa.validate_rendered_persistent_title(title, "/tmp/not-used")
+    content = captured["narrative"].contents[0]
+    assert result.passed
+    assert content.full == title.content
+    assert len(content.short) <= 400
+    assert len(content.micro) <= 180
+    assert captured["layout"].text_blocks[0].variant_id == ContentVariant.full
+    assert captured["layout"].text_blocks[0].content_hash == title.content_hash
+
+
+def test_persistent_title_selection_falls_back_after_chromium_overflow(monkeypatch, tmp_path):
+    candidates = build_persistent_title_candidates("ChaoxingSignFaker：伪造学习通的签到活动")
+    monkeypatch.setattr(url_video, "build_persistent_title_candidates", lambda *_args: candidates)
+    monkeypatch.setattr(url_video, "persistent_title_preflight_fits", lambda *_args: True)
+
+    def rendered(candidate, _public):
+        if candidate.content == candidates[0].content:
+            from content_creator.schemas import LayoutIssue
+            return RenderedLayoutValidationResult(scene_id="persistent-title", issues=[LayoutIssue(code="rendered_overflow", block_id="persistent-title", message="overflow")], passed=False)
+        return RenderedLayoutValidationResult(scene_id="persistent-title", fonts_ready=True, passed=True)
+
+    monkeypatch.setattr(url_video, "validate_rendered_persistent_title", rendered)
+    selected, result, attempts = url_video._select_persistent_title("ignored", None, tmp_path)
+    assert result.passed
+    assert selected.content == "ChaoxingSignFaker 项目介绍"
+    assert attempts[0]["issues"] == ["rendered_overflow"]
 
 
 def test_opening_uses_reference_hierarchy_without_display_overlay():

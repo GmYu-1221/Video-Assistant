@@ -6,6 +6,7 @@ import re
 
 from content_creator.schemas import ArticleBrief, LocalizedArticleCopy, VideoCopy
 from content_creator.services.llm.router import get_agent_provider
+from content_creator.services.title_normalization import normalize_article_title
 
 
 def chinese_ratio(value: str) -> float:
@@ -178,11 +179,13 @@ def localize_article_copy(brief: ArticleBrief) -> tuple[ArticleBrief, LocalizedA
     paragraphs = _paragraphs(brief.text)
     original = " ".join([brief.title, brief.summary, *paragraphs])
     if chinese_ratio(original) >= 0.18:
-        copy = LocalizedArticleCopy(title=brief.title, summary=brief.summary, paragraphs=paragraphs, source_paragraph_indices=list(range(len(paragraphs))), translation_mode="passthrough", chinese_text_ratio=chinese_ratio(original))
+        title = normalize_article_title(brief.title)
+        copy = LocalizedArticleCopy(title=title, summary=brief.summary, paragraphs=paragraphs, source_paragraph_indices=list(range(len(paragraphs))), translation_mode="passthrough", chinese_text_ratio=chinese_ratio(original))
         issues = validate_localized_display_text([copy.title, copy.summary, *copy.paragraphs])
         if issues:
             raise ValueError("中文文案翻译失败：" + "; ".join(issues))
-        return brief, copy, {"mode": "passthrough", "chinese_text_ratio": copy.chinese_text_ratio, "source_paragraph_indices": copy.source_paragraph_indices}
+        localized = brief.model_copy(update={"title": title, "text": "\n".join(paragraphs)})
+        return localized, copy, {"mode": "passthrough", "chinese_text_ratio": copy.chinese_text_ratio, "source_paragraph_indices": copy.source_paragraph_indices, "title_normalized": title != brief.title}
     provider = get_agent_provider("article")
     translated_by_index: dict[int, str] = {}
     batches: list[dict] = []
@@ -203,6 +206,7 @@ def localize_article_copy(brief: ArticleBrief) -> tuple[ArticleBrief, LocalizedA
     # the first translated paragraph as a deterministic summary.
     if not title:
         title = brief.title
+    title = normalize_article_title(title)
     summary_parts = _paragraphs(summary) if summary else []
     if summary_parts:
         summary = " ".join(summary_parts[:2])
