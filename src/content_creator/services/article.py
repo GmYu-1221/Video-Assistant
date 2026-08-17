@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 _SRCSET_PART = re.compile(r"^\s*(\S+)(?:\s+(\d+(?:\.\d+)?)([wx]))?")
 _DIRECT_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov"}
 _IMAGE_EXTENSIONS = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
-_UI_TOKEN = re.compile(r"(?:^|[-_/.])(icon|avatar|logo|wordmark|button|badge|lock|protection|toolbar|tobar|heart|thumb|collect|comment|share|wechat|weixin|alipay|pay|reward|vip|close|coupon|follow|like|unlike)(?:[-_/.]|$)", re.I)
+_UI_TOKEN = re.compile(r"(?:^|[-_/.])(icons?|avatar|logo|wordmark|button|badge|lock|protection|toolbar|tobar|heart|thumb|collect|comment|share|wechat|weixin|alipay|pay|reward|vip|close|coupon|follow|like|unlike)(?:[-_/.]|$)", re.I)
 _UI_SUBSTRING = re.compile(r"(?:toolbar|tobar|heart|thumb|collect|comment|share|wechat|weixin|alipay|reward|vip|coupon|follow|like|unlike|identityvip|identity|readcount|pay-help|guide-red)", re.I)
 _UI_TEXT_TOKEN = re.compile(r"(?:用户.{0,12}主页|个人主页|头像|profile picture|author avatar)", re.I)
 _ARTICLE_UI_PHRASES = {
@@ -209,7 +209,11 @@ def _extract_article_text(html: str) -> tuple[str, BeautifulSoup]:
 
 
 _SCRIPT_ASSIGNMENT = re.compile(r"(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*(['\"])", re.S)
-_TEXT_SELECTORS = ("article", "main", "[role=main]", ".article", ".article-content", ".post-content", ".entry-content", ".content", ".text_area", ".content_area")
+_TEXT_SELECTORS = (
+    "article", "main", "[role=main]", "[itemprop='articleBody']",
+    ".article", ".article-content", ".post-content", ".post-body", ".postBody",
+    ".blogpost-body", ".entry-content", ".content", ".text_area", ".content_area",
+)
 _METADATA_SOURCES = {"metadata", "jsonld"}
 
 
@@ -304,12 +308,14 @@ def _discover_text_candidates(raw_html: str, soup: BeautifulSoup, title: str, *,
                 index += 1
     # JSON-LD is parsed as data, never executed.
     def walk_json(value, key_path: str = ""):
+        nonlocal index
         if isinstance(value, dict):
             for key, child in value.items():
                 if key in {"articleBody", "description"} and isinstance(child, str):
                     candidate = _candidate_from_html(f"text-{index:03d}", "jsonld", f"{key_path}.{key}", f"<article><p>{html_escape.escape(child)}</p></article>", title, index)
                     if candidate:
                         candidates.append(candidate)
+                        index += 1
                 walk_json(child, f"{key_path}.{key}")
         elif isinstance(value, list):
             for offset, child in enumerate(value):

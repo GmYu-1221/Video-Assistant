@@ -392,3 +392,48 @@ def test_browser_asset_required_is_distinct_from_normal_download_failure(tmp_pat
     assert item["http_status"] == 403
     assert diagnostics["downloader"]["browser_asset_required"] == 1
     assert diagnostics["downloader"]["failed"] == 0
+
+
+def test_blog_post_body_beats_short_metadata_and_drives_asset_target(monkeypatch):
+    topics = [
+        "平台先统一管理采集的工业图像，并按照项目与任务组织数据集。",
+        "标注工具支持实例分割，操作者可以检查轮廓并修正对象边界。",
+        "模型训练记录参数、版本和指标，便于团队比较不同实验结果。",
+        "自动标注读取已有样本并生成候选区域，人工确认后进入训练集。",
+        "模型测试展示检测框、置信度与错误样本，帮助定位实际问题。",
+        "部署完成后进入实时视觉分析，并把异常结果发送到告警中心。",
+    ]
+    paragraphs = "".join(
+        f"<p>第{index}部分。" + topic * 7 + f"<img src='https://img.example.com/{index}.png' alt='步骤{index}'></p>"
+        for index, topic in enumerate(topics)
+    )
+    html = f"""<html><head><title>视觉分析平台升级</title>
+    <meta name='description' content='只有一行的页面摘要，不能替代完整正文。'></head>
+    <body><div class='postBody'><div id='cnblogs_post_body' class='blogpost-body'>{paragraphs}</div></div></body></html>"""
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    extraction, _ = extract_article_html("https://example.com/post", html, allow_rendered_fallback=False)
+    assert extraction.extraction_method == "dom"
+    assert len(extraction.body) > 1200
+    assert extraction.selected_html.count("<img") == 6
+    from content_creator.services.url_video import _asset_target_count
+    assert _asset_target_count(len(extraction.body)) >= 2
+
+
+def test_jsonld_and_metadata_candidates_receive_unique_ids():
+    payload = json.dumps({"@type": "Article", "description": "这是 JSON-LD 中的文章摘要说明，包含完整主题、使用方法、核心能力和应用范围，长度足够形成正文候选。"}, ensure_ascii=False)
+    html = f"<html><head><script type='application/ld+json'>{payload}</script><meta name='description' content='这是页面 metadata 摘要，内容不同，并且完整说明产品升级结果、用户价值和后续计划，足够形成另一个候选。'></head></html>"
+    soup = BeautifulSoup(html, "html.parser")
+    candidates = _discover_text_candidates(html, soup, "文章标题")
+    assert len(candidates) == 2
+    assert len({item.id for item in candidates}) == len(candidates)
+
+
+def test_plural_icons_directory_is_filtered_as_page_ui():
+    candidate = AssetCandidate(
+        id="asset-icon", kind=AssetKind.image,
+        source_url="https://assets.example.com/icons/search.svg",
+        page_url="https://example.com/article", alt="搜索",
+    )
+    diagnostics = {}
+    assert basic_asset_filter([candidate], diagnostics) == []
+    assert diagnostics["rule_filter"]["icon_avatar_logo"] == 1
