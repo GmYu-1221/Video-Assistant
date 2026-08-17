@@ -3,8 +3,19 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from content_creator.schemas import ArticleBrief, ArticleExtractionResult, ArticleImage, AssetCandidate, AssetDecision, AssetKind, ImageTag, VideoCopy
+from content_creator.schemas import ArticleBrief, ArticleExtractionResult, ArticleImage, AssetCandidate, AssetDecision, AssetKind, BackgroundVideoConfig, ImageTag, VideoCopy
 from content_creator.services import url_video
+
+
+@pytest.fixture(autouse=True)
+def deterministic_background_video(monkeypatch):
+    monkeypatch.setattr(url_video, "_select_background_video", lambda *_args, **_kwargs: BackgroundVideoConfig(path="background/background.mp4", source_filename="test.mp4", duration=9, width=1080, height=1920))
+    def still(_project, _remotion, output, _frame):
+        path = Path(output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (1080, 1920), "black").save(path)
+        return path
+    monkeypatch.setattr(url_video, "render_layout_still", still)
 
 
 def test_url_projects_force_reference_canvas(tmp_path, monkeypatch):
@@ -69,4 +80,6 @@ def test_browser_import_protected_asset_skips_second_agent_call(tmp_path, monkey
     monkeypatch.setattr(url_video, "compile_render_plan", lambda project, *_args, **_kwargs: project)
     html = "<article><h1>Imported article</h1><p>" + ("正文内容 " * 50) + "</p><p>" + ("更多正文 " * 50) + "</p></article>"
     project, _ = url_video.create_url_project("https://example.com/article", tmp_path / "output", imported_html=html)
-    assert len(project.images) == 4
+    # The compact imported article needs one readable visual beat; additional
+    # valid images no longer force an artificially long video.
+    assert len(project.images) == 1

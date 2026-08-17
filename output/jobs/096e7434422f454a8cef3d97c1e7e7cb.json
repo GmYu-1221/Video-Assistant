@@ -1,0 +1,126 @@
+{
+  "id": "096e7434422f454a8cef3d97c1e7e7cb",
+  "url": "https://blog.csdn.net/csdnnews/article/details/163747298?spm=1000.2115.3001.5926",
+  "status": "completed",
+  "stage": "已完成",
+  "progress": 100,
+  "error": null,
+  "project_dir": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260817_121728_867167",
+  "video_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260817_121728_867167/versions/v001/final.mp4",
+  "browser_import_status": null,
+  "browser_import_url": "javascript:(()=>{const f=document.createElement('form');f.method='POST';f.action=\"http://127.0.0.1:8000/api/browser-import\";f.target='_blank';for(const [k,v] of [['token',\"uKTfGQmfuQxFXH1igBRBvH6723BoMGrJW8_moCqQd4I\"],['source_url',location.href],['html',document.documentElement.outerHTML]]){const i=document.createElement('input');i.type='hidden';i.name=k;i.value=v;f.appendChild(i)}document.body.appendChild(f);f.submit();setTimeout(()=>f.remove(),1000)})()",
+  "events": [
+    {
+      "status": "running",
+      "stage": "抓取文章",
+      "progress": 8
+    },
+    {
+      "status": "running",
+      "stage": "正文识别：已过滤 73 个页面 UI 节点，可用正文 6437 字",
+      "progress": 15
+    },
+    {
+      "status": "running",
+      "stage": "发现网页素材",
+      "progress": 22
+    },
+    {
+      "status": "running",
+      "stage": "过滤网页素材",
+      "progress": 27
+    },
+    {
+      "status": "running",
+      "stage": "分析网页素材",
+      "progress": 34
+    },
+    {
+      "status": "running",
+      "stage": "下载已选素材",
+      "progress": 42
+    },
+    {
+      "status": "running",
+      "stage": "素材状态：发现 71 个，优先选择 10 个，成功下载 1 个",
+      "progress": 48
+    },
+    {
+      "status": "running",
+      "stage": "补充正文截图",
+      "progress": 55
+    },
+    {
+      "status": "running",
+      "stage": "正文截图：成功补充 9 张，当前素材 10 张",
+      "progress": 55
+    },
+    {
+      "status": "running",
+      "stage": "分析图片与生成文案",
+      "progress": 62
+    },
+    {
+      "status": "running",
+      "stage": "翻译中文说明文案",
+      "progress": 69
+    },
+    {
+      "status": "running",
+      "stage": "选择背景音乐",
+      "progress": 74
+    },
+    {
+      "status": "running",
+      "stage": "Director 编排连续性状态",
+      "progress": 79
+    },
+    {
+      "status": "running",
+      "stage": "编排动态布局视频",
+      "progress": 85
+    },
+    {
+      "status": "running",
+      "stage": "渲染视频",
+      "progress": 88
+    },
+    {
+      "status": "running",
+      "stage": "正式渲染开始...",
+      "progress": 88
+    },
+    {
+      "status": "running",
+      "stage": "正在打包 Remotion 项目...",
+      "progress": 92
+    },
+    {
+      "status": "running",
+      "stage": "正在渲染并编码视频...",
+      "progress": 96
+    },
+    {
+      "status": "running",
+      "stage": "视频渲染已完成",
+      "progress": 100
+    },
+    {
+      "status": "completed",
+      "stage": "已完成",
+      "progress": 100
+    }
+  ],
+  "versions": [
+    {
+      "id": "v001",
+      "video_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260817_121728_867167/versions/v001/final.mp4",
+      "project_path": "/Users/yu/Documents/Codex/Video-Assistant/output/projects/20260817_121728_867167/versions/v001/project.json",
+      "created_at": "2026-08-17T04:47:28.978765+00:00",
+      "source_version": null,
+      "feedback_id": null
+    }
+  ],
+  "current_version": "v001",
+  "feedback_status": null
+}

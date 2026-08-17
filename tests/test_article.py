@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 
 from content_creator.schemas import ArticleBrief, ArticleImage, AssetCandidate, AssetDecision, AssetKind, ImageRole, ImageTag, MusicTrack
 from content_creator.services import article as article_service
-from content_creator.services.article import BrowserImportRequired, _assert_public_url, _build_screenshot_document, _clean_imported_article_document, _deduplicate_text_candidates, _discover_text_candidates, _hamming_distance, _is_verified_title_card, _merge_text_candidates, _perceptual_hash, _select_article_candidates, _screenshot_anchors, analyze_prominent_headlines, basic_asset_filter, capture_article_screenshots, chromium_available, discover_asset_candidates, download_selected_assets, extract_article_html, order_images, parse_article_html, select_assets_with_agent
+from content_creator.services.article import BrowserImportRequired, _assert_public_url, _build_screenshot_document, _clean_imported_article_document, _deduplicate_text_candidates, _discover_text_candidates, _hamming_distance, _is_verified_title_card, _merge_text_candidates, _perceptual_hash, _quality_ok, _select_article_candidates, _screenshot_anchors, analyze_prominent_headlines, basic_asset_filter, capture_article_screenshots, chromium_available, classify_content_sufficiency, discover_asset_candidates, download_selected_assets, extract_article_html, order_images, parse_article_html, select_assets_with_agent
 from content_creator.services.music.catalog import select_track
 
 
@@ -21,6 +21,27 @@ def test_private_urls_are_rejected():
     for url in ("http://127.0.0.1/article", "http://localhost/article", "file:///etc/passwd"):
         with pytest.raises(ValueError):
             _assert_public_url(url)
+
+
+def test_plain_text_angle_bracket_placeholders_are_not_parsed_as_html():
+    body = "安装命令使用 <skill-name> 参数。\n" + ("这是完整的中文说明段落，介绍参数用途和执行结果。" * 8)
+    classification, metrics = classify_content_sufficiency(body, representation="text")
+    assert classification in {"compact", "normal"}
+    assert metrics["paragraph_count"] == 2
+    assert _quality_ok(body)
+
+
+def test_single_substantive_paragraph_can_form_compact_video():
+    body = "这一段正文完整说明工具的用途、安装方式、执行步骤、适用范围和最终效果，内容虽然简短但具有独立且可追溯的事实。" * 3
+    classification, metrics = classify_content_sufficiency(body)
+    assert classification == "compact"
+    assert metrics["paragraph_count"] == 1
+
+
+def test_short_navigation_text_remains_invalid_article_content():
+    body = "首页\n登录\n注册\n收藏\n分享\n上一页\n下一页"
+    classification, _ = classify_content_sufficiency(body)
+    assert classification == "invalid"
 
 
 def test_tag_order_places_hero_first_and_result_last():

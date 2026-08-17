@@ -12,6 +12,7 @@ export interface TransitionPlanItem { index: number; transition: TransitionConfi
 export interface TransitionPlan { transitions: TransitionPlanItem[]; }
 export interface ImageAsset { id: string; filename: string; relative_path: string; width: number; height: number; fit: "contain"; backgroundColor: RGBColor; duration_frames: number; motion: MotionType | string; entrance: EntranceConfig; }
 export interface AudioConfig { path: string; source_path?: string | null; duration: number; sample_rate: number; bpm: number; }
+export interface BackgroundVideoConfig {path:string;source_filename:string;duration:number;width:number;height:number;fit:'cover';loop:true;muted:true;overlay_opacity:number;}
 export interface AnimationDesign { description: string; movement: string; direction?: string | null; energy: number; timing?: string | null; camera?: string | null; effects: string[]; }
 export type VisualEventPhase = "entrance" | "exit" | "transition" | "camera" | "effect";
 export interface VisualEvent { type: string; phase: VisualEventPhase; start_frame: number; duration_frames: number; source_asset_id?: string | null; target_asset_id?: string | null; params: Record<string, unknown>; }
@@ -20,7 +21,7 @@ export interface TimelineItem { asset_id: string; start_frame: number; end_frame
 export interface VideoOutput { project_dir: string; render_data: string; final_video: string; }
 export type VideoCopy = {headline: string; subtitle: string; body: string;}
 export type PersistentTitleSpec = {content:string;content_hash:string;bbox:{x:number;y:number;width:number;height:number};alignment:'left'|'center'|'right';typography_role:'headline';font_id:string;style_intent:string;weight:'regular'|'medium'|'bold';color:string;outline:'none'|'dark_thin'|'dark_strong';shadow:'none'|'soft'|'strong';letter_spacing:'normal'|'relaxed';caption_style_intent:'reference_emphasis';max_lines:3;entrance_duration_frames:number;z_index:number};
-export interface VideoProject { project_id: string; fps: number; width: number; height: number; images: ImageAsset[]; audio: AudioConfig; timeline: TimelineItem[]; output: VideoOutput; video_copy: VideoCopy; persistent_title?: PersistentTitleSpec | null; media_base_url?: string; }
+export interface VideoProject { project_id: string; fps: number; width: number; height: number; images: ImageAsset[]; audio: AudioConfig; background_video?: BackgroundVideoConfig | null; timeline: TimelineItem[]; output: VideoOutput; video_copy: VideoCopy; persistent_title?: PersistentTitleSpec | null; media_base_url?: string; }
 export type RemotionProps = VideoProject & Record<string, unknown>;
 export type VisualSpecKeyframe = {frame: number; value: number; easing?: string};
 export type VisualSpecTrack = {target?: string | null; property: string; keyframes: VisualSpecKeyframe[]};

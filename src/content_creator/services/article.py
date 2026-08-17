@@ -404,21 +404,45 @@ def _preview(candidate: ArticleTextCandidate) -> CandidatePreview:
     return CandidatePreview(id=candidate.id, source=candidate.source, selector_or_key=candidate.selector_or_key, char_count=candidate.char_count, paragraph_count=candidate.paragraph_count, image_count=candidate.image_count, title_context=candidate.title_context, beginning=text[:360], middle=text[max(0, midpoint - 180):midpoint + 180], ending=text[-360:])
 
 
-def _quality_ok(body: str) -> bool:
-    parsed = BeautifulSoup(body, "html.parser") if "<" in body else None
+def classify_content_sufficiency(body: str, *, representation: str = "text") -> tuple[str, dict]:
+    """Classify grounded article content without guessing its representation.
+
+    Plain article text commonly contains command placeholders such as
+    ``<path>``. Treating every angle bracket as HTML discards that content and
+    makes an otherwise valid article fail extraction.
+    """
+    if representation not in {"text", "html"}:
+        raise ValueError("representation must be 'text' or 'html'")
+    parsed = BeautifulSoup(body, "html.parser") if representation == "html" else None
     text = _normalize_text(parsed.get_text(" ", strip=True)) if parsed else _normalize_text(body)
     paragraphs = ([node for node in parsed.find_all(["p", "h2", "h3", "li"]) if _normalize_text(node.get_text(" ", strip=True))] if parsed else [line for line in body.splitlines() if _normalize_text(line)])
-    if len(text) < 80 or len(paragraphs) < 2:
-        return False
-    text_density = len(text) / max(len(body), 1)
-    if text_density < .08:
-        return False
-    links = sum(len(_normalize_text(node.get_text(" ", strip=True))) for node in parsed.find_all("a")) if parsed else 0
-    if links / max(len(text), 1) > .35:
-        return False
     paragraph_texts = [_normalize_text(node.get_text(" ", strip=True) if hasattr(node, "get_text") else str(node)) for node in paragraphs]
+    substantive = [item for item in paragraph_texts if len(item) >= 24]
+    text_density = len(text) / max(len(body), 1)
+    links = sum(len(_normalize_text(node.get_text(" ", strip=True))) for node in parsed.find_all("a")) if parsed else 0
+    link_ratio = links / max(len(text), 1)
     duplicate_ratio = 1 - len(set(paragraph_texts)) / max(len(paragraph_texts), 1)
-    return duplicate_ratio < .35
+    valid_length = len(text) >= 80 and len(paragraphs) >= 2
+    # A short, single-paragraph article is still usable when it contains a
+    # substantive continuous passage. Metadata candidates are filtered by the
+    # caller and cannot reach this exception as a replacement for article body.
+    if len(paragraphs) == 1 and len(text) >= 120 and substantive:
+        valid_length = True
+    valid = valid_length and text_density >= .08 and link_ratio <= .35 and duplicate_ratio < .35
+    classification = "invalid" if not valid else ("compact" if len(text) < 600 or len(substantive) < 3 else "normal")
+    return classification, {
+        "classification": classification,
+        "char_count": len(text),
+        "paragraph_count": len(paragraphs),
+        "substantive_paragraph_count": len(substantive),
+        "text_density": round(text_density, 4),
+        "link_ratio": round(link_ratio, 4),
+        "duplicate_ratio": round(duplicate_ratio, 4),
+    }
+
+
+def _quality_ok(body: str, *, representation: str = "text") -> bool:
+    return classify_content_sufficiency(body, representation=representation)[0] != "invalid"
 
 
 def _merge_text_candidates(candidates: list[ArticleTextCandidate], selected_ids: list[str]) -> ArticleExtractionResult:
@@ -446,7 +470,7 @@ def _merge_text_candidates(candidates: list[ArticleTextCandidate], selected_ids:
     body = "\n".join(merged_paragraphs)
     used_candidates = [by_id[item] for item in used_ids]
     method = "+".join(dict.fromkeys(item.source for item in used_candidates)) or "deterministic"
-    confidence = min(1.0, max((_candidate_score(item) for item in selected), default=0) / 20)
+    confidence = min(1.0, max(0.0, max((_candidate_score(item) for item in selected), default=0) / 20))
     return ArticleExtractionResult(requested_url="", canonical_url="", effective_base_url="", extraction_method=method, extraction_confidence=confidence, selected_candidate_ids=used_ids, title=used_candidates[0].title_context if used_candidates else "未命名文章", body=body, selected_html="<article>" + "".join(selected_html) + "</article>")
 
 
@@ -621,7 +645,15 @@ def capture_article_screenshots(source_url: str, project_dir: str | Path, start_
                 result.append(ArticleImage(id=f"article-{start_index + len(result):03d}", source_url=f"screenshot://article/{start_index + len(result)}", local_path=str(target), width=SCREENSHOT_SIZE[0], height=SCREENSHOT_SIZE[1], source_index=start_index + len(result), alt="文章正文截图", caption="", context="正文截图", sha256=digest))
             browser.close()
             if len(result) < count:
-                raise ValueError(f"正文截图内容重复，尝试 {len(anchors)} 个段落位置后仅生成 {len(result)} 张")
+                if diagnostics is not None:
+                    diagnostics["screenshot_fallback"].update({
+                        "requested_count": count,
+                        "generated_count": len(result),
+                        "shortfall": count - len(result),
+                        "reduction_reason": "duplicate_or_insufficient_article_regions",
+                    })
+                if not result:
+                    raise ValueError(f"正文截图内容重复，尝试 {len(anchors)} 个段落位置后未生成可用截图")
             return result
     except Exception as exc:
         raise ValueError(f"本地正文截图失败：{exc}") from exc

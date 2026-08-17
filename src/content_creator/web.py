@@ -52,18 +52,48 @@ class JobVersion:
     feedback_id: str | None = None
 
 
+def _stage_progress(stage: str, status: str, current: int) -> int:
+    if status == "completed":
+        return 100
+    milestones = (
+        (("等待开始", "正在提交"), 2),
+        (("抓取文章", "解析浏览器导入"), 8),
+        (("正文识别", "收到浏览器导入"), 15),
+        (("发现网页素材",), 22),
+        (("过滤网页素材",), 27),
+        (("分析网页素材",), 34),
+        (("下载已选素材",), 42),
+        (("素材状态",), 48),
+        (("正文截图", "补充正文截图", "准备正文截图"), 55),
+        (("分析图片与生成文案",), 62),
+        (("翻译中文说明文案",), 69),
+        (("选择背景音乐",), 74),
+        (("Director 编排",), 79),
+        (("编排动态布局视频",), 85),
+        (("根据反馈生成字幕版本",), 12),
+        (("Layout Director 正在重新设计",), 38),
+        (("渲染字幕版本", "渲染视频", "正式渲染开始"), 88),
+        (("正在打包 Remotion",), 92),
+        (("正在渲染并编码",), 96),
+        (("视频渲染已完成", "字幕版本", "已完成"), 100),
+    )
+    matched = next((value for needles, value in milestones if any(needle in stage for needle in needles)), current)
+    return max(current, matched)
+
+
 @dataclass
 class Job:
     id: str
     url: str
     status: str = "queued"
     stage: str = "等待开始"
+    progress: int = 0
     error: str | None = None
     project_dir: str | None = None
     video_path: str | None = None
     browser_import_status: int | None = None
     browser_import_url: str | None = None
-    events: list[dict[str, str]] = field(default_factory=list)
+    events: list[dict[str, str | int]] = field(default_factory=list)
     versions: list[JobVersion] = field(default_factory=list)
     current_version: str | None = None
     feedback_status: str | None = None
@@ -71,7 +101,8 @@ class Job:
 
     def event(self, stage: str) -> None:
         self.stage = stage
-        self.events.append({"status": self.status, "stage": stage})
+        self.progress = _stage_progress(stage, self.status, self.progress)
+        self.events.append({"status": self.status, "stage": stage, "progress": self.progress})
         if self.persist_callback:
             self.persist_callback()
 
@@ -111,6 +142,7 @@ class JobManager:
     def _persist_job(self, job: Job) -> None:
         data = {
             "id": job.id, "url": job.url, "status": job.status, "stage": job.stage,
+            "progress": job.progress,
             "error": job.error, "project_dir": job.project_dir, "video_path": job.video_path,
             "browser_import_status": job.browser_import_status, "browser_import_url": job.browser_import_url,
             "events": job.events, "versions": [asdict(version) for version in job.versions],
@@ -239,6 +271,7 @@ class JobManager:
             return job
         next_version = f"v{len(job.versions) + 1:03d}"
         job.status = "revising"
+        job.progress = 5
         job.feedback_status = "revising"
         job.error = None
         job.event(f"根据反馈生成字幕版本 {next_version}")
@@ -393,7 +426,7 @@ def _job_payload(job: Job) -> dict:
             "message": "请在正常浏览器打开该文章，点击导入书签后返回此页面。",
         }
     versions = [{"id": item.id, "created_at": item.created_at, "source_version": item.source_version, "video_url": f"/api/jobs/{job.id}/video?version={item.id}"} for item in job.versions]
-    return {"id": job.id, "url": job.url, "status": job.status, "stage": job.stage, "error": job.error, "project_dir": job.project_dir, "video_url": f"/api/jobs/{job.id}/video?version={job.current_version}" if job.current_version else None, "versions": versions, "current_version": job.current_version, "feedback_status": job.feedback_status, "browser_import": browser_import}
+    return {"id": job.id, "url": job.url, "status": job.status, "stage": job.stage, "progress": job.progress, "error": job.error, "project_dir": job.project_dir, "video_url": f"/api/jobs/{job.id}/video?version={job.current_version}" if job.current_version else None, "versions": versions, "current_version": job.current_version, "feedback_status": job.feedback_status, "browser_import": browser_import}
 
 
 app = create_app()
@@ -413,24 +446,25 @@ body{margin:0;background:#111;color:#f4f4f0;font:16px -apple-system,BlinkMacSyst
 main{max-width:760px;margin:0 auto;padding:10vh 24px 48px}h1{font-size:32px;margin:0 0 12px}p{color:#a8aaa7;margin:0 0 28px}
 #generate{display:flex;border-bottom:1px solid #686b65;gap:12px;padding-bottom:10px}input,textarea,select{font:inherit;color:#f4f4f0;background:#1b1d1c;border:1px solid #4d504c}
 #url{min-width:0;flex:1;border:0;background:transparent;outline:none}button{border:0;background:#dce74a;color:#111;padding:9px 16px;font:inherit;font-weight:650;cursor:pointer}button.secondary{background:#2a2d2a;color:#f4f4f0;border:1px solid #555}
-#status{margin-top:28px;min-height:24px;color:#dce74a;line-height:1.7}video{display:none;margin:22px auto 0;width:min(100%,405px);aspect-ratio:9/16;object-fit:contain;background:#000}
+#status{margin-top:28px;min-height:24px;color:#dce74a;line-height:1.7}#progressWrap{margin-top:12px}#progressMeta{display:flex;justify-content:space-between;color:#a8aaa7;font-size:13px;margin-bottom:7px}#progressTrack{height:8px;background:#292c29;overflow:hidden}#progressBar{width:0;height:100%;background:#dce74a;transition:width .35s ease}#progressWrap.failed #progressBar{background:#d36b5f}#progressWrap.paused #progressBar{background:#9da55a}video{display:none;margin:22px auto 0;width:min(100%,405px);aspect-ratio:9/16;object-fit:contain;background:#000}
 #review{display:none;margin-top:24px;padding-top:20px;border-top:1px solid #383b38}#versionRow{display:flex;align-items:center;gap:10px;margin-bottom:16px}select{padding:8px 10px}
 textarea{box-sizing:border-box;width:100%;min-height:76px;padding:10px;resize:vertical}#ratingButtons{display:flex;gap:10px;margin-top:10px}#feedbackMessage{margin-top:10px;color:#a8aaa7}a{color:#dce74a}
 </style></head><body><main><h1>文章转视频</h1><p>输入公开文章 URL，自动生成竖屏短视频，并通过反馈学习你的字幕审美。</p>
 <form id="generate"><input id="url" type="url" required placeholder="https://example.com/article"><button>生成视频</button></form>
-<div id="status"></div><video id="video" controls></video>
+<div id="status"></div><div id="progressWrap" hidden><div id="progressMeta"><span>阶段进度</span><span id="progressValue">0%</span></div><div id="progressTrack" role="progressbar" aria-label="视频生成进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progressBar"></div></div></div><video id="video" controls></video>
 <section id="review"><div id="versionRow"><label for="versions">视频版本</label><select id="versions"></select></div>
 <textarea id="reason" maxlength="1000" placeholder="可选：例如字太花、标题太挤、层级不清楚"></textarea>
 <div id="ratingButtons"><button type="button" data-rating="positive">好看</button><button type="button" class="secondary" data-rating="negative">不好看，重新设计字幕</button></div><div id="feedbackMessage"></div></section>
 </main><script>
-const form=document.querySelector('#generate'),urlInput=document.querySelector('#url'),statusEl=document.querySelector('#status'),video=document.querySelector('#video'),review=document.querySelector('#review'),versions=document.querySelector('#versions'),reason=document.querySelector('#reason'),feedbackMessage=document.querySelector('#feedbackMessage');
+const form=document.querySelector('#generate'),urlInput=document.querySelector('#url'),statusEl=document.querySelector('#status'),progressWrap=document.querySelector('#progressWrap'),progressTrack=document.querySelector('#progressTrack'),progressBar=document.querySelector('#progressBar'),progressValue=document.querySelector('#progressValue'),video=document.querySelector('#video'),review=document.querySelector('#review'),versions=document.querySelector('#versions'),reason=document.querySelector('#reason'),feedbackMessage=document.querySelector('#feedbackMessage');
 let currentJob=null,eventSource=null;
 function setVideo(src){if(!src)return;video.pause();video.src=src+'&cache='+Date.now();video.load();video.style.display='block'}
-function render(job){currentJob=job;statusEl.textContent=job.stage||job.status;if(job.error)statusEl.textContent+='：'+job.error;if(job.status==='awaiting_browser_import'&&job.browser_import?.bookmarklet_url){const a=document.createElement('a');a.href=job.browser_import.bookmarklet_url;a.textContent=' 导入当前文章';a.draggable=true;statusEl.append(a)}
+function renderProgress(job){const value=Math.max(0,Math.min(100,Number(job.progress)||0));progressWrap.hidden=false;progressWrap.classList.toggle('failed',job.status==='failed');progressWrap.classList.toggle('paused',job.status==='awaiting_browser_import');progressBar.style.width=value+'%';progressValue.textContent=value+'%';progressTrack.setAttribute('aria-valuenow',String(value));progressTrack.setAttribute('aria-valuetext',(job.stage||job.status)+'，'+value+'%')}
+function render(job){currentJob=job;statusEl.textContent=job.stage||job.status;renderProgress(job);if(job.error)statusEl.textContent+='：'+job.error;if(job.status==='awaiting_browser_import'&&job.browser_import?.bookmarklet_url){const a=document.createElement('a');a.href=job.browser_import.bookmarklet_url;a.textContent=' 导入当前文章';a.draggable=true;statusEl.append(a)}
 const old=versions.value;versions.replaceChildren(...job.versions.map(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.id+(v.id===job.current_version?'（当前）':'');o.dataset.url=v.video_url;return o}));if(job.versions.length){versions.value=job.versions.some(v=>v.id===old)?old:job.current_version;review.style.display='block';const selected=job.versions.find(v=>v.id===versions.value);if(selected&&video.dataset.version!==selected.id){video.dataset.version=selected.id;setVideo(selected.video_url)}}else{review.style.display='none'}
 document.querySelectorAll('[data-rating]').forEach(b=>b.disabled=job.status==='revising');if(job.feedback_status==='revising')feedbackMessage.textContent='正在生成新的字幕版本';else if(job.feedback_status==='completed')feedbackMessage.textContent='新字幕版本已生成';else if(job.feedback_status==='recorded')feedbackMessage.textContent='已记录偏好，将影响以后的视频';else if(job.feedback_status==='failed')feedbackMessage.textContent='修订失败：'+(job.error||'未知布局错误')+'；原视频仍然保留';}
 function listen(id){eventSource?.close();eventSource=new EventSource('/api/jobs/'+id+'/events');eventSource.onmessage=e=>{const job=JSON.parse(e.data);render(job);if(job.status==='completed'||job.status==='failed')eventSource.close()}}
-form.onsubmit=async e=>{e.preventDefault();video.style.display='none';review.style.display='none';statusEl.textContent='正在提交任务';const response=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url:urlInput.value})});const job=await response.json();if(!response.ok){statusEl.textContent=job.detail||'提交失败';return}render(job);listen(job.id)};
+form.onsubmit=async e=>{e.preventDefault();video.style.display='none';review.style.display='none';statusEl.textContent='正在提交任务';renderProgress({status:'queued',stage:'正在提交任务',progress:2});const response=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url:urlInput.value})});const job=await response.json();if(!response.ok){statusEl.textContent=job.detail||'提交失败';progressWrap.classList.add('failed');return}render(job);listen(job.id)};
 versions.onchange=()=>{const selected=currentJob?.versions.find(v=>v.id===versions.value);if(selected){video.dataset.version=selected.id;setVideo(selected.video_url)}};
 document.querySelectorAll('[data-rating]').forEach(button=>button.onclick=async()=>{if(!currentJob)return;feedbackMessage.textContent='正在提交反馈';const response=await fetch('/api/jobs/'+currentJob.id+'/feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({version_id:versions.value,rating:button.dataset.rating,reason:reason.value})});const job=await response.json();if(!response.ok){feedbackMessage.textContent=job.detail||'反馈提交失败';return}render(job);if(button.dataset.rating==='negative')listen(job.id);else reason.value=''})
 </script></body></html>"""

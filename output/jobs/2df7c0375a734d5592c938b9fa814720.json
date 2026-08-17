@@ -1,0 +1,27 @@
+{
+  "id": "2df7c0375a734d5592c938b9fa814720",
+  "url": "https://github.com/titanwings/colleague-skill/blob/dot-skill/docs/lang/README_ZH.md#-%E5%AE%89%E8%A3%85",
+  "status": "failed",
+  "stage": "生成失败",
+  "progress": 8,
+  "error": "未能从网页提取足够的正文内容（候选 10 个，最终 3172 字）",
+  "project_dir": null,
+  "video_path": null,
+  "browser_import_status": null,
+  "browser_import_url": "javascript:(()=>{const f=document.createElement('form');f.method='POST';f.action=\"http://127.0.0.1:8000/api/browser-import\";f.target='_blank';for(const [k,v] of [['token',\"uKTfGQmfuQxFXH1igBRBvH6723BoMGrJW8_moCqQd4I\"],['source_url',location.href],['html',document.documentElement.outerHTML]]){const i=document.createElement('input');i.type='hidden';i.name=k;i.value=v;f.appendChild(i)}document.body.appendChild(f);f.submit();setTimeout(()=>f.remove(),1000)})()",
+  "events": [
+    {
+      "status": "running",
+      "stage": "抓取文章",
+      "progress": 8
+    },
+    {
+      "status": "failed",
+      "stage": "生成失败",
+      "progress": 8
+    }
+  ],
+  "versions": [],
+  "current_version": null,
+  "feedback_status": null
+}

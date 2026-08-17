@@ -37,6 +37,18 @@ class AudioConfig(BaseModel):
     bpm: float = Field(default=120.0, gt=0)
 
 
+class BackgroundVideoConfig(BaseModel):
+    path: str = Field(min_length=1)
+    source_filename: str = Field(min_length=1)
+    duration: float = Field(gt=0)
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    fit: Literal["cover"] = "cover"
+    loop: Literal[True] = True
+    muted: Literal[True] = True
+    overlay_opacity: float = Field(default=.62, ge=0, le=.9)
+
+
 class VideoCopy(BaseModel):
     """User-authored copy rendered in the persistent center-stage layout."""
     headline: str = Field(default="", max_length=80)
@@ -79,6 +91,7 @@ class VideoProject(BaseModel):
     height: int = Field(default=1080, gt=0)
     images: list[ImageAsset] = Field(min_length=1)
     audio: AudioConfig
+    background_video: BackgroundVideoConfig | None = None
     timeline: list[TimelineItem] = Field(min_length=1)
     output: VideoOutput
     video_copy: VideoCopy = Field(default_factory=VideoCopy)

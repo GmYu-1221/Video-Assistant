@@ -8,11 +8,13 @@ import {TransitionFactory} from './transitions';
 import {TransitionEffectRenderer} from './transitions/TransitionEffectRenderer';
 import {EffectRenderer} from './effects';
 import {VisualEffectRenderer} from './visual/VisualEffectRenderer';
+import {BackgroundVideoLayer} from './components/BackgroundVideoLayer';
 
 export const Slideshow: React.FC<RemotionProps> = (props) => {
   const base = props.media_base_url ?? '';
   const map = new Map(props.images.map((x) => [x.id, x]));
-  return <AbsoluteFill style={{backgroundColor: 'black'}}>
+  return <AbsoluteFill style={{backgroundColor: props.background_video ? 'transparent' : 'black'}}>
+    <BackgroundVideoLayer config={props.background_video} mediaBaseUrl={props.media_base_url}/>
     <TransitionSeries>
       {props.timeline.flatMap((item, index) => {
         const asset = map.get(item.asset_id);
@@ -25,9 +27,9 @@ export const Slideshow: React.FC<RemotionProps> = (props) => {
         // The incoming transition already controls this scene's reveal during
         // the overlap, so an entrance wrapper would create a competing reveal.
         const sceneEvents = events.filter((event) => event.phase !== 'transition' && !(incomingTransition && event.phase === 'entrance'));
-        const sceneContent = sceneEvents.reduce<React.ReactNode>((content, event, eventIndex) => VisualEffectRenderer(event, `visual-${item.asset_id}-${eventIndex}`, content), <ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} imageWidth={asset?.width ?? props.width} imageHeight={asset?.height ?? props.height} motion={asset?.motion ?? 'static'} entrance={incomingTransition ? undefined : asset?.entrance} />);
+        const sceneContent = sceneEvents.reduce<React.ReactNode>((content, event, eventIndex) => VisualEffectRenderer(event, `visual-${item.asset_id}-${eventIndex}`, content), <ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} imageWidth={asset?.width ?? props.width} imageHeight={asset?.height ?? props.height} motion={asset?.motion ?? 'static'} entrance={incomingTransition ? undefined : asset?.entrance} backgroundColor={props.background_video ? 'transparent' : undefined} />);
         const sequence = <TransitionSeries.Sequence key={`sequence-${item.asset_id}`} durationInFrames={item.duration_frames + transitionFrames}>
-          {events.length ? sceneContent : <EffectRenderer animation={item.animation}><ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} imageWidth={asset?.width ?? props.width} imageHeight={asset?.height ?? props.height} motion={asset?.motion ?? 'static'} entrance={asset?.entrance} /></EffectRenderer>}
+          {events.length ? sceneContent : <EffectRenderer animation={item.animation}><ImageFrame src={`${base}/${asset?.relative_path ?? ''}`} imageWidth={asset?.width ?? props.width} imageHeight={asset?.height ?? props.height} motion={asset?.motion ?? 'static'} entrance={asset?.entrance} backgroundColor={props.background_video ? 'transparent' : undefined} /></EffectRenderer>}
         </TransitionSeries.Sequence>;
         if (isLast) return [sequence];
         const nextItem = props.timeline[index + 1];

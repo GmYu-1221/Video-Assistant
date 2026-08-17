@@ -60,8 +60,9 @@ LAYOUT_MODEL=gemini-3.6-flash
 VISUAL_CRITIC_MODEL=gemini-3.6-flash
 LAYOUT_QA_THRESHOLD=0.78
 URL_ASSET_CHARS_PER_IMAGE=650
-URL_ASSET_TARGET_MIN=4
+URL_ASSET_TARGET_MIN=1
 URL_ASSET_TARGET_MAX=12
+URL_BACKGROUND_VIDEO_DIR=/Users/yu/Documents/Codex/Video-Assistant/input/bgv
 ```
 
 Claude、GPT、DeepSeek、Kimi 或 Ollama 只要兼容该接口即可切换。模型分工：
@@ -75,6 +76,7 @@ Claude、GPT、DeepSeek、Kimi 或 Ollama 只要兼容该接口即可切换。�
 - `LAYOUT_MODEL` / `VISUAL_CRITIC_MODEL`：动态场景排版与视觉审查；均回退到 `ASSET_MODEL`。
 - `LAYOUT_QA_THRESHOLD`：视觉审查得分低于该值时触发一次本地化排版修复。
 - `URL_ASSET_CHARS_PER_IMAGE` / `URL_ASSET_TARGET_MIN` / `URL_ASSET_TARGET_MAX`：Web 模式的配图数量按正文长度动态计算。
+- `URL_BACKGROUND_VIDEO_DIR`：URL 视频随机背景素材目录；每个项目固定选择一次，短素材循环、长素材随主时间线裁剪。
 
 缺少 API Key 或设置 `LLM_PROVIDER=mock` 时使用 Mock Provider（纯本地规则，不发送任何外部请求）。
 

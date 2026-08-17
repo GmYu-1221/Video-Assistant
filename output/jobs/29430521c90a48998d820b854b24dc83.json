@@ -1,0 +1,37 @@
+{
+  "id": "29430521c90a48998d820b854b24dc83",
+  "url": "https://zhuanlan.zhihu.com/p/1994423521271637277",
+  "status": "failed",
+  "stage": "任务已中断",
+  "progress": 15,
+  "error": "服务重启中断了正在执行的任务",
+  "project_dir": null,
+  "video_path": null,
+  "browser_import_status": 403,
+  "browser_import_url": "javascript:(()=>{const f=document.createElement('form');f.method='POST';f.action=\"http://127.0.0.1:8000/api/browser-import\";f.target='_blank';for(const [k,v] of [['token',\"uKTfGQmfuQxFXH1igBRBvH6723BoMGrJW8_moCqQd4I\"],['source_url',location.href],['html',document.documentElement.outerHTML]]){const i=document.createElement('input');i.type='hidden';i.name=k;i.value=v;f.appendChild(i)}document.body.appendChild(f);f.submit();setTimeout(()=>f.remove(),1000)})()",
+  "events": [
+    {
+      "status": "running",
+      "stage": "抓取文章",
+      "progress": 8
+    },
+    {
+      "status": "awaiting_browser_import",
+      "stage": "需要浏览器导入页面内容（HTTP 403）",
+      "progress": 8
+    },
+    {
+      "status": "running",
+      "stage": "收到浏览器导入内容",
+      "progress": 15
+    },
+    {
+      "status": "running",
+      "stage": "解析浏览器导入内容",
+      "progress": 15
+    }
+  ],
+  "versions": [],
+  "current_version": null,
+  "feedback_status": null
+}

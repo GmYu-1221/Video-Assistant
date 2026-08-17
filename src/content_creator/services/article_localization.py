@@ -180,12 +180,19 @@ def localize_article_copy(brief: ArticleBrief) -> tuple[ArticleBrief, LocalizedA
     original = " ".join([brief.title, brief.summary, *paragraphs])
     if chinese_ratio(original) >= 0.18:
         title = normalize_article_title(brief.title)
-        copy = LocalizedArticleCopy(title=title, summary=brief.summary, paragraphs=paragraphs, source_paragraph_indices=list(range(len(paragraphs))), translation_mode="passthrough", chinese_text_ratio=chinese_ratio(original))
-        issues = validate_localized_display_text([copy.title, copy.summary, *copy.paragraphs])
-        if issues:
-            raise ValueError("中文文案翻译失败：" + "; ".join(issues))
-        localized = brief.model_copy(update={"title": title, "text": "\n".join(paragraphs)})
-        return localized, copy, {"mode": "passthrough", "chinese_text_ratio": copy.chinese_text_ratio, "source_paragraph_indices": copy.source_paragraph_indices, "title_normalized": title != brief.title}
+        header_issues = validate_localized_display_text([title, brief.summary])
+        if header_issues:
+            raise ValueError("中文文案翻译失败：" + "; ".join(header_issues))
+        kept = [(index, paragraph) for index, paragraph in enumerate(paragraphs) if not validate_localized_display_text([paragraph])]
+        excluded = [index for index, paragraph in enumerate(paragraphs) if validate_localized_display_text([paragraph])]
+        if not kept:
+            raise ValueError("中文文案翻译失败：没有可用的简体中文正文")
+        kept_indices = [index for index, _ in kept]
+        kept_paragraphs = [paragraph for _, paragraph in kept]
+        ratio = chinese_ratio(" ".join([title, brief.summary, *kept_paragraphs]))
+        copy = LocalizedArticleCopy(title=title, summary=brief.summary, paragraphs=kept_paragraphs, source_paragraph_indices=kept_indices, translation_mode="passthrough", chinese_text_ratio=ratio)
+        localized = brief.model_copy(update={"title": title, "text": "\n".join(kept_paragraphs)})
+        return localized, copy, {"mode": "passthrough", "chinese_text_ratio": copy.chinese_text_ratio, "source_paragraph_indices": copy.source_paragraph_indices, "excluded_non_chinese_paragraph_indices": excluded, "title_normalized": title != brief.title}
     provider = get_agent_provider("article")
     translated_by_index: dict[int, str] = {}
     batches: list[dict] = []

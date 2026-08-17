@@ -1,3 +1,5 @@
+import pytest
+
 from content_creator.schemas import ArticleBrief, LocalizedArticleCopy, VideoCopy
 from content_creator.services.article_localization import build_localized_video_copy, validate_localized_display_text
 from content_creator.services import article_localization
@@ -49,6 +51,19 @@ def test_passthrough_keeps_normal_chinese_title_unchanged() -> None:
     assert localized.title == brief.title
     assert copy.title == brief.title
     assert diagnostics["title_normalized"] is False
+
+
+def test_passthrough_excludes_isolated_english_explanation_instead_of_failing(monkeypatch) -> None:
+    monkeypatch.setattr(article_localization, "get_agent_provider", lambda *_: pytest.fail("mostly Chinese content must not call the translation model"))
+    brief = ArticleBrief(
+        url="https://example.com/a", canonical_url="https://example.com/a", title="中文项目说明",
+        text="中文正文第一段，完整说明项目目标和使用方法。\nThis paragraph explains an optional integration in plain English.\n中文正文第二段，继续说明执行结果和适用范围。",
+        summary="中文摘要。",
+    )
+    localized, copy, diagnostics = article_localization.localize_article_copy(brief)
+    assert "optional integration" not in localized.text
+    assert copy.source_paragraph_indices == [0, 2]
+    assert diagnostics["excluded_non_chinese_paragraph_indices"] == [1]
 
 
 def test_batched_translation_retries_only_untranslated_paragraphs(monkeypatch) -> None:

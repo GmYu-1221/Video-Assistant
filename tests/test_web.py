@@ -4,7 +4,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from content_creator.schemas import NarrativeContent
-from content_creator.web import FeedbackRequest, Job, JobManager, JobVersion, _job_payload, _public_error_message, create_app
+from content_creator.web import FeedbackRequest, Job, JobManager, JobVersion, _PAGE, _job_payload, _public_error_message, create_app
 
 
 def test_web_app_exposes_single_url_job_api(tmp_path):
@@ -17,6 +17,30 @@ def test_web_app_exposes_single_url_job_api(tmp_path):
     assert "/api/jobs/{job_id}/feedback" in routes
     assert "/api/browser-import" in routes
     assert "/api/browser-asset-upload" in routes
+
+
+def test_web_page_contains_accessible_stage_progress_bar():
+    assert 'role="progressbar"' in _PAGE
+    assert 'aria-valuenow="0"' in _PAGE
+    assert "renderProgress(job)" in _PAGE
+
+
+def test_job_progress_is_monotonic_and_completes_with_job_status():
+    job = Job(id="job-progress", url="https://example.com/article", status="running")
+    job.event("抓取文章")
+    assert job.progress == 8
+    job.event("下载已选素材")
+    assert job.progress == 42
+    job.event("正文识别：迟到的旧阶段事件")
+    assert job.progress == 42
+    job.status = "failed"
+    job.event("生成失败")
+    assert job.progress == 42
+    assert _job_payload(job)["progress"] == 42
+    job.status = "completed"
+    job.event("已完成")
+    assert job.progress == 100
+    assert job.events[-1]["progress"] == 100
 
 
 def test_public_validation_error_does_not_expose_input_or_pydantic_url():

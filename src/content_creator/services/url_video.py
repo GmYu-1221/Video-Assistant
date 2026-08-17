@@ -4,12 +4,15 @@ from __future__ import annotations
 import json
 import math
 import os
+import random
 import shutil
+import subprocess
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 
-from content_creator.schemas import AudioConfig, BoundaryAction, CopyAction, ImageSemanticProfile, ImageTag, LayoutAction, LayoutPlan, TimelineItem, VideoCopy, VideoOutput, VideoProject
-from content_creator.services.article import _brief_from_extraction, _is_verified_title_card, _title_match_score, augment_soup_with_selected_html, basic_asset_filter, capture_article_screenshots, chromium_available, discover_asset_candidates, download_selected_assets, extract_article_html, fetch_article_with_extraction, log_asset_diagnostics, order_images, select_assets_with_agent, tag_images
+from content_creator.schemas import AudioConfig, BackgroundVideoConfig, BoundaryAction, CopyAction, ImageSemanticProfile, ImageTag, LayoutAction, LayoutPlan, TimelineItem, VideoCopy, VideoOutput, VideoProject
+from content_creator.services.article import _brief_from_extraction, _is_verified_title_card, _title_match_score, augment_soup_with_selected_html, basic_asset_filter, capture_article_screenshots, chromium_available, classify_content_sufficiency, discover_asset_candidates, download_selected_assets, extract_article_html, fetch_article_with_extraction, log_asset_diagnostics, order_images, select_assets_with_agent, tag_images
 from content_creator.services.assets import scan_and_process
 from content_creator.services.music import analyze_audio, load_catalog, select_track
 from content_creator.services.timeline import build_timeline
@@ -26,6 +29,7 @@ from content_creator.services.article_localization import build_localized_video_
 REFERENCE_WIDTH = 1080
 REFERENCE_HEIGHT = 1920
 REFERENCE_FPS = 30
+BACKGROUND_VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
 
 
 def _asset_target_count(body_char_count: int) -> int:
@@ -35,14 +39,92 @@ def _asset_target_count(body_char_count: int) -> int:
     except ValueError:
         per_asset = 650
     try:
-        minimum = max(1, int(os.getenv("URL_ASSET_TARGET_MIN", "4")))
+        minimum = max(1, int(os.getenv("URL_ASSET_TARGET_MIN", "1")))
     except ValueError:
-        minimum = 4
+        minimum = 1
     try:
         maximum = max(minimum, int(os.getenv("URL_ASSET_TARGET_MAX", "12")))
     except ValueError:
         maximum = max(minimum, 12)
     return min(maximum, max(minimum, math.ceil(body_char_count / per_asset)))
+
+
+def _select_background_video(source_dir: str | Path, project_dir: str | Path, *, rng=None) -> BackgroundVideoConfig:
+    source_root = Path(source_dir).expanduser().resolve()
+    if not source_root.is_dir():
+        raise ValueError(f"背景视频目录不存在：{source_root}")
+    candidates = sorted(path for path in source_root.iterdir() if path.is_file() and path.suffix.lower() in BACKGROUND_VIDEO_EXTENSIONS)
+    mp4_candidates = [path for path in candidates if path.suffix.lower() == ".mp4"]
+    candidates = mp4_candidates or candidates
+    if not candidates:
+        raise ValueError(f"背景视频目录中没有可用视频：{source_root}")
+    selected = (rng or random.SystemRandom()).choice(candidates)
+    probe = subprocess.run([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height", "-show_entries", "format=duration",
+        "-of", "json", str(selected),
+    ], check=False, capture_output=True, text=True)
+    if probe.returncode:
+        raise ValueError(f"无法读取背景视频：{selected.name}")
+    try:
+        payload = json.loads(probe.stdout)
+        stream = payload["streams"][0]
+        duration = float(payload["format"]["duration"])
+        width, height = int(stream["width"]), int(stream["height"])
+    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"背景视频缺少有效视频流：{selected.name}") from exc
+    target_dir = Path(project_dir) / "background"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"background{selected.suffix.lower()}"
+    shutil.copy2(selected, target)
+    return BackgroundVideoConfig(
+        path=f"background/{target.name}", source_filename=selected.name,
+        duration=duration, width=width, height=height,
+    )
+
+
+def _retime_resolved_bundle(bundle, profiles: dict, *, bpm: float, fps: int) -> list[dict]:
+    """Fit URL segments to real rendered copy while preserving Director actions."""
+    beat_seconds = 60.0 / max(bpm, 1.0)
+    single_segment = len(bundle.resolved) == 1
+    cursor = 0
+    timing: list[dict] = []
+    actions = []
+    partial = []
+    resolved = []
+    for action, partial_item, state in zip(bundle.actions, bundle.partial, bundle.resolved):
+        narrative = bundle.segment_narratives[state.segment_id]
+        layout = bundle.segment_layouts[state.segment_id]
+        contents = {item.content_id: item for item in narrative.contents}
+        displayed = [contents[block.content_id].value(block.variant_id) for block in layout.text_blocks if block.content_id in contents]
+        # Blocks are displayed concurrently. Use the longest reading burden,
+        # rather than adding headline and explanation as if they were serial.
+        visible_chars = max((len("".join(value.split())) for value in displayed), default=0)
+        density = getattr(profiles.get(state.resolved_media_id), "information_density", .5) or .5
+        requested_seconds = visible_chars / 6.0 + 1.5 + (.75 if density >= .7 else 0)
+        maximum = 6.0 if single_segment else 7.0
+        requested_seconds = max(3.0, min(maximum, requested_seconds))
+        beat_aligned = math.ceil(requested_seconds / beat_seconds) * beat_seconds
+        seconds = max(3.0, min(maximum, beat_aligned))
+        frames = max(1, round(seconds * fps))
+        transition = state.transition.model_copy(update={"duration_frames": min(state.transition.duration_frames, max(1, frames // 3))})
+        end = cursor + frames
+        actions.append(action.model_copy(update={"duration_frames": frames, "transition": transition}))
+        partial.append(partial_item.model_copy(update={"duration_frames": frames, "transition": transition}))
+        resolved.append(state.model_copy(update={"start_frame": cursor, "end_frame": end, "duration_frames": frames, "transition": transition}))
+        timing.append({
+            "segment_id": state.segment_id,
+            "visible_character_count": visible_chars,
+            "information_density": density,
+            "requested_seconds": round(requested_seconds, 3),
+            "actual_seconds": round(frames / fps, 3),
+            "beat_seconds": round(beat_seconds, 3),
+        })
+        cursor = end
+    bundle.actions = actions
+    bundle.partial = partial
+    bundle.resolved = resolved
+    return timing
 
 
 def _select_persistent_title(title: str, font_palette: list[str] | None, remotion_public: Path):
@@ -81,7 +163,10 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     project_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     project_dir = root / "projects" / project_id
     project_dir.mkdir(parents=True, exist_ok=False)
-    diagnostics: dict = {"url": url, "browser_imported": imported_html is not None, "article_extraction": extraction.diagnostics | {"requested_url": extraction.requested_url, "canonical_url": extraction.canonical_url, "effective_base_url": extraction.effective_base_url, "extraction_method": extraction.extraction_method, "extraction_confidence": extraction.extraction_confidence, "selected_candidate_ids": extraction.selected_candidate_ids, "final_body_chars": len(extraction.body)}}
+    sufficiency, sufficiency_metrics = classify_content_sufficiency(extraction.body, representation="text")
+    if sufficiency == "invalid":
+        raise ValueError("网页内容不是可用于视频的有效正文")
+    diagnostics: dict = {"url": url, "browser_imported": imported_html is not None, "content_sufficiency": sufficiency_metrics, "article_extraction": extraction.diagnostics | {"requested_url": extraction.requested_url, "canonical_url": extraction.canonical_url, "effective_base_url": extraction.effective_base_url, "extraction_method": extraction.extraction_method, "extraction_confidence": extraction.extraction_confidence, "selected_candidate_ids": extraction.selected_candidate_ids, "final_body_chars": len(extraction.body)}}
     cleanup = extraction.diagnostics.get("html_cleanup", {})
     removed_ui = int(cleanup.get("ui_nodes_removed", 0)) + int(cleanup.get("structural_nodes_removed", 0))
     if removed_ui:
@@ -140,8 +225,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         persist_diagnostics()
         progress("准备正文截图引擎" if not chromium_available() else "补充正文截图")
         try:
-            screenshot_count = asset_target_count - len(article_images)
-            article_images.extend(capture_article_screenshots(
+            screenshots = capture_article_screenshots(
                 brief.effective_base_url or brief.url,
                 project_dir,
                 len(article_images),
@@ -150,17 +234,20 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
                 selected_html=extraction.selected_html,
                 body=extraction.body,
                 title=extraction.title,
-            ))
-            progress(f"正文截图：成功补充 {screenshot_count} 张，当前素材 {len(article_images)} 张")
+            )
+            article_images.extend(screenshots)
+            progress(f"正文截图：成功补充 {len(screenshots)} 张，当前素材 {len(article_images)} 张")
         except Exception as exc:
             diagnostics["screenshot_fallback"]["error"] = str(exc)
             persist_diagnostics()
-            details = f"发现 {summary['discovered']} 个候选、优先选择 {summary['agent_preferred']} 个、成功下载 {len(article_images)} 个"
-            raise ValueError(f"{details}；正文截图兜底失败：{exc}") from exc
+            if not article_images:
+                raise ValueError(f"正文有效，但没有可渲染画面；本地正文截图失败：{exc}") from exc
+            diagnostics["screenshot_fallback"]["reduced_after_error"] = True
+            progress(f"正文截图未补足，使用现有 {len(article_images)} 个素材缩短视频")
     elif len(article_images) < asset_target_count:
-        # This is intentionally a hard invariant. A screenshot must never hide
-        # a candidate-pool truncation or an interrupted downloader.
-        raise ValueError("候选素材池尚未耗尽，不能执行正文截图兜底")
+        diagnostics["screenshot_fallback"] = {"triggered": False, "reason": "download_pool_incomplete_using_available_assets", "project_images_before_fallback": len(article_images), "missing": asset_target_count - len(article_images)}
+        if not article_images:
+            raise ValueError("正文有效，但候选素材池没有产生可渲染画面")
     else:
         diagnostics["screenshot_fallback"] = {"triggered": False, "reason": "not_needed", "project_images_before_fallback": len(article_images), "missing": 0}
     progress("分析图片与生成文案")
@@ -189,11 +276,21 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     progress("翻译中文说明文案")
     brief, localized_copy, localization_diagnostics = localize_article_copy(brief)
     copy = build_localized_video_copy(brief, localized_copy, preferred=copy)
-    diagnostics["localized_copy"] = localization_diagnostics
+    localized_hashes = [sha256(paragraph.encode("utf-8")).hexdigest() for paragraph in localized_copy.paragraphs]
+    diagnostics["localized_copy"] = localization_diagnostics | {
+        "localized_paragraph_hashes": localized_hashes,
+        "summary_source_paragraph_indices": localized_copy.source_paragraph_indices,
+        "article_body_source_hash": sha256(extraction.body.encode("utf-8")).hexdigest(),
+    }
     (project_dir / "localized_copy.json").write_text(localized_copy.model_dump_json(indent=2), encoding="utf-8")
     selected, contexts = order_images(article_images, tags, title=brief.title, target_count=asset_target_count)
-    if len(selected) < min(4, asset_target_count):
-        raise ValueError(f"文章可用视觉素材少于最低要求：{len(selected)}/{min(4, asset_target_count)}")
+    if not selected:
+        raise ValueError("正文有效，但没有可用于视频的视觉素材")
+    diagnostics["asset_summary"].update({
+        "actual_count": len(selected),
+        "shortened": len(selected) < asset_target_count,
+        "reduction_reason": "available_nonduplicate_assets_below_target" if len(selected) < asset_target_count else None,
+    })
     tag_by_id = {tag.image_id: tag for tag in tags}
     opening_tag = tag_by_id.get(selected[0].id)
     opening_has_verified_headline = _is_verified_title_card(selected[0], opening_tag)
@@ -235,6 +332,14 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     audio_dir.mkdir()
     copied_audio = audio_dir / source_audio.name
     shutil.copy2(source_audio, copied_audio)
+    progress("选择随机背景视频")
+    background_dir = os.getenv("URL_BACKGROUND_VIDEO_DIR", str(repo_root / "input" / "bgv"))
+    background_video = _select_background_video(background_dir, project_dir)
+    diagnostics["background_video"] = background_video.model_dump(mode="json") | {
+        "selection_mode": "random_once_per_project",
+        "main_timeline_unchanged": True,
+        "duration_behavior": "loop_if_short_trim_if_long",
+    }
     assets = scan_and_process(selected_dir, project_dir, (1920, 1080))
     selected_by_index = {index: image for index, image in enumerate(selected)}
     tag_by_id = {tag.image_id: tag for tag in tags}
@@ -272,7 +377,27 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     actions = default_url_actions(timeline, assets)
     profiles = {asset.id: asset.semantic_profile for asset in assets}
     preference_summary = TypographyPreferenceStore(root).summary_for(brief)
-    bundle = resolve_timeline(actions, profiles, title=brief.title, body=brief.text, summary=brief.summary, layout_context=article_context(brief), layout_preferences=preference_summary)
+    layout_context = article_context(brief)
+    if sufficiency == "compact" or len(assets) == 1:
+        layout_context["copy_density_intent"] = "reduce"
+    bundle = resolve_timeline(actions, profiles, title=brief.title, body=brief.text, summary=brief.summary, layout_context=layout_context, layout_preferences=preference_summary)
+    timing_diagnostics = _retime_resolved_bundle(bundle, profiles, bpm=analysis.bpm, fps=REFERENCE_FPS)
+    actions = bundle.actions
+    actual_duration = sum(item.duration_frames for item in bundle.resolved) / REFERENCE_FPS
+    diagnostics["video_scope"] = {
+        "content_classification": sufficiency,
+        "semantic_unit_count": len({content.semantic_unit_id for narrative in bundle.narratives.values() for content in narrative.contents}),
+        "desired_asset_count": asset_target_count,
+        "actual_asset_count": len(assets),
+        "final_segment_count": len(bundle.resolved),
+        "target_duration_seconds": round(actual_duration, 3),
+        "actual_duration_seconds": round(actual_duration, 3),
+        "shortened": len(assets) < asset_target_count or sufficiency == "compact",
+        "reduction_reasons": [reason for reason in ["compact_article" if sufficiency == "compact" else None, "limited_visual_assets" if len(assets) < asset_target_count else None] if reason],
+        "segments": timing_diagnostics,
+    }
+    if diagnostics["video_scope"]["shortened"]:
+        progress(f"正文和素材较少，已调整为 {len(bundle.resolved)} 个镜头、{actual_duration:.1f} 秒")
     persistent_title, persistent_title_rendered, title_attempts = _select_persistent_title(
         brief.title,
         bundle.layout_diagnostics.get("font_palette"),
@@ -348,7 +473,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         "render_path": "url_layout_renderer",
     }
     persist_diagnostics()
-    project = VideoProject(project_id=project_id, fps=REFERENCE_FPS, width=REFERENCE_WIDTH, height=REFERENCE_HEIGHT, images=assets, audio=AudioConfig(path=f"audio/{copied_audio.name}", source_path=f"audio/{copied_audio.name}", duration=max(item.end_frame for item in timeline) / REFERENCE_FPS, sample_rate=analysis.sample_rate, bpm=analysis.bpm), timeline=updated_timeline, output=output, video_copy=copy, persistent_title=persistent_title)
+    project = VideoProject(project_id=project_id, fps=REFERENCE_FPS, width=REFERENCE_WIDTH, height=REFERENCE_HEIGHT, images=assets, audio=AudioConfig(path=f"audio/{copied_audio.name}", source_path=f"audio/{copied_audio.name}", duration=actual_duration, sample_rate=analysis.sample_rate, bpm=analysis.bpm), background_video=background_video, timeline=updated_timeline, output=output, video_copy=copy, persistent_title=persistent_title)
     progress("编排动态布局视频")
     project = compile_render_plan(project, _storyboard_from_timeline(project), creative_plan=None)
     # Rendered previews are durable QA evidence and are generated with the
