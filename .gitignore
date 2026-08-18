@@ -3,7 +3,10 @@
 .pytest_cache/
 __pycache__/
 *.pyc
+.DS_Store
+**/.DS_Store
 remotion/node_modules/
+remotion/.remotion-bundle*/
 output/projects/*
 output/jobs/*
 !output/projects/.gitkeep
