@@ -419,6 +419,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     preference_summary = TypographyPreferenceStore(root).summary_for(brief)
     layout_context = article_context(brief)
     layout_context["pace"] = "fast"
+    layout_context["copy_generation_mode"] = viral_copy_diagnostics.get("mode", "deterministic_fallback")
     layout_context["target_segment_count"] = asset_target_count
     layout_context["segment_duration_range_seconds"] = [URL_SEGMENT_MIN_SECONDS, URL_SEGMENT_MAX_SECONDS]
     if sufficiency == "compact" or len(assets) == 1:

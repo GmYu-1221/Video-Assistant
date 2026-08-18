@@ -133,14 +133,21 @@ def expand_project_narratives(project: VideoProject, article: ArticleBrief, inte
         if len(sources) < 2 and article.summary:
             sources.append((article.summary, "summary", None))
 
-        contents = []
-        for source_index, (text, kind, paragraph_index) in enumerate(sources[:3]):
-            content = _content(text, content_id="primary" if source_index == 0 else f"support-{source_index}", segment_id=segment_id, kind=kind, source_index=paragraph_index)
-            if content and content.source_hash not in used_hashes:
-                contents.append(content)
-                used_hashes.add(content.source_hash)
-        if len(contents) < 2:
-            raise ValueError(f"没有更多可用正文：{segment_id} 无法构建第二个不重复字幕语义块")
+        selected_sources = sources[:3]
+        combined = "".join(text.rstrip("，,；;：:。.!！？?") + "。" for text, _, _ in selected_sources)
+        content = _content(
+            combined,
+            content_id="primary",
+            segment_id=segment_id,
+            kind="body",
+            source_index=selected_sources[0][2] if selected_sources else None,
+        )
+        if content is None:
+            raise ValueError(f"没有更多可用正文：{segment_id} 无法构建完整总结段落")
+        source_indices = list(dict.fromkeys(index for _, _, index in selected_sources if index is not None))
+        content = content.model_copy(update={"source_paragraph_indices": source_indices})
+        contents = [content]
+        used_hashes.add(content.source_hash)
         copy_id = f"copy-density-{sha256(f'{segment_id}:{contents[0].source_hash}'.encode()).hexdigest()[:12]}"
         expanded[segment_id] = original.model_copy(update={"copy_id": copy_id, "scene_id": segment_id, "contents": contents})
 

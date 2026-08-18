@@ -21,7 +21,7 @@ def _free_regions(profile: ImageSemanticProfile | None) -> list[Rect]:
     return [Rect(x=60, y=60, width=960, height=360), Rect(x=60, y=1500, width=960, height=360)]
 
 
-def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None, *, global_style: str = "editorial", font_palette: list[str] | None = None, copy_density_intent: CopyDensityIntent = CopyDensityIntent.preserve, fast_pace: bool = False) -> SceneLayoutSpec:
+def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None, *, global_style: str = "editorial", font_palette: list[str] | None = None, copy_density_intent: CopyDensityIntent = CopyDensityIntent.preserve, fast_pace: bool = False, use_full_summary: bool = False) -> SceneLayoutSpec:
     dense = bool(profile and (profile.contains_text or profile.is_screenshot or profile.is_data_chart))
     # URL video contract: media geometry is fixed. Layout freedom belongs to
     # typography only, and `contain` guarantees that the full image is visible.
@@ -38,7 +38,7 @@ def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None,
             validate_font_for_role(preferred_font, text_role.value)
         except ValueError:
             preferred_font = DEFAULT_FONT_ID
-    first_variant = ContentVariant.micro if copy_density_intent == CopyDensityIntent.reduce else ContentVariant.short if fast_pace else ContentVariant.full
+    first_variant = ContentVariant.micro if copy_density_intent == CopyDensityIntent.reduce else ContentVariant.full if use_full_summary else ContentVariant.short if fast_pace else ContentVariant.full
     primary_bbox = Rect(x=80, y=1335, width=920, height=465)
     primary_role = text_role
     primary_lines = 6 if dense else 5
@@ -70,4 +70,5 @@ def solve_plan(items: list[tuple[SceneNarrative, ImageSemanticProfile | None]], 
     palette = font_palette or choose_font_palette(context, preferences, avoid=avoid_fonts)
     intent = CopyDensityIntent((context or {}).get("copy_density_intent", CopyDensityIntent.preserve.value))
     fast_pace = (context or {}).get("pace") == "fast"
-    return LayoutPlan(global_style=global_style, scenes=[solve_scene(narrative, profile, global_style=global_style, font_palette=palette, copy_density_intent=intent, fast_pace=fast_pace) for narrative, profile in items])
+    use_full_summary = (context or {}).get("copy_generation_mode") == "deterministic_fallback"
+    return LayoutPlan(global_style=global_style, scenes=[solve_scene(narrative, profile, global_style=global_style, font_palette=palette, copy_density_intent=intent, fast_pace=fast_pace, use_full_summary=use_full_summary) for narrative, profile in items])

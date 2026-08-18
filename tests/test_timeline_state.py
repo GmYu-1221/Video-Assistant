@@ -66,5 +66,5 @@ def test_opening_dynamic_narrative_does_not_repeat_persistent_title():
     assert all(content.source_kind != "title" for content in narrative.contents)
     assert all("固定文章标题" not in content.full for content in narrative.contents)
     blocks = bundle.segment_layouts["s0"].text_blocks
-    assert any(block.bbox.y >= 470 and block.bbox.y + block.bbox.height <= 655 for block in blocks)
-    assert any(block.bbox.y >= 1040 for block in blocks)
+    assert len(blocks) == 1
+    assert blocks[0].bbox.y >= 1265
