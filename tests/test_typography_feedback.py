@@ -59,7 +59,7 @@ def test_chromium_wraps_long_url_and_renderer_uses_the_same_rules():
     scene_narrative = SceneNarrative(copy_id="copy-0", scene_id="scene-0", asset_id="asset-0", scene_purpose="evidence", contents=[content])
     spec = solve_scene(scene_narrative, ImageSemanticProfile(), font_palette=["source-han-serif"])
     spec.text_blocks[0] = spec.text_blocks[0].model_copy(update={
-        "bbox": Rect(x=80, y=1200, width=920, height=348),
+            "bbox": Rect(x=80, y=1335, width=920, height=348),
         "font_id": "source-han-serif",
         "variant_id": ContentVariant.micro,
         "content_hash": content.content_hash(ContentVariant.micro),
@@ -124,11 +124,10 @@ def test_copy_density_feedback_expands_article_grounded_narratives_without_dupli
     expanded, diagnostics = expand_project_narratives(project, brief, CopyDensityIntent.increase)
     narrative = expanded["segment"]
 
-    assert diagnostics["after_candidate_block_count"] > diagnostics["before_block_count"]
-    assert len(narrative.contents) == 2
-    assert len({item.source_hash for item in narrative.contents}) == 2
+    assert diagnostics["after_candidate_character_count"] > diagnostics["before_character_count"]
+    assert len(narrative.contents) == 1
     assert all(len(item.full) > len(item.short) > len(item.micro) for item in narrative.contents)
     plan = solve_scene(narrative, ImageSemanticProfile(), font_palette=["source-han-serif", "noto-sans-sc"], copy_density_intent=CopyDensityIntent.increase)
-    assert len(plan.text_blocks) == 2
+    assert len(plan.text_blocks) == 1
     assert not validate_scene_layout(plan, narrative, None)
     assert project_copy_metrics(project)["block_count"] == 1

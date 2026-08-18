@@ -15,6 +15,21 @@ from content_creator.services.title_normalization import normalize_article_title
 
 _SKILL_COMMIT = "1c76f891fb928ceb22fd101044d100d759f8cee5"
 _FACT_TOKEN = re.compile(r"https?://\S+|(?<![\w.])\d+(?:\.\d+)*(?:%|万|亿|年|月|日|秒|分钟|小时)?")
+_NON_NARRATIVE_PREFIX = re.compile(r"^(?:目录|更新时间|适用版本|第\s*\d+\s*步|\d+(?:\.\d+)+\s*)", re.I)
+
+
+def _complete_summary(value: str) -> bool:
+    text = re.sub(r"\s+", " ", value).strip()
+    if len(text) < 16 or _NON_NARRATIVE_PREFIX.match(text):
+        return False
+    if text.endswith(("，", ",", "；", ";", "：", ":", "——", "-")):
+        return False
+    return bool(re.search(r"[。！？!?]$", text))
+
+
+def _usable_source_sentence(value: str) -> bool:
+    text = re.sub(r"\s+", " ", value).strip()
+    return len(text) >= 16 and not _NON_NARRATIVE_PREFIX.match(text) and not text.endswith(("：", ":", "；", ";"))
 
 
 def viral_writer_skill_path() -> Path:
@@ -91,7 +106,7 @@ def _fallback_plan(brief: ArticleBrief, target_count: int) -> ViralCopyPlan:
     for source_index in priority_indices:
         source = sources[source_index]
         variants = build_variants(source)
-        if variants is None or validate_localized_display_text(list(variants)):
+        if variants is None or validate_localized_display_text(list(variants)) or not _usable_source_sentence(source):
             continue
         unit_index = len(units)
         purpose = "opening" if unit_index == 0 else "explanation" if unit_index % 2 else "evidence"
@@ -189,13 +204,16 @@ def _validate_and_normalize(plan: ViralCopyPlan, brief: ArticleBrief, target_cou
         raise ValueError("viral copy plan source hash does not match the localized article")
     if validate_localized_display_text([item.text for item in plan.title_candidates]) or any(chinese_ratio(item.text) < .08 for item in plan.title_candidates):
         raise ValueError("Viral Writer returned an English explanatory title")
-    if validate_localized_display_text([value for unit in plan.content_units for value in (unit.full, unit.short, unit.micro)]):
-        raise ValueError("Viral Writer returned English explanatory copy")
     minimum_units = min(24, max(1, target_count))
     if len(plan.content_units) < minimum_units:
         raise ValueError(f"Viral Writer returned too few semantic units: {len(plan.content_units)}/{minimum_units}")
+    selected_units = _select_scene_units(plan.content_units, target_count)
+    if validate_localized_display_text([value for unit in selected_units for value in (unit.full, unit.short, unit.micro)]):
+        raise ValueError("Viral Writer returned English explanatory copy")
+    if any(not _complete_summary(unit.short) for unit in selected_units):
+        raise ValueError("Viral Writer returned an incomplete scene summary")
     normalized_units: list[ViralCopyUnit] = []
-    for unit in plan.content_units:
+    for unit in selected_units:
         if any(index >= len(paragraphs) for index in unit.source_paragraph_indices):
             raise ValueError("Viral Writer referenced an unknown source paragraph")
         referenced = " ".join(paragraphs[index] for index in unit.source_paragraph_indices)
@@ -211,7 +229,7 @@ def _validate_and_normalize(plan: ViralCopyPlan, brief: ArticleBrief, target_cou
     return plan.model_copy(update={
         "selected_title_id": selected.candidate_id,
         "final_title": selected.text,
-        "content_units": _select_scene_units(normalized_units, target_count),
+        "content_units": normalized_units,
     })
 
 

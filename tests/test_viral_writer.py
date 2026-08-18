@@ -121,6 +121,19 @@ def test_malformed_model_response_falls_back(monkeypatch):
     assert len(plan.title_candidates) == 5
 
 
+def test_agent_reference_shape_errors_are_normalized_without_losing_summary(monkeypatch):
+    article = brief()
+    payload = response_payload(article)
+    payload["content_units"][1]["semantic_unit_id"] = payload["content_units"][0]["semantic_unit_id"]
+    payload["content_units"][1]["content_id"] = payload["content_units"][0]["content_id"]
+    payload["content_units"][0]["source_paragraph_indices"] = [0] * 9
+    monkeypatch.setattr(viral_writer, "get_agent_provider", lambda _name: Provider(payload))
+    plan, diagnostics = viral_writer.create_viral_copy_plan(article, [], 1)
+    assert diagnostics["mode"] == "model_success"
+    assert len(plan.content_units) == 1
+    assert plan.content_units[0].full.startswith("人工智能降低了表达门槛")
+
+
 def test_fallback_skips_mixed_sentence_whose_micro_variant_becomes_english():
     article = ArticleBrief(
         url="https://example.com/technical", canonical_url="https://example.com/technical",
