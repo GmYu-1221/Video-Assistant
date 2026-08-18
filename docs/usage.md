@@ -184,7 +184,7 @@ uv run python -m content_creator.director_chat \
 
 ## 7. Remotion Creative Agent
 
-Creative Agent 将 `DirectorPlan` 中的创意意图转为实现中立的计划，再由 Render Agent 写入 `render_data.json`。当前统一入口为 `create_remotion_creative_plan`：一次性输出 `RemotionCreativePlan`（每个场景的 `visual_events` 列表，事件包含 `entrance` / `camera` / `effect` / `transition` 阶段）。旧的逐场景 `AnimationPlan` 与逐边界 `TransitionEffectPlan` 能力表仍然有效，作为注册能力来源。
+Creative Agent 将 `DirectorPlan` 中的创意意图转为实现中立的计划，再由 Render Agent 写入 `render_data.json`。当前统一入口为 `create_remotion_creative_plan`：一次性输出 `RemotionCreativePlan`（每个场景的 `visual_events` 列表，事件包含 `entrance` / `camera` / `effect` / `transition` 阶段）。逐边界 `TransitionEffectPlan` 仅保留模板基础数据链路。
 
 入场/场景动画（注册于 `remotion/src/effects/index.tsx`）：
 
@@ -200,21 +200,7 @@ Creative Agent 将 `DirectorPlan` 中的创意意图转为实现中立的计划�
 | `particle_flip_reveal` | ParticleFlipReveal | 粒子面纱翻转入场 |
 | `creative_reveal` | CreativeReveal | 安全蒙版淡入（LLM 不可用时的默认降级） |
 
-创意转场（注册于 `TransitionEffectRenderer.tsx`，作用于场景边界）：
-
-| 类型 | 说明 |
-| --- | --- |
-| `card_flip_transition` | 卡片翻转转场 |
-| `glass_shatter_transition` | 玻璃破碎（仅显式玻璃/碎裂意图，如"玻璃""破碎""碎片"） |
-| `shake_transition` | 抖动冲击转场（未指定类型的强转场默认值） |
-| `gaussian_blur_transition` | 高斯模糊转场（失焦、梦境、回忆） |
-| `directional_blur_transition` | 方向速度模糊转场（高速移动、横向扫过） |
-| `pixel_blur_transition` | 像素块模糊转场（数字、像素、数据） |
-| `bokeh_blur_transition` | 光斑/柔光转场（电影感柔光） |
-| `water_ripple_transition` | 水波纹转场（水滴、涟漪） |
-| `zoom_through_transition` | 放大穿过转场（仅显式"穿过画面""穿越图片""放大穿越"意图） |
-
-降级策略：LLM 不可用或输出校验失败时，入场使用 `creative_reveal`，转场使用 `shake_transition`（显式玻璃意图才使用 `glass_shatter_transition`）。效果不改变图片 contain 几何，也不使用 `cover`、裁剪、`scaleX` 或 `scaleY`；效果结束后图片恢复完全静止。
+创意转场统一使用 `template_transition`，具体视觉由 `template_id` 指向双端注册的模板。当前正式模板数量为 0，因此 transition intent 不会产生创意转场。LLM 不可用或输出校验失败时，入场使用 `creative_reveal`，转场不做视觉 fallback。效果不改变图片 contain 几何，也不使用 `cover`、裁剪、`scaleX` 或 `scaleY`；效果结束后图片恢复完全静止。
 
 视觉规格决策（`create_visual_spec_decision`）：由 Remotion Agent 额外选择画面布局（`center_stage` / `fullscreen`）与转场预设（`clean_cut` / `crossfade` / `white_flash` / `flash_zoom_blur`），未决策时使用本地默认。
 

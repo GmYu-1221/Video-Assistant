@@ -22,7 +22,7 @@ DirectorPlan（creative_intent / transition_intent）
           -> Render Agent
 ```
 
-Creative Agent 只输出实现中立的视觉事件计划，不让 LLM 直接生成 TSX。未知或校验失败的事件被丢弃并记录日志；LLM 不可用时使用安全降级（入场 `creative_reveal`、转场 `shake_transition`）。
+Creative Agent 只输出实现中立的视觉事件计划，不让 LLM 直接生成 TSX。未知或校验失败的事件被丢弃并记录日志；LLM 不可用时仅保留入场 `creative_reveal` 降级，不生成创意转场。
 
 ## 3. 当前开发规则
 
@@ -52,13 +52,7 @@ Creative Agent 只输出实现中立的视觉事件计划，不让 LLM 直接生
 
 ## 5. 创意转场实现
 
-创意转场位于 `remotion/src/transitions/presentations/`，通过 `TransitionEffectRenderer.tsx` 的 `TransitionEffectRegistry` 注册：
-
-- `card_flip_transition`：卡片翻转转场。
-- `glass_shatter_transition`：玻璃破碎（仅显式玻璃/碎裂意图）。
-- `shake_transition`：抖动冲击转场（未指定类型的强转场默认值）。
-- `gaussian_blur_transition` / `directional_blur_transition` / `pixel_blur_transition` / `bokeh_blur_transition` / `water_ripple_transition`：五类模糊转场。
-- `zoom_through_transition`：放大穿过转场（仅显式穿过意图）。
+创意转场统一使用 `template_transition` 基础设施，并由 Python 与 Remotion 两端的模板注册表共同注册。当前两个正式注册表均为空，因此 Agent 不会生成创意转场。
 
 `TransitionEffectRenderer` 与基线 `TransitionFactory`（`fade`、`crossfade`、`wipe`、`slide`、`push`、`whip` 等）分离；存在创意转场事件时优先于基线转场。
 

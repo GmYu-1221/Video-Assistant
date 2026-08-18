@@ -101,7 +101,7 @@ Creative Agent 读取 `.agents/skills/` 下的项目技能文档，将创意意�
 
 基线转场注册于 `TransitionRegistry`：`fade`、`crossfade`、`black_flash`、`white_flash`、`push`、`whip`、`stretch_whip`、`digital_wipe`、`iris`、`clock_wipe`、`blinds`、`pixel_reveal`、`glitch`、`light_leak`、`slide`、`wipe`、`flip`、`zoom_blur` 等，由风格预设（`PRESETS`）决定可选集合。
 
-创意转场注册于 `TransitionEffectRenderer` 的 `TransitionEffectRegistry`：`card_flip_transition`、`glass_shatter_transition`、`shake_transition`、`gaussian_blur_transition`、`directional_blur_transition`、`pixel_blur_transition`、`bokeh_blur_transition`、`water_ripple_transition`、`zoom_through_transition`。未知转场或动画使用安全 fallback；LLM 不可用时默认使用 `shake_transition`（显式玻璃意图才使用 `glass_shatter_transition`）。
+创意转场通过 `template_transition` 和双端模板注册表接入。当前正式模板数量为 0；未知、禁用或无可靠选择的模板不会生成创意转场，也不会回退到其它模板。
 
 ## 9. 视觉规格与排版系统
 

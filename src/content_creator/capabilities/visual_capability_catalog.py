@@ -7,6 +7,8 @@ import logging
 import re
 from typing import Any
 
+from content_creator.transitions import get_transition_template_capabilities
+
 logger = logging.getLogger(__name__)
 
 DIRECTOR_VISUAL_CAPABILITIES: dict[str, list[dict[str, Any]]] = {
@@ -20,22 +22,20 @@ DIRECTOR_VISUAL_CAPABILITIES: dict[str, list[dict[str, Any]]] = {
         {"name": "particle_flip_reveal", "description": "图片伴随粒子帷幕和翻转效果组装显现。", "examples": ["粒子翻转进入", "碎片汇聚成画面", "粒子组装出现"]},
         {"name": "creative_reveal", "description": "图片通过柔和遮罩、透明度或轻微位移完成受控揭示。", "examples": ["遮罩展开", "柔和显现", "从中心揭示"]},
     ],
-    "transition": [
-        {"name": "glass_shatter_transition", "description": "真实玻璃破碎、裂纹扩散、碎片飞散的视觉转场。", "examples": ["玻璃破碎", "裂纹扩散", "碎片炸开"]},
-        {"name": "shake_transition", "description": "快速震动、冲击感、力量感转场。", "examples": ["强烈震动", "冲击切换", "镜头震颤"]},
-        {"name": "card_flip_transition", "description": "三维页面翻转、卡片旋转切换。", "examples": ["页面翻转", "卡片翻面", "3D翻转"]},
-        {"name": "zoom_through_transition", "description": "镜头快速穿越当前画面，进入下一张图片的电影感转场。不是单镜头推进。", "examples": ["镜头穿过画面进入下一幕", "快速放大穿越到下一张", "穿越图片切换"], "avoid_when": ["简单放大", "单镜头推进", "静态图片运动"]},
-        {"name": "gaussian_blur_transition", "description": "失焦、柔焦、梦境、回忆感过渡。", "examples": ["画面逐渐模糊", "回忆效果", "梦幻过渡"], "avoid_when": ["强烈冲击", "爆炸", "快速切换"]},
-        {"name": "directional_blur_transition", "description": "高速运动方向造成的速度模糊。", "examples": ["横向扫过", "极速切换", "速度感"], "avoid_when": ["柔和回忆", "静态展示"]},
-        {"name": "pixel_blur_transition", "description": "数字像素化模糊效果。", "examples": ["数字故障", "像素消散"]},
-        {"name": "bokeh_blur_transition", "description": "电影光斑和散景效果。", "examples": ["光斑扩散", "梦幻镜头"]},
-        {"name": "water_ripple_transition", "description": "水波和液体波纹扩散。", "examples": ["水面波纹", "涟漪扩散"]},
-    ],
+    "transition": [],
 }
 
 
+def director_visual_capabilities() -> dict[str, list[dict[str, Any]]]:
+    return {**DIRECTOR_VISUAL_CAPABILITIES, "transition": [
+        {"name": "template_transition", **definition}
+        for definition in get_transition_template_capabilities().values()
+    ]}
+
+
 def director_capability_guidance() -> str:
-    return json.dumps(DIRECTOR_VISUAL_CAPABILITIES, ensure_ascii=False, sort_keys=True)
+    capabilities = director_visual_capabilities()
+    return json.dumps(capabilities, ensure_ascii=False, sort_keys=True)
 
 
 _ADAPTATION_RULES = (

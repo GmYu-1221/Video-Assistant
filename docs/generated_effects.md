@@ -49,4 +49,4 @@
 
 ## 生成与降级策略
 
-效果由 `create_remotion_creative_plan` 统一生成：LLM 从能力注册表选择注册类型并给出参数，本地完成阶段、时长、参数范围校验，非法事件被丢弃。LLM 不可用或全部事件非法时回退到安全方案：入场使用 `creative_reveal`，转场使用 `shake_transition`（仅显式玻璃意图才使用 `glass_shatter_transition`）。运行时不会执行任意的源码生成。
+效果由 `create_remotion_creative_plan` 统一生成：LLM 从能力注册表选择注册类型并给出参数，本地完成阶段、时长、参数范围校验，非法事件被丢弃。LLM 不可用或全部事件非法时，入场可使用 `creative_reveal`；创意转场直接省略。运行时不会执行任意的源码生成。

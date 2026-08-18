@@ -11,12 +11,8 @@ def _use_fallback(monkeypatch):
 
 def test_remotion_agent_reads_official_skill_documents():
     documents = load_skill_documents()
-    assert len(documents) == 10
+    assert len(documents) == 7
     assert all(Path(document).name == "SKILL.md" for document in documents)
-    zoom_skill = next(Path(document) for document in documents if Path(document).parent.name == "zoom-motion-design")
-    content = zoom_skill.read_text(encoding="utf-8")
-    assert content.startswith("---\nname: zoom-motion-design\n")
-    assert "description:" in content.split("---", 2)[1]
     elastic_skill = next(Path(document) for document in documents if Path(document).parent.name == "elastic-blur-motion-design")
     elastic_content = elastic_skill.read_text(encoding="utf-8")
     assert "name: elastic-blur-motion-design" in elastic_content
@@ -29,25 +25,10 @@ def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
     assert "Remotion Motion Design" in prompt["remotion_motion_guidelines"]
     assert "Image Animation Guidance" in prompt["remotion_motion_guidelines"]
     assert "Cinematic Motion Guidance" in prompt["remotion_motion_guidelines"]
-    assert "Visual Event Architecture" in prompt["project_visual_event_rules"]
-    assert "Transition Ownership Rule" in prompt["project_visual_event_rules"]
-    assert "camera_push" in prompt["project_visual_event_rules"]
-    assert "card_flip_transition" in prompt["project_visual_event_rules"]
+    assert "registered template_transition" in prompt["project_visual_event_rules"]
     assert "stretch-motion-design" in prompt["remotion_reference_guidelines"]
     assert "elastic-blur-motion-design" in prompt["remotion_reference_guidelines"]
-    assert "blur-transition-design" in prompt["remotion_reference_guidelines"]
-    assert "zoom-motion-design" in prompt["remotion_reference_guidelines"]
-    blur_skill = prompt["remotion_reference_guidelines"]["blur-transition-design"]
-    assert "# Blur Transition Design" in blur_skill
-    assert "gaussian_blur_transition" in blur_skill
-    assert "water_ripple_transition" in blur_skill
-    assert "Do not generate blur transition from \"cinematic\" alone." in blur_skill
-    zoom_skill = prompt["remotion_reference_guidelines"]["zoom-motion-design"]
-    assert "# Zoom Through Motion Design" in zoom_skill
-    assert "zoom_through_transition" in zoom_skill
-    assert "source_asset_id" in zoom_skill
-    assert "target_asset_id" in zoom_skill
-    assert "zoom_blur_transition" in zoom_skill
+    assert "template_transition" not in prompt["visual_effect_capabilities"]
     assert "stretch_reveal" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
     stretch_guidance = prompt["remotion_reference_guidelines"]["stretch-motion-design"]
     assert "There is no registered `stretch_transition`" in stretch_guidance
@@ -59,13 +40,8 @@ def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
     assert "图片丝滑拉伸进入" in rules
     assert "Generate camera_push only when the Director explicitly requests" in rules
     assert "Never infer it from cinematic, dramatic, smooth, premium, entrance, or transition" in rules
-    assert "camera_push conflicts with a transition by default" in rules
-    assert "Use glass_shatter_transition only for explicit glass" in rules
-    assert "Blur is a transition only" in rules
-    assert "blur_reveal, blur_effect, or blur_motion" in rules
-    assert "unknown, cinematic, dramatic, strong, premium, or impact transitions" in rules
-    assert "card_flip_reveal is entrance-only" in rules
-    assert "Use zoom_through_transition only for explicit camera passing through" in rules
+    assert "card_flip_reveal remains an entrance-only" in rules
+    assert "If no transition template is exposed, do not emit a transition event" in rules
     assert "Use elastic_blur_reveal only for an image entering with weight" in rules
     elastic_skill_prompt = prompt["remotion_reference_guidelines"]["elastic-blur-motion-design"]
     assert "elastic_blur_reveal" in elastic_skill_prompt

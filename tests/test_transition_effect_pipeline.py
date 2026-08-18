@@ -3,241 +3,116 @@ from pathlib import Path
 
 import pytest
 
-from content_creator.agents.director_agent import plan_to_storyboard
-from content_creator.agents.remotion_agent import create_remotion_plans, create_transition_effect_plan
-from content_creator.agents.render_agent import compile_render_plan
-from content_creator.schemas import AudioConfig, DirectorPlan, ImageAsset, TimelineItem, TransitionConfig, VideoOutput, VideoProject
+from content_creator.agents.remotion_agent import create_transition_effect_plan
+from content_creator.schemas import DirectorPlan, TransitionEffectPlanItem, TransitionEffectType
+from content_creator.transitions import (
+    TRANSITION_TEMPLATE_REGISTRY,
+    TransitionTemplateDefinition,
+    enabled_transition_templates,
+    get_transition_template,
+    validate_transition_template_params,
+)
 
 
-class VisualLLM:
-    model_name = "claude-remotion"
+class RecordingProvider:
+    model_name = "test-remotion"
 
-    def __init__(self) -> None:
-        self.prompts: list[str] = []
+    def __init__(self, response: dict | None = None):
+        self.response = response or {}
+        self.calls = 0
 
-    def complete_json(self, prompt: str) -> str:
-        self.prompts.append(prompt)
-        if "transition_effect_capabilities" in prompt:
-            return json.dumps({
-                "type": "glass_shatter_transition", "duration_frames": 18,
-                "params": {"fragment_count": 48, "impact_origin": "center", "motion_blur": True},
-            })
-        return json.dumps({
-            "type": "particle_flip_reveal", "duration_frames": 24,
-            "params": {"particle_density": 240, "rotation_axis": "Y"},
+    def complete_json(self, _prompt: str) -> str:
+        self.calls += 1
+        return json.dumps(self.response)
+
+
+def transition_plan() -> DirectorPlan:
+    return DirectorPlan.model_validate({"timeline": [
+        {"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "custom boundary"}},
+        {"asset_id": "image-002", "duration_frames": 60},
+    ]})
+
+
+def test_transition_effect_type_is_only_template_infrastructure():
+    assert [item.value for item in TransitionEffectType] == ["template_transition"]
+
+
+def test_production_template_registry_is_empty():
+    assert TRANSITION_TEMPLATE_REGISTRY == {}
+    assert enabled_transition_templates() == ()
+
+
+def test_empty_registry_skips_transition_without_calling_llm(caplog):
+    provider = RecordingProvider()
+    result = create_transition_effect_plan(transition_plan(), provider=provider)
+    assert result.transitions == []
+    assert provider.calls == 0
+    assert "No registered transition templates" in caplog.text
+
+
+def test_unknown_and_disabled_templates_are_rejected(monkeypatch):
+    with pytest.raises(ValueError, match="Unknown transition template"):
+        get_transition_template("missing")
+    monkeypatch.setitem(TRANSITION_TEMPLATE_REGISTRY, "disabled", TransitionTemplateDefinition(
+        id="disabled", description="test only", enabled=False,
+    ))
+    with pytest.raises(ValueError, match="disabled"):
+        get_transition_template("disabled")
+
+
+def test_registered_test_template_validates_and_serializes(monkeypatch):
+    monkeypatch.setitem(TRANSITION_TEMPLATE_REGISTRY, "test_template", TransitionTemplateDefinition(
+        id="test_template", description="test only", params={"intensity": {"type": "number", "minimum": 0, "maximum": 1}},
+        duration_min=12, duration_max=36, duration_default=18,
+    ))
+    provider = RecordingProvider({
+        "type": "template_transition",
+        "duration_frames": 18,
+        "params": {"template_id": "test_template", "parameters": {"intensity": 0.7}},
+    })
+    result = create_transition_effect_plan(transition_plan(), provider=provider)
+    assert provider.calls == 1
+    assert result.transitions[0].model_dump(mode="json") == {
+        "from_asset_id": "image-001", "to_asset_id": "image-002",
+        "type": "template_transition", "duration_frames": 18,
+        "params": {"template_id": "test_template", "parameters": {"intensity": 0.7}},
+        "implementation": "new", "design": result.transitions[0].design,
+    }
+
+
+def test_template_parameter_and_duration_validation(monkeypatch):
+    monkeypatch.setitem(TRANSITION_TEMPLATE_REGISTRY, "test_template", TransitionTemplateDefinition(
+        id="test_template", description="test only", params={"enabled": {"type": "boolean"}},
+        duration_min=10, duration_max=20,
+    ))
+    assert validate_transition_template_params("test_template", {"enabled": True}, 12) == {"enabled": True}
+    with pytest.raises(ValueError, match="Invalid duration"):
+        validate_transition_template_params("test_template", {}, 9)
+    with pytest.raises(ValueError, match="Unknown parameter"):
+        validate_transition_template_params("test_template", {"extra": 1}, 12)
+
+
+def test_schema_rejects_renderer_implementation_fields():
+    with pytest.raises(ValueError):
+        TransitionEffectPlanItem.model_validate({
+            "from_asset_id": "a", "to_asset_id": "b", "type": "template_transition",
+            "duration_frames": 18,
+            "params": {"template_id": "test", "component": "UnsafeComponent"},
         })
 
 
-class RawTransitionLLM:
-    model_name = "claude-remotion"
-
-    def __init__(self, response: str) -> None:
-        self.response = response
-
-    def complete_json(self, _prompt: str) -> str:
-        return self.response
-
-
-def test_one_remotion_agent_creates_animation_and_transition_render_data(tmp_path, monkeypatch):
-    provider = VisualLLM()
-    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: provider)
-    plan = DirectorPlan.model_validate({"timeline": [
-        {
-            "asset_id": "image-001", "duration_frames": 60, "reason": "opening",
-            "creative_intent": {"description": "第一张图片从下往上反转进入，并且有粒子碎裂重组效果"},
-            "transition_intent": {"description": "图一转图二使用玻璃破碎效果", "effects": ["glass shatter"]},
-        },
-        {"asset_id": "image-002", "duration_frames": 60, "reason": "reveal"},
-    ]})
-
-    animations, transitions = create_remotion_plans(plan)
-
-    assert len(provider.prompts) == 2
-    assert any("remotion_skill_guidelines" in prompt and "creative_intent" in prompt for prompt in provider.prompts)
-    assert any("transition_effect_capabilities" in prompt and "glass_shatter_transition" in prompt for prompt in provider.prompts)
-    assert animations.animations[0].type.value == "particle_flip_reveal"
-    assert transitions.transitions[0].type.value == "glass_shatter_transition"
-
-    root = tmp_path / "project"
-    audio_dir = root / "audio"; audio_dir.mkdir(parents=True)
-    (audio_dir / "source.wav").write_bytes(b"audio")
-    project = VideoProject(
-        project_id="p",
-        images=[ImageAsset(id="image-001", filename="a.jpg", relative_path="a.jpg", width=100, height=100), ImageAsset(id="image-002", filename="b.jpg", relative_path="b.jpg", width=100, height=100)],
-        audio=AudioConfig(path="audio/bgm_adapted.wav", source_path="audio/source.wav", duration=1, sample_rate=44100),
-        timeline=[TimelineItem(asset_id="image-001", start_frame=0, end_frame=1, duration_frames=1, transition=TransitionConfig()), TimelineItem(asset_id="image-002", start_frame=1, end_frame=2, duration_frames=1, transition=TransitionConfig())],
-        output=VideoOutput(project_dir=str(root), render_data=str(root / "render_data.json"), final_video=str(root / "final.mp4")),
-    )
-    monkeypatch.setattr("content_creator.agents.render_agent.adapt_audio_to_duration", lambda *_args: None)
-    compile_render_plan(project, plan_to_storyboard(plan, "cinematic"), animations, transitions)
-    payload = json.loads((root / "render_data.json").read_text(encoding="utf-8"))
-    assert payload["timeline"][0]["animation"]["type"] == "particle_flip_reveal"
-    assert payload["timeline"][0]["transition_effect"]["type"] == "glass_shatter_transition"
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_schema_rejects_non_json_numbers(value):
+    with pytest.raises(ValueError, match="not JSON-safe"):
+        TransitionEffectPlanItem.model_validate({
+            "from_asset_id": "a", "to_asset_id": "b", "type": "template_transition",
+            "duration_frames": 18,
+            "params": {"template_id": "test", "parameters": {"intensity": value}},
+        })
 
 
-def test_composition_uses_independent_transition_effect_registry():
-    composition = Path("remotion/src/Composition.tsx").read_text(encoding="utf-8")
-    registry = Path("remotion/src/transitions/TransitionEffectRenderer.tsx").read_text(encoding="utf-8")
-    presentation = Path("remotion/src/transitions/presentations/glass-shatter.tsx").read_text(encoding="utf-8")
-    assert "item.transition_effect" in composition
-    assert "TransitionEffectRenderer" in composition
-    assert "TransitionEffectRegistry" in registry
-    assert "glass_shatter_transition" in registry
-    assert "clipPath" in presentation
-    assert "opacity" in presentation
-    assert "rotate" in presentation
-    assert "entrance={incomingTransition ? undefined : asset?.entrance}" in composition
-
-
-def test_render_plan_normalizes_high_impact_transition_parameters(tmp_path, monkeypatch):
-    from content_creator.agents.render_agent import compile_render_plan
-    from content_creator.schemas import RemotionCreativePlan
-
-    root = tmp_path / "project"
-    audio_dir = root / "audio"; audio_dir.mkdir(parents=True)
-    (audio_dir / "source.wav").write_bytes(b"audio")
-    project = VideoProject(
-        project_id="p",
-        images=[ImageAsset(id="image-001", filename="a.jpg", relative_path="a.jpg", width=100, height=100), ImageAsset(id="image-002", filename="b.jpg", relative_path="b.jpg", width=100, height=100)],
-        audio=AudioConfig(path="audio/bgm_adapted.wav", source_path="audio/source.wav", duration=1, sample_rate=44100),
-        timeline=[TimelineItem(asset_id="image-001", start_frame=0, end_frame=60, duration_frames=60, transition=TransitionConfig()), TimelineItem(asset_id="image-002", start_frame=60, end_frame=120, duration_frames=60, transition=TransitionConfig())],
-        output=VideoOutput(project_dir=str(root), render_data=str(root / "render_data.json"), final_video=str(root / "final.mp4")),
-    )
-    storyboard = plan_to_storyboard(DirectorPlan.model_validate({"timeline": [{"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "玻璃破碎"}}, {"asset_id": "image-002", "duration_frames": 60}]}), "cinematic")
-    creative = RemotionCreativePlan.model_validate({"plans": [{"scene_id": "image-001", "visual_events": [{"type": "shake_transition", "phase": "transition", "start_frame": 0, "duration_frames": 60, "source_asset_id": "image-001", "target_asset_id": "image-002", "params": {"intensity": 0.95, "motion_blur": True}}]}, {"scene_id": "image-002", "visual_events": []}]})
-    monkeypatch.setattr("content_creator.agents.render_agent.adapt_audio_to_duration", lambda *_args: None)
-    result = compile_render_plan(project, storyboard, creative)
-    event = result.timeline[0].visual_events[0]
-    assert event.start_frame == 42
-    assert event.duration_frames == 18
-    assert event.params == {"intensity": 0.6, "motion_blur": False}
-
-
-def test_blur_transition_registry_contains_all_concrete_effects():
-    registry = Path("remotion/src/transitions/TransitionEffectRenderer.tsx").read_text(encoding="utf-8")
-    presentation = Path("remotion/src/transitions/blur/BlurTransition.tsx").read_text(encoding="utf-8")
-    for effect in ["gaussian_blur_transition", "directional_blur_transition", "pixel_blur_transition", "bokeh_blur_transition", "water_ripple_transition"]:
-        assert effect in registry
-    assert "useVideoConfig" in presentation
-    assert "spring(" in presentation
-    assert "opacity: 0.2" not in presentation
-
-
-def test_zoom_through_transition_is_registered_with_a_frame_driven_presentation():
-    registry = Path("remotion/src/transitions/TransitionEffectRenderer.tsx").read_text(encoding="utf-8")
-    presentation = Path("remotion/src/transitions/zoom/ZoomThroughTransition.tsx").read_text(encoding="utf-8")
-    composition = Path("remotion/src/Composition.tsx").read_text(encoding="utf-8")
-    assert "zoom_through_transition" in registry
-    assert "ZoomThroughTransition" in registry
-    assert "zoom_through_transition" in composition
-    assert "presentationProgress" in presentation
-    assert "scale(" in presentation
-    assert "camera_push" not in presentation
-
-
-@pytest.mark.parametrize("response", [
-    '{"type":"glass_shatter_transition","duration_frames":45,"params":{"fragment_count":64},"description":"glass fragments"}',
-    '```json\n{"type":"glass_shatter_transition","duration_frames":45,"params":{"fragment_count":64},"description":"glass fragments"}\n```',
-    'Recommended cinematic transition:\n{"type":"glass_shatter_transition","duration_frames":45,"params":{"fragment_count":64},"confidence":0.92,"reason":"matches the intent"}',
-])
-def test_transition_effect_plan_extracts_wrapped_json_and_ignores_metadata(monkeypatch, response):
-    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: RawTransitionLLM(response))
-    plan = DirectorPlan.model_validate({"timeline": [
-        {"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "图一转图二使用玻璃破碎效果"}},
-        {"asset_id": "image-002", "duration_frames": 60},
-    ]})
-
-    transitions = create_remotion_plans(plan)[1]
-
-    assert transitions.transitions[0].type.value == "glass_shatter_transition"
-    assert transitions.transitions[0].duration_frames == 45
-    assert transitions.transitions[0].params == {"fragment_count": 64}
-
-
-def test_transition_effect_plan_rejects_unregistered_effect(monkeypatch):
-    monkeypatch.setattr(
-        "content_creator.agents.remotion_agent.get_agent_provider",
-        lambda _: RawTransitionLLM('{"type":"unknown_transition","duration_frames":45,"params":{}}'),
-    )
-    plan = DirectorPlan.model_validate({"timeline": [
-        {"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "unknown transition"}},
-        {"asset_id": "image-002", "duration_frames": 60},
-    ]})
-    with pytest.raises(ValueError, match="unavailable transition effect"):
-        create_transition_effect_plan(plan)
-
-
-def test_shake_transition_intent_generates_validated_transition_plan(monkeypatch):
-    provider = RawTransitionLLM(
-        '{"type":"shake_transition","duration_frames":18,"params":{"intensity":0.7,"motion_blur":true}}'
-    )
-    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: provider)
-    plan = DirectorPlan.model_validate({"timeline": [
-        {"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "第二张图片抖动切出"}},
-        {"asset_id": "image-002", "duration_frames": 60},
-    ]})
-
-    transition = create_transition_effect_plan(plan).transitions[0]
-
-    assert transition.type.value == "shake_transition"
-    assert transition.duration_frames == 18
-    assert transition.params == {"intensity": 0.7, "motion_blur": True}
-
-
-@pytest.mark.parametrize("response", [
-    '{"duration_frames":18,"params":{}}',
-    '{"type":"shake_transition","duration_frames":18,"params":{"intensity":"high"}}',
-])
-def test_invalid_transition_response_uses_safe_fallback(monkeypatch, response):
-    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: RawTransitionLLM(response))
-    plan = DirectorPlan.model_validate({"timeline": [
-        {"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "第二张图片抖动切出"}},
-        {"asset_id": "image-002", "duration_frames": 60},
-    ]})
-
-    transition = create_transition_effect_plan(plan).transitions[0]
-
-    assert transition.type.value == "shake_transition"
-    assert transition.params == {"intensity": 0.45, "motion_blur": False}
-    assert transition.implementation == "fallback"
-
-
-def test_explicit_glass_intent_keeps_glass_fallback(monkeypatch):
-    monkeypatch.setattr("content_creator.agents.remotion_agent.get_agent_provider", lambda _: RawTransitionLLM('{"duration_frames":18,"params":{}}'))
-    plan = DirectorPlan.model_validate({"timeline": [
-        {"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "玻璃破碎后切到下一张"}},
-        {"asset_id": "image-002", "duration_frames": 60},
-    ]})
-    transition = create_transition_effect_plan(plan).transitions[0]
-    assert transition.type.value == "glass_shatter_transition"
-    assert transition.implementation == "fallback"
-
-
-def test_unknown_strong_transition_does_not_keep_model_glass_shatter(monkeypatch):
-    monkeypatch.setattr(
-        "content_creator.agents.remotion_agent.get_agent_provider",
-        lambda _: RawTransitionLLM('{"type":"glass_shatter_transition","duration_frames":30,"params":{"fragment_count":48}}'),
-    )
-    plan = DirectorPlan.model_validate({"timeline": [
-        {"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "未知强烈转场"}},
-        {"asset_id": "image-002", "duration_frames": 60},
-    ]})
-    transition = create_transition_effect_plan(plan).transitions[0]
-    assert transition.type.value == "shake_transition"
-    assert transition.params == {"intensity": 0.45, "motion_blur": False}
-
-
-def test_transition_raw_response_log_is_labeled_and_redacted(monkeypatch, caplog):
-    monkeypatch.setattr(
-        "content_creator.agents.remotion_agent.get_agent_provider",
-        lambda _: RawTransitionLLM('api_key=secret-value {"type":"glass_shatter_transition","duration_frames":45,"params":{}}'),
-    )
-    caplog.set_level("DEBUG")
-    plan = DirectorPlan.model_validate({"timeline": [
-        {"asset_id": "image-001", "duration_frames": 60, "transition_intent": {"description": "glass shatter"}},
-        {"asset_id": "image-002", "duration_frames": 60},
-    ]})
-    create_transition_effect_plan(plan)
-    messages = [record.message for record in caplog.records if "Remotion Transition RAW RESPONSE" in record.message]
-    assert len(messages) == 1
-    assert "secret-value" not in messages[0]
+def test_remotion_registry_contains_only_template_transition():
+    renderer = Path("remotion/src/transitions/TransitionEffectRenderer.tsx").read_text(encoding="utf-8")
+    registry = Path("remotion/src/transitions/templates/registry.ts").read_text(encoding="utf-8")
+    assert "template_transition: templateTransition" in renderer
+    assert "TemplatePresentationRegistry: Record<string, TemplatePresentationComponent> = {}" in registry

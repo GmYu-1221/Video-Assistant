@@ -2,33 +2,40 @@
 
 from __future__ import annotations
 
+import math
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, model_serializer, model_validator
+
+
+_FORBIDDEN_TEMPLATE_KEYS = {"component", "tsx", "css", "javascript", "code", "path", "module", "import", "function"}
+
+
+def _validate_json_safe(value: Any, path: str = "parameters") -> None:
+    if value is None or isinstance(value, (bool, int, str)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"Transition template parameter is not JSON-safe: {path}")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_json_safe(item, f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str) or key.lower() in _FORBIDDEN_TEMPLATE_KEYS:
+                raise ValueError(f"Forbidden transition template parameter: {key}")
+            _validate_json_safe(item, f"{path}.{key}")
+        return
+    raise ValueError(f"Transition template parameter is not JSON-safe: {path}")
 
 
 class TransitionEffectType(str, Enum):
-    card_flip_transition = "card_flip_transition"
-    glass_shatter_transition = "glass_shatter_transition"
-    shake_transition = "shake_transition"
-    gaussian_blur_transition = "gaussian_blur_transition"
-    directional_blur_transition = "directional_blur_transition"
-    pixel_blur_transition = "pixel_blur_transition"
-    bokeh_blur_transition = "bokeh_blur_transition"
-    water_ripple_transition = "water_ripple_transition"
-    zoom_through_transition = "zoom_through_transition"
+    """Stable infrastructure type; concrete visuals live in the template registry."""
 
-
-class BlurTransitionEffectType(str, Enum):
-    """Registered blur-transition variants emitted as TransitionEffectType values."""
-
-    blur_transition = "blur_transition"
-    gaussian_blur_transition = "gaussian_blur_transition"
-    directional_blur_transition = "directional_blur_transition"
-    pixel_blur_transition = "pixel_blur_transition"
-    bokeh_blur_transition = "bokeh_blur_transition"
-    water_ripple_transition = "water_ripple_transition"
+    template_transition = "template_transition"
 
 
 class TransitionEffectPlanItem(BaseModel):
@@ -39,6 +46,19 @@ class TransitionEffectPlanItem(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     implementation: Literal["new", "fallback"] = "new"
     design: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_template_contract(self):
+        if set(self.params) - {"template_id", "parameters"}:
+            raise ValueError("template_transition params contain renderer implementation fields")
+        template_id = self.params.get("template_id")
+        parameters = self.params.get("parameters", {})
+        if not isinstance(template_id, str) or not template_id:
+            raise ValueError("template_transition requires template_id")
+        if not isinstance(parameters, dict):
+            raise ValueError("template_transition parameters must be an object")
+        _validate_json_safe(parameters)
+        return self
 
     @model_serializer
     def serialize_for_render(self) -> dict[str, Any]:

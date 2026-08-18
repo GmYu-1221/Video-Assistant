@@ -27,11 +27,7 @@ Director 负责解释意图：它在 `creative_intent` 中描述场景内的运�
 {"type":"particle_flip_reveal","phase":"entrance","start_frame":0,"duration_frames":24,"params":{"particle_density":240,"rotation_axis":"Y"}}
 ```
 
-创意转场也以视觉事件形式挂到出场景上：
-
-```json
-{"type":"glass_shatter_transition","phase":"transition","start_frame":30,"duration_frames":45,"source_asset_id":"image-001","target_asset_id":"image-002","params":{"fragment_count":48,"impact_origin":"center","motion_blur":true}}
-```
+创意转场也以视觉事件形式挂到出场景上，但只有双端注册表存在启用模板时才会生成。
 
 `render_data.json` 是渲染器契约。一个 `timeline` 项可以同时包含动画与转场事件。
 
@@ -44,7 +40,7 @@ Director 负责解释意图：它在 `creative_intent` 中描述场景内的运�
 
 这样 `fade`、`crossfade`、`wipe`、`slide` 等所有既有基线转场保持兼容，AI 选择的创意转场也不会静默回落到基线转场。
 
-`TransitionEffectRenderer` 与场景 `EffectRenderer` 相互独立，通过 `TransitionEffectRegistry` 分发。注册表当前包含：`card_flip_transition`（卡片翻转转场）、`glass_shatter_transition`（玻璃破碎，出场景被裁剪为碎片图层，带不透明度分解、位移、旋转、可选模糊与入场景揭示）、`shake_transition`（抖动冲击）、`gaussian_blur_transition` / `directional_blur_transition` / `pixel_blur_transition` / `bokeh_blur_transition` / `water_ripple_transition`（五类模糊转场）以及 `zoom_through_transition`（放大穿过转场）。
+`TransitionEffectRenderer` 与场景 `EffectRenderer` 相互独立。前者只识别 `template_transition` 基础类型，并根据 `template_id` 查询当前为空的 `TemplatePresentationRegistry`。
 
 ## 添加一个场景动画
 

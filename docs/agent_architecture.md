@@ -53,21 +53,7 @@ particle_flip_reveal-> ParticleFlipReveal
 creative_reveal    -> CreativeReveal（默认降级）
 ```
 
-创意转场（9 个）：
-
-```text
-card_flip_transition      卡片翻转转场
-glass_shatter_transition  玻璃破碎（需显式玻璃意图）
-shake_transition          抖动冲击（默认降级）
-gaussian_blur_transition  高斯模糊转场
-directional_blur_transition 方向速度模糊转场
-pixel_blur_transition     像素块模糊转场
-bokeh_blur_transition     光斑/柔光转场
-water_ripple_transition   水波纹转场
-zoom_through_transition   放大穿过（需显式穿过意图）
-```
-
-不支持的意图保留在导演方案中；LLM 不可用或输出校验失败时，入场降级为 `creative_reveal`、转场降级为 `shake_transition`。
+创意转场统一通过 `template_transition` 扩展入口注册。当前正式模板数量为 0。不支持的意图保留在导演方案中；LLM 不可用或输出校验失败时，入场降级为 `creative_reveal`，不生成创意转场。
 
 ## Render Agent
 

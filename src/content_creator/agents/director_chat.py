@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from content_creator.agents.director_agent import create_director_plan, load_remotion_skill_guidance, plan_to_storyboard
-from content_creator.capabilities.visual_capability_catalog import DIRECTOR_VISUAL_CAPABILITIES, log_intent_adaptation
+from content_creator.capabilities.visual_capability_catalog import director_visual_capabilities, log_intent_adaptation
 from content_creator.schemas import DirectorPlan, DirectorPlanPatch
 from content_creator.services.llm.router import get_agent_provider
 from content_creator.services.llm.validator import validate_director_plan_patch_json
@@ -36,7 +36,7 @@ def _chat_prompt(session: ProjectSession, message: str) -> str:
             "recent_history": session.conversation_history[-10:],
             "user_feedback": message,
             "remotion_capability_guidance": load_remotion_skill_guidance(),
-            "available_visual_capabilities": DIRECTOR_VISUAL_CAPABILITIES,
+            "available_visual_capabilities": director_visual_capabilities(),
             "output_contract": {
                 "operations": [
                     {

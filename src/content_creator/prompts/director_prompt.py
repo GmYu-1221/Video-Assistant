@@ -1,6 +1,6 @@
 import json
 
-from content_creator.capabilities.visual_capability_catalog import DIRECTOR_VISUAL_CAPABILITIES
+from content_creator.capabilities.visual_capability_catalog import director_visual_capabilities
 
 
 def director_prompt(images: list[dict], beat_analysis: dict, style: str, remotion_guidance: str = "", capability_catalog: dict | None = None) -> str:
@@ -40,7 +40,7 @@ def director_prompt(images: list[dict], beat_analysis: dict, style: str, remotio
         ],
         "style": style,
         "remotion_capability_guidance": remotion_guidance,
-        "available_visual_capabilities": capability_catalog or DIRECTOR_VISUAL_CAPABILITIES,
+        "available_visual_capabilities": capability_catalog or director_visual_capabilities(),
         "images": images,
         "beat_analysis": beat_analysis,
     }

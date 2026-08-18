@@ -24,16 +24,18 @@ from content_creator.schemas import (
     VisualSpecDecision,
 )
 from content_creator.services.llm.router import get_agent_provider
+from content_creator.transitions import (
+    enabled_transition_templates,
+    get_transition_template_capabilities,
+    validate_transition_template_params,
+)
 
 # Runtime knowledge only. Development-only Skills under ~/.codex/skills are not
 # prompt material for the provider.
 _SKILL_NAMES = (
-    "video-assistant-visual-events",
     "remotion-motion-design",
     "stretch-motion-design",
     "elastic-blur-motion-design",
-    "blur-transition-design",
-    "zoom-motion-design",
     "remotion-best-practices",
     "remotion-docs",
     "remotion-markup",
@@ -118,91 +120,33 @@ _ANIMATION_EFFECT_PHASES = {
     AnimationEffectType.particle_flip_reveal: ["entrance"],
     AnimationEffectType.creative_reveal: ["entrance"],
 }
-_TRANSITION_EFFECT_CAPABILITIES = {
-    TransitionEffectType.card_flip_transition: {
-        "description": "The outgoing image flips in 3D into the next image.",
-        "params": {"rotation_axis": {"type": "enum", "values": ["X", "Y"]}, "perspective": {"type": "number", "minimum": 300, "maximum": 2000}},
-    },
-    TransitionEffectType.zoom_through_transition: {
-        "description": "The camera rapidly passes through the outgoing image and the next image emerges after the pass-through. This is a cross-image transition, not a camera push or simple zoom.",
-        "params": {"intensity": {"type": "number", "minimum": 0, "maximum": 1}, "direction": {"type": "enum", "values": ["center", "left", "right", "top", "bottom"]}},
-    },
-    TransitionEffectType.glass_shatter_transition: {
-        "description": "The outgoing image fractures into cinematic glass-like fragments while the incoming image is revealed behind it.",
-        "params": {
-            "fragment_count": {"type": "number", "minimum": 12, "maximum": 96, "description": "Number of visible fragment cells."},
-            "impact_origin": {"type": "enum", "values": ["center", "left", "right", "top", "bottom"], "description": "Where the glass fracture begins."},
-            "motion_blur": {"type": "boolean", "description": "Enable a motion-blur approximation while shards move."},
-        },
-    },
-    TransitionEffectType.shake_transition: {
-        "description": "The outgoing image shakes with a short cinematic impact before the next scene resolves into view.",
-        "params": {
-            "intensity": {"type": "number", "minimum": 0, "maximum": 1, "description": "Strength of the shake."},
-            "motion_blur": {"type": "boolean", "description": "Enable blur during the shake."},
-        },
-    },
-    TransitionEffectType.gaussian_blur_transition: {
-        "description": "Smooth cinematic blur based transition. The outgoing image loses focus and the incoming image emerges.",
-        "params": {"blur_type": {"type": "enum", "values": ["gaussian"]}, "direction": {"type": "enum", "values": ["horizontal", "vertical", "radial"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
-    },
-    TransitionEffectType.directional_blur_transition: {
-        "description": "Fast directional velocity blur transition between two images.",
-        "params": {"blur_type": {"type": "enum", "values": ["directional"]}, "direction": {"type": "enum", "values": ["horizontal", "vertical", "left", "right", "up", "down"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
-    },
-    TransitionEffectType.pixel_blur_transition: {
-        "description": "Image resolves through low-resolution pixel blocks into the next image.",
-        "params": {"blur_type": {"type": "enum", "values": ["pixelate"]}, "direction": {"type": "enum", "values": ["horizontal", "vertical", "radial"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
-    },
-    TransitionEffectType.bokeh_blur_transition: {
-        "description": "Cinematic bokeh light bloom expands as the next image appears.",
-        "params": {"blur_type": {"type": "enum", "values": ["bokeh", "mist"]}, "direction": {"type": "enum", "values": ["horizontal", "vertical", "radial"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
-    },
-    TransitionEffectType.water_ripple_transition: {
-        "description": "Water-drop ripple refraction transition from one image into the next.",
-        "params": {"blur_type": {"type": "enum", "values": ["water_ripple"]}, "direction": {"type": "enum", "values": ["radial"]}, "intensity": {"type": "number", "minimum": 0, "maximum": 1}, "softness": {"type": "number", "minimum": 0, "maximum": 1}, "motion_blur": {"type": "boolean"}},
-    },
-}
-_BLUR_TRANSITION_CAPABILITY = {
-    "description": "Smooth cinematic blur based transition. The outgoing image loses focus and the incoming image emerges.",
-    "intent_mapping": ["模糊转场", "失焦", "雾化", "朦胧", "亮点", "水滴", "梦幻", "回忆", "柔和过渡"],
-    "output_types": [
-        "gaussian_blur_transition",
-        "directional_blur_transition",
-        "pixel_blur_transition",
-        "bokeh_blur_transition",
-        "water_ripple_transition",
-    ],
-}
-_VISUAL_EFFECT_CAPABILITIES = {
+_ANIMATION_VISUAL_CAPABILITIES = {
     **{
         effect.value: {**capability, "phase": _ANIMATION_EFFECT_PHASES[effect]}
         for effect, capability in _ANIMATION_EFFECT_CAPABILITIES.items()
         if effect.value != "none"
     },
-    **{effect.value: {**capability, "phase": ["transition"]} for effect, capability in _TRANSITION_EFFECT_CAPABILITIES.items()},
 }
-_TRANSITION_DURATION_RANGES = {
-    "card_flip_transition": (18, 60, 30),
-    "zoom_through_transition": (12, 45, 18),
-    "glass_shatter_transition": (30, 90, 45),
-    "shake_transition": (12, 45, 18),
-    "gaussian_blur_transition": (1, 60, 30),
-    "directional_blur_transition": (1, 45, 18),
-    "pixel_blur_transition": (1, 60, 30),
-    "bokeh_blur_transition": (1, 75, 36),
-    "water_ripple_transition": (1, 75, 36),
-    "particle_dissolve_transition": (24, 90, 36),
-    "liquid_morph_transition": (36, 120, 48),
-}
+
+
+def _visual_effect_capabilities() -> dict[str, dict]:
+    capabilities = dict(_ANIMATION_VISUAL_CAPABILITIES)
+    templates = get_transition_template_capabilities()
+    if templates:
+        capabilities[TransitionEffectType.template_transition.value] = {
+            "description": "A registered scene-boundary transition template.",
+            "templates": templates,
+            "params": {
+                "template_id": {"type": "enum", "values": list(templates)},
+                "parameters": {"type": "object"},
+            },
+            "phase": ["transition"],
+        }
+    return capabilities
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str], None]
 _SECRET = re.compile(r"(?i)(?:authorization\s*:\s*(?:bearer\s+)?|bearer\s+|api[_-]?key\s*[:=]\s*|token\s*[:=]\s*|password\s*[:=]\s*)[^\s,;]+")
 _CAMERA_PUSH_INTENT = re.compile(r"(?:缓慢推进|镜头推进|push\s*in|zoom\s*in|camera\s+movement|ken\s*burns)", re.IGNORECASE)
-_ZOOM_THROUGH_INTENT = re.compile(r"(?:穿过(?:画面|图片|镜头)?|穿越(?:画面|图片|镜头)?|推进穿过|放大穿越|zoom\s*(?:through|past)|push\s*through|pass\s+through)", re.IGNORECASE)
-_BLUR_TRANSITION_TYPES = frozenset(_BLUR_TRANSITION_CAPABILITY["output_types"])
-_BLUR_TRANSITION_INTENT = re.compile(r"(?:模糊转场|模糊|失焦|雾化|朦胧|亮点|光斑|水滴|波纹|梦幻|回忆|柔和过渡|数字|像素|数据|blur|defocus|mist|bokeh|water|ripple|dream|memory|pixel|digital|data|soft\s+transition)", re.IGNORECASE)
-_GLASS_SHATTER_INTENT = re.compile(r"(?:玻璃|碎裂|破碎|碎片|爆裂|glass|shatter|fragment)", re.IGNORECASE)
 
 
 class InvalidAnimationResponse(ValueError):
@@ -260,36 +204,25 @@ def _remotion_prompt(creative_intent: object, scene_duration: int) -> str:
 
 
 def _transition_prompt(transition_intent: object, from_item, to_item) -> str:
-    """Use the same Remotion Creative Agent and skill context for scene boundaries."""
+    """Prompt only currently registered transition templates."""
     documents = {Path(path).parent.name: Path(path).read_text(encoding="utf-8") for path in load_skill_documents()}
     return json.dumps({
         "role": "Remotion Creative Agent",
-        "task": "Turn the Director-owned transition_intent into one executable scene-boundary transition effect.",
+        "task": "Turn the Director-owned transition_intent into one registered template transition, or omit it when no template fits.",
         "transition_intent": transition_intent.model_dump(mode="json"),
         "from_scene": {"asset_id": from_item.asset_id, "duration_frames": from_item.duration_frames},
         "to_scene": {"asset_id": to_item.asset_id, "duration_frames": to_item.duration_frames},
-        "transition_effect_capabilities": {effect.value: capability for effect, capability in _TRANSITION_EFFECT_CAPABILITIES.items()},
-        "blur_transition": _BLUR_TRANSITION_CAPABILITY,
+        "transition_template_capabilities": get_transition_template_capabilities(),
         "remotion_skill_guidelines": documents,
         "output_contract": {
-            "type": "one transition_effect_capabilities key",
+            "type": "template_transition",
             "duration_frames": f"positive integer, at most {min(from_item.duration_frames, to_item.duration_frames)}",
-            "params": "object containing only parameters supported by the selected capability",
+            "params": "{template_id: string, parameters: JSON-safe object}",
         },
         "rules": [
-            "Return only one JSON object with exactly type, duration_frames, and params. Do not return description, transition_description, implementation_plan, explanation, or Markdown.",
-            "Choose a registered transition effect and use its documented parameters.",
-            "Choose params only from the selected transition capability.",
-            "blur_transition is a family label only. Return one concrete blur transition type, never blur_transition itself.",
-            "Map blur intent to the matching concrete type: loss of focus/mist/soft memory -> gaussian_blur_transition; fast horizontal or vertical blur -> directional_blur_transition; digital blocks -> pixel_blur_transition; light spots/romance -> bokeh_blur_transition; water drops/ripples -> water_ripple_transition.",
-            "Blur selection: gaussian for 模糊、失焦、梦境、回忆; directional for 高速移动、横向扫过、速度冲击; pixel for 数字、像素、数据; bokeh for 光斑、电影感柔光; water ripple for 水、波纹、涟漪.",
-            "Blur is transition-only. Never return blur_reveal, blur_effect, or blur_motion: none are registered types.",
-            "Do not choose glass_shatter_transition or particle_flip_reveal for blur_transition intent. Do not infer a blur transition from cinematic alone; the Director must explicitly request blur, defocus, mist, bokeh, water, dream, memory, or soft transition language.",
-            "Use glass_shatter_transition only for explicit glass, shatter, fracture, fragment, or explosion language. Never use it as the default for unknown, cinematic, dramatic, strong, premium, or impact transitions; use shake_transition for an otherwise unspecified strong transition.",
-            "Use zoom_through_transition only for explicit camera passing through the current image into the next scene: 穿过画面, 穿越图片, 推进穿过, 放大穿越, zoom through, or push through. It is a cross-image transition, never camera_push, simple zoom in, or static image movement.",
-            "Example: transition_intent '第二张图片抖动切出' returns {\"type\":\"shake_transition\",\"duration_frames\":18,\"params\":{\"intensity\":0.7,\"motion_blur\":true}}.",
-            "Do not return a legacy TransitionConfig type, TSX, React, CSS, or component names.",
-            "The transition presentation uses frame-driven transforms, opacity, filters, masks, and fragment layering.",
+            "Return only one JSON object with exactly type, duration_frames, and params, or an empty object when no template is registered. Do not return Markdown.",
+            "Use only a template_id present in transition_template_capabilities.",
+            "Never invent a template, renderer, component, TSX, CSS, path, module, import, or code.",
         ],
     }, ensure_ascii=False)
 
@@ -395,68 +328,27 @@ def _validate_animation_params(effect: AnimationEffectType, params: dict) -> dic
     return clean
 
 
-def _fallback_transition_effect(from_item, to_item, implementation: str = "fallback") -> TransitionEffectPlanItem:
-    intent = from_item.transition_intent
-    assert intent is not None
-    is_glass = _explicitly_requests_glass_shatter(from_item)
-    return TransitionEffectPlanItem(
-        from_asset_id=from_item.asset_id,
-        to_asset_id=to_item.asset_id,
-        type=TransitionEffectType.glass_shatter_transition if is_glass else TransitionEffectType.shake_transition,
-        duration_frames=min(18, from_item.duration_frames, to_item.duration_frames),
-        params={"fragment_count": 48, "impact_origin": "center", "motion_blur": True} if is_glass else {"intensity": 0.45, "motion_blur": False},
-        implementation=implementation,
-        design={"transition_intent": intent.model_dump()},
-    )
-
-
 def _parse_llm_transition_effect(raw: str, from_item, to_item) -> TransitionEffectPlanItem:
     effect_value, duration_frames, params = _plan_fields(raw, "TransitionEffectPlan")
-    try:
-        effect = TransitionEffectType(effect_value)
-    except (KeyError, ValueError) as exc:
-        # A valid but unknown creative selection is an integration error, never a silent fallback.
-        raise UnknownTransitionEffect("Remotion Agent selected an unavailable transition effect") from exc
+    if effect_value != TransitionEffectType.template_transition.value:
+        raise UnknownTransitionEffect("Remotion Agent selected an unavailable transition effect")
     if not isinstance(duration_frames, int) or isinstance(duration_frames, bool) or not 0 < duration_frames <= min(from_item.duration_frames, to_item.duration_frames):
         raise ValueError("Remotion Agent returned invalid transition duration_frames")
     if not isinstance(params, dict):
         raise ValueError("Remotion Agent returned invalid transition params")
-    if effect == TransitionEffectType.glass_shatter_transition and not _explicitly_requests_glass_shatter(from_item):
-        raise ValueError("Remotion Agent selected glass shatter without explicit glass intent")
-    clean_params = _validate_transition_params(effect, params)
+    template_id = params.get("template_id")
+    if not isinstance(template_id, str) or not template_id:
+        raise ValueError("Remotion Agent returned no transition template_id")
+    clean_params = {"template_id": template_id, "parameters": validate_transition_template_params(template_id, params.get("parameters", {}), duration_frames)}
     return TransitionEffectPlanItem(
         from_asset_id=from_item.asset_id,
         to_asset_id=to_item.asset_id,
-        type=effect,
+        type=TransitionEffectType.template_transition.value,
         duration_frames=duration_frames,
         params=clean_params,
         implementation="new",
         design={"transition_intent": from_item.transition_intent.model_dump()},
     )
-
-
-def _validate_transition_params(effect: TransitionEffectType, params: dict) -> dict:
-    allowed = _TRANSITION_EFFECT_CAPABILITIES[effect]["params"]
-    clean: dict = {}
-    for name, value in params.items():
-        specification = allowed.get(name)
-        if specification is None:
-            logger.warning("[Remotion Agent] Unknown transition parameter ignored: %s", name)
-            continue
-        kind = specification["type"]
-        if kind == "boolean":
-            valid = isinstance(value, bool)
-        elif kind == "number":
-            valid = isinstance(value, (int, float)) and not isinstance(value, bool)
-            valid = valid and specification.get("minimum", float("-inf")) <= value <= specification.get("maximum", float("inf"))
-        elif kind == "enum":
-            valid = value in specification["values"]
-        else:
-            valid = False
-        if not valid:
-            raise ValueError(f"Remotion Agent returned invalid {effect.value} parameter: {name}")
-        clean[name] = value
-    return clean
 
 
 def create_animation_plan(plan: DirectorPlan, mode: str | None = None, provider=None) -> AnimationPlan:
@@ -493,7 +385,10 @@ def create_animation_plan(plan: DirectorPlan, mode: str | None = None, provider=
 
 
 def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> TransitionEffectPlan:
-    """Use the existing Remotion Creative Agent to design all requested boundaries."""
+    """Design registered templates only; an empty registry means no effect."""
+    if not enabled_transition_templates():
+        logger.warning("[Remotion Agent] No registered transition templates; skipping creative transition")
+        return TransitionEffectPlan(transitions=[])
     provider = provider or get_agent_provider("remotion")
     transitions: list[TransitionEffectPlanItem] = []
     for index, item in enumerate(plan.timeline[:-1]):
@@ -501,8 +396,7 @@ def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> Transiti
             continue
         next_item = plan.timeline[index + 1]
         if provider.model_name == "mock":
-            logger.warning("[Remotion Agent] LLM unavailable, using fallback")
-            transitions.append(_fallback_transition_effect(item, next_item))
+            logger.warning("[Remotion Agent] LLM unavailable; skipping creative transition")
             continue
         logger.info("[Remotion Agent] transition intent analyzed")
         try:
@@ -511,16 +405,13 @@ def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> Transiti
             logger.debug("[Remotion Transition RAW RESPONSE] %s", _safe_raw_response_log(raw))
             transitions.append(_parse_llm_transition_effect(raw, item, next_item))
         except (OSError, TimeoutError, ConnectionError):
-            logger.warning("[Remotion Agent] LLM unavailable, using fallback")
-            transitions.append(_fallback_transition_effect(item, next_item))
+            logger.warning("[Remotion Agent] LLM unavailable; skipping creative transition")
         except InvalidAnimationResponse as exc:
-            logger.warning("[Remotion Agent] Invalid response, using safe fallback (%s)", exc)
-            transitions.append(_fallback_transition_effect(item, next_item))
+            logger.warning("[Remotion Agent] Invalid response; skipping creative transition (%s)", exc)
         except UnknownTransitionEffect:
             raise
         except ValueError as exc:
-            logger.warning("[Remotion Agent] Invalid response, using safe fallback (%s)", exc)
-            transitions.append(_fallback_transition_effect(item, next_item))
+            logger.warning("[Remotion Agent] Invalid response; skipping creative transition (%s)", exc)
         else:
             logger.info("[Remotion Agent] generated TransitionEffectPlan")
     return TransitionEffectPlan(transitions=transitions)
@@ -548,13 +439,12 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
         "role": "Remotion Creative Agent",
         "task": "Convert all Director visual intents into one executable unified visual event plan.",
         "scenes": scenes,
-        "visual_effect_capabilities": _VISUAL_EFFECT_CAPABILITIES,
-        "blur_transition": _BLUR_TRANSITION_CAPABILITY,
-        "project_visual_event_rules": documents["video-assistant-visual-events"],
+        "visual_effect_capabilities": _visual_effect_capabilities(),
+        "project_visual_event_rules": "Entrance and camera events are single-scene effects. Scene-boundary creative transitions may only use registered template_transition entries.",
         "remotion_motion_guidelines": documents["remotion-motion-design"],
         "remotion_reference_guidelines": {
             name: content for name, content in documents.items()
-            if name not in {"video-assistant-visual-events", "remotion-motion-design"}
+            if name != "remotion-motion-design"
         },
         "output_contract": {"plans": [{"scene_id": "asset id", "visual_events": [{"type": "registered effect", "phase": "entrance|exit|transition|camera|effect", "start_frame": "scene-local integer", "duration_frames": "positive integer", "source_asset_id": "required for transition", "target_asset_id": "required for transition", "params": "object"}]}]},
         "rules": [
@@ -569,19 +459,10 @@ def _creative_plan_prompt(plan: DirectorPlan) -> str:
             "A transition event belongs to the source scene and must set target_asset_id.",
             "A transition event owns the reveal of its target asset. Never create entrance, reveal, fade in, creative_reveal, particle_flip_reveal, or drop_reveal for a target asset covered by a transition.",
             "Transitions are cross-scene visual events; entrance animations are single-scene events. If both are requested, keep the transition and remove the target entrance.",
-            "Example: '图一玻璃破碎，图二从碎片后出现' returns only a glass_shatter_transition event with source_asset_id image-001 and target_asset_id image-002.",
-            "blur_transition is a family label only. For explicit 模糊转场, 失焦, 雾化, 朦胧, 亮点, 水滴, 梦幻, 回忆, or 柔和过渡 intent, return one concrete blur type: gaussian_blur_transition, directional_blur_transition, pixel_blur_transition, bokeh_blur_transition, or water_ripple_transition. Never return blur_transition itself.",
-            "Use gaussian_blur_transition for defocus, mist, soft memory, or gentle change; directional_blur_transition for fast horizontal or vertical blur; pixel_blur_transition for digital blocks; bokeh_blur_transition for light spots or romance; water_ripple_transition for water drops or ripples.",
-            "Blur transition selection rules: gaussian blur is for 模糊、失焦、梦境、回忆; directional blur is for 高速移动、横向扫过、速度冲击; pixel blur is for 数字、像素、数据; bokeh is for 光斑、电影感柔光; water ripple is for 水、波纹、涟漪.",
-            "All concrete blur transitions accept any positive integer duration. For 快速, 极短时间, 紧凑, or 干脆 intent, use a short duration when appropriate.",
-            "Blur is a transition only. Never output blur_reveal, blur_effect, or blur_motion; those are not registered types.",
-            "For '图片模糊出现', use an entrance capability when it describes one image appearing, and a concrete blur transition only when two images are being replaced.",
-            "Never use glass_shatter_transition or particle_flip_reveal for explicit blur-transition intent. Do not infer blur_transition from cinematic alone; the Director must explicitly request blur, defocus, mist, bokeh, water, dream, memory, or a soft transition.",
-            "Use glass_shatter_transition only for explicit glass, shatter, fracture, fragment, or explosion language. Never use it for unknown, cinematic, dramatic, strong, premium, or impact transitions; use shake_transition for an otherwise unspecified strong transition.",
-            "Use zoom_through_transition only for explicit camera passing through the current image into the next scene: 穿过画面, 穿越图片, 推进穿过, 放大穿越, zoom through, or push through. It is a cross-image transition, never camera_push, simple zoom in, or static image movement.",
+            "Output template_transition only when visual_effect_capabilities includes it, and choose only a listed template_id.",
+            "If no transition template is exposed, do not emit a transition event even when transition_intent is present.",
             "Generate camera_push only when the Director explicitly requests 缓慢推进, 镜头推进, push in, zoom in, camera movement, or Ken Burns. Never infer it from cinematic, dramatic, smooth, premium, entrance, or transition.",
-            "camera_push conflicts with a transition by default. Keep camera_push plus a transition only when the Director explicitly requests both camera movement and the transition. Example: '图一缓慢推进，然后翻转到图二' returns camera_push effect at frames 0-60 plus card_flip_transition at frames 30-60.",
-            "card_flip_reveal is entrance-only for one image appearing. card_flip_transition is transition-only for two images changing; use card_flip_transition for '图一图二翻转转场'.",
+            "card_flip_reveal remains an entrance-only animation and is not a scene-boundary transition.",
             "Do not return component names, TSX, React, CSS, or legacy animation/transition fields.",
         ],
     }, ensure_ascii=False)
@@ -639,44 +520,46 @@ def _fallback_creative_plan(plan: DirectorPlan) -> RemotionCreativePlan:
         events: list[VisualEvent] = []
         if scene.creative_intent:
             events.append(VisualEvent(type="creative_reveal", phase="entrance", start_frame=0, duration_frames=min(18, scene.duration_frames), params={}))
-        if scene.transition_intent and index + 1 < len(plan.timeline):
-            fallback_duration = min(30 if _explicitly_requests_glass_shatter(scene) else 18, scene.duration_frames, plan.timeline[index + 1].duration_frames)
-            is_glass = _explicitly_requests_glass_shatter(scene)
-            events.append(VisualEvent(type="glass_shatter_transition" if is_glass else "shake_transition", phase="transition", start_frame=max(0, scene.duration_frames - fallback_duration), duration_frames=fallback_duration, source_asset_id=scene.asset_id, target_asset_id=plan.timeline[index + 1].asset_id, params={"fragment_count": 48, "impact_origin": "center", "motion_blur": True} if is_glass else {"intensity": 0.45, "motion_blur": False}))
         items.append(RemotionCreativePlanItem(scene_id=scene.asset_id, visual_events=events))
     transition_targets = {event.target_asset_id for item in items for event in item.visual_events if event.phase == "transition"}
     return RemotionCreativePlan(plans=[item.model_copy(update={"visual_events": [event for event in item.visual_events if not (event.phase == "entrance" and item.scene_id in transition_targets)]}) for item in items])
 
 
 def _validate_visual_event(event: VisualEvent, scene: DirectorTimelineItem, next_asset_id: str | None) -> VisualEvent:
-    if event.type not in _VISUAL_EFFECT_CAPABILITIES:
+    capabilities = _visual_effect_capabilities()
+    if event.type not in capabilities:
         raise UnknownVisualEffect(f"Remotion Agent selected an unavailable visual effect: {event.type}")
-    capability = _VISUAL_EFFECT_CAPABILITIES[event.type]
+    capability = capabilities[event.type]
     allowed_phases = capability["phase"]
     if event.phase not in allowed_phases:
         raise ValueError(f"Invalid phase for {event.type}: expected {', '.join(allowed_phases)}")
     if event.start_frame + event.duration_frames > scene.duration_frames:
         raise ValueError(f"Visual event exceeds scene duration: {event.type}")
     if event.phase == "transition":
-        expected_min, expected_max, _recommended = _TRANSITION_DURATION_RANGES.get(event.type, (1, scene.duration_frames, 1))
-        if event.duration_frames < expected_min or event.duration_frames > min(expected_max, scene.duration_frames):
-            raise ValueError(f"Invalid duration for {event.type}: expected {expected_min}-{min(expected_max, scene.duration_frames)} frames")
+        template_id = event.params.get("template_id")
+        if not isinstance(template_id, str):
+            raise ValueError("template_transition requires template_id")
+        parameters = validate_transition_template_params(template_id, event.params.get("parameters", {}), event.duration_frames)
+        event = event.model_copy(update={"params": {"template_id": template_id, "parameters": parameters}})
     if event.type == AnimationEffectType.elastic_blur_reveal.value:
         if event.phase != "entrance":
             raise ValueError("elastic_blur_reveal must use entrance phase")
         if not 18 <= event.duration_frames <= min(36, scene.duration_frames):
             raise ValueError(f"Invalid duration for elastic_blur_reveal: expected 18-{min(36, scene.duration_frames)} frames")
     clean_params = dict(event.params)
-    for name, value in list(clean_params.items()):
-        spec = capability.get("params", {}).get(name)
-        if spec is None:
-            logger.warning("[Remotion Agent] Unknown visual parameter ignored: %s", name)
-            clean_params.pop(name)
-            continue
-        kind = spec["type"]
-        valid = (isinstance(value, bool) if kind == "boolean" else value in spec["values"] if kind == "enum" else isinstance(value, (int, float)) and not isinstance(value, bool) and spec.get("minimum", float("-inf")) <= value <= spec.get("maximum", float("inf")))
-        if not valid:
-            raise ValueError(f"Invalid visual parameter {name} for {event.type}")
+    if event.phase == "transition":
+        clean_params = event.params
+    else:
+        for name, value in list(clean_params.items()):
+            spec = capability.get("params", {}).get(name)
+            if spec is None:
+                logger.warning("[Remotion Agent] Unknown visual parameter ignored: %s", name)
+                clean_params.pop(name)
+                continue
+            kind = spec["type"]
+            valid = (isinstance(value, bool) if kind == "boolean" else value in spec["values"] if kind == "enum" else isinstance(value, (int, float)) and not isinstance(value, bool) and spec.get("minimum", float("-inf")) <= value <= spec.get("maximum", float("inf")))
+            if not valid:
+                raise ValueError(f"Invalid visual parameter {name} for {event.type}")
     event = event.model_copy(update={"params": clean_params})
     if event.phase == "transition":
         event = event.model_copy(update={"source_asset_id": event.source_asset_id or scene.asset_id, "target_asset_id": event.target_asset_id or next_asset_id})
@@ -694,33 +577,6 @@ def _explicitly_requests_camera_push(scene: DirectorTimelineItem) -> bool:
         return False
     text = " ".join(filter(None, [intent.description, intent.movement, intent.camera, intent.timing, *intent.effects]))
     return bool(_CAMERA_PUSH_INTENT.search(text))
-
-
-def _explicitly_requests_zoom_through_transition(scene: DirectorTimelineItem) -> bool:
-    """Zoom through requires explicit cross-scene pass-through language."""
-    intent = scene.transition_intent
-    if intent is None:
-        return False
-    text = " ".join(filter(None, [intent.description, intent.movement, intent.camera, intent.timing, *intent.effects]))
-    return bool(_ZOOM_THROUGH_INTENT.search(text))
-
-
-def _explicitly_requests_blur_transition(scene: DirectorTimelineItem) -> bool:
-    """Blur transitions require explicit boundary intent, never style alone."""
-    intent = scene.transition_intent
-    if intent is None:
-        return False
-    text = " ".join(filter(None, [intent.description, intent.movement, intent.camera, intent.timing, *intent.effects]))
-    return bool(_BLUR_TRANSITION_INTENT.search(text))
-
-
-def _explicitly_requests_glass_shatter(scene: DirectorTimelineItem) -> bool:
-    """Glass fragments are reserved for explicit glass or fracture direction."""
-    intent = scene.transition_intent
-    if intent is None:
-        return False
-    text = " ".join(filter(None, [intent.description, intent.movement, intent.camera, intent.timing, *intent.effects]))
-    return bool(_GLASS_SHATTER_INTENT.search(text))
 
 
 def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress: ProgressCallback | None = None) -> RemotionCreativePlan:
@@ -768,14 +624,6 @@ def create_remotion_creative_plan(plan: DirectorPlan, provider=None, on_progress
             kept = []
             for event in item.visual_events:
                 if event.phase == "transition":
-                    if event.type in _BLUR_TRANSITION_TYPES and not _explicitly_requests_blur_transition(scene):
-                        continue
-                    if event.type == "zoom_through_transition" and not _explicitly_requests_zoom_through_transition(scene):
-                        continue
-                    if event.type == "glass_shatter_transition" and not _explicitly_requests_glass_shatter(scene):
-                        duration = min(18, scene.duration_frames)
-                        kept.append(event.model_copy(update={"type": "shake_transition", "start_frame": max(0, scene.duration_frames - duration), "duration_frames": duration, "params": {"intensity": 0.45, "motion_blur": False}}))
-                        continue
                     kept.append(event)
                     continue
                 if item.scene_id in incoming:
