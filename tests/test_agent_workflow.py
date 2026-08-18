@@ -1,14 +1,30 @@
 from content_creator.main import apply_agent_workflow
-from content_creator.schemas import AudioConfig, VideoOutput, VideoProject
+from content_creator.schemas import AudioConfig, ImageAsset, TimelineItem, TransitionConfig, VideoOutput, VideoProject
 from content_creator.services.music.beat_detector import BeatAnalysis
 
 
 def test_agent_workflow_preserves_original_beat_analysis(monkeypatch):
     project = VideoProject(
         project_id="test",
-        images=[],
+        images=[
+            ImageAsset(
+                id="a",
+                filename="a.jpg",
+                relative_path="materials/a.jpg",
+                width=100,
+                height=100,
+            )
+        ],
         audio=AudioConfig(path="audio/bgm.wav", duration=4.0, sample_rate=44100, bpm=120.0),
-        timeline=[],
+        timeline=[
+            TimelineItem(
+                asset_id="a",
+                start_frame=0,
+                end_frame=120,
+                duration_frames=120,
+                transition=TransitionConfig(),
+            )
+        ],
         output=VideoOutput(
             project_dir=".",
             render_data="render_data.json",
