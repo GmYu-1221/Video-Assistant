@@ -114,7 +114,7 @@ def test_copy_density_feedback_expands_article_grounded_narratives_without_dupli
     from content_creator.services.layout.revision import project_copy_metrics
 
     content = NarrativeContent(semantic_unit_id="unit", content_id="primary", full="标题内容足够长用于测试", short="标题内容", micro="标题")
-    scene = SceneNarrative(copy_id="copy", scene_id="scene", asset_id="image", scene_purpose="opening", contents=[content])
+    scene = SceneNarrative(copy_id="copy", scene_id="scene", asset_id="image", scene_purpose="explanation", contents=[content])
     layout = solve_scene(scene, ImageSemanticProfile())
     state = ResolvedTimelineItem(segment_id="segment", scene_id="scene", start_frame=0, end_frame=30, duration_frames=30, resolved_media_id="image", resolved_copy_id="copy", resolved_layout_id=layout.layout_id, visibility="visible", boundary_action=BoundaryAction.continuous, requested_layout_action=LayoutAction.replace, resolved_layout_action=LayoutAction.replace, transition=TransitionConfig())
     project = VideoProject(project_id="density", fps=30, width=1080, height=1920, images=[ImageAsset(id="image", filename="image.jpg", relative_path="image.jpg", width=1080, height=610, semantic_profile=ImageSemanticProfile())], audio=AudioConfig(path="audio.wav", duration=1, sample_rate=44100), timeline=[TimelineItem(asset_id="image", start_frame=0, end_frame=30, duration_frames=30, transition=TransitionConfig(), narrative=scene, layout=layout, resolved_state=state)], output=VideoOutput(project_dir=str(tmp_path), render_data=str(tmp_path / "render_data.json"), final_video=str(tmp_path / "final.mp4")), video_copy=VideoCopy())
@@ -127,6 +127,11 @@ def test_copy_density_feedback_expands_article_grounded_narratives_without_dupli
     assert diagnostics["after_candidate_character_count"] > diagnostics["before_character_count"]
     assert len(narrative.contents) == 1
     assert all(len(item.full) > len(item.short) > len(item.micro) for item in narrative.contents)
+    assert narrative.contents[0].source_paragraph_indices == [0, 1]
+    assert narrative.contents[0].source_index == 0
+    assert "第一条事实" in narrative.contents[0].full
+    assert "第二条事实" in narrative.contents[0].full
+    assert "第三条事实" not in narrative.contents[0].full
     plan = solve_scene(narrative, ImageSemanticProfile(), font_palette=["source-han-serif", "noto-sans-sc"], copy_density_intent=CopyDensityIntent.increase)
     assert len(plan.text_blocks) == 1
     assert not validate_scene_layout(plan, narrative, None)

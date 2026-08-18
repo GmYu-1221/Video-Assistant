@@ -149,6 +149,7 @@ def _freeze_viral_narratives(partial: list[PartialTimelineItem], plan: ViralCopy
                 micro=unit.micro,
                 source_kind="generated" if unit.origin == "creative" else "body",
                 source_index=unit.source_paragraph_indices[0] if unit.source_paragraph_indices else None,
+                source_paragraph_indices=list(dict.fromkeys(unit.source_paragraph_indices)),
                 source_hash=unit.source_hash,
             ) for unit in selected]
             for unit in selected:

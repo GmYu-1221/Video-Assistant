@@ -150,3 +150,42 @@ def test_fallback_skips_mixed_sentence_whose_micro_variant_becomes_english():
     assert viral_writer.validate_localized_display_text(values) == []
     assert all("parameters 与 output." not in value for value in values)
     assert plan.content_units[-1].purpose == "conclusion"
+
+
+def test_source_sentence_filter_rejects_incomplete_endings_but_keeps_complete_text():
+    assert not viral_writer._usable_source_sentence("这是一个长度足够、但明显尚未结束的正文片段，")
+    assert not viral_writer._usable_source_sentence("This is a sufficiently long but unfinished fragment,")
+    assert not viral_writer._usable_source_sentence("这是一个明显还没有结束的正文说明：")
+    assert viral_writer._usable_source_sentence("人工智能正在改变软件开发方式，并显著降低重复工作的成本。")
+    assert viral_writer._usable_source_sentence("2026 年人工智能工具继续快速发展，并逐渐进入实际生产环境。")
+    assert viral_writer._usable_source_sentence("123 个模型参与了这次完整的性能评估与结果分析。")
+
+
+def test_source_sentence_filter_rejects_numbered_section_headings():
+    headings = [
+        "1. 安装依赖并初始化完整的本地项目开发环境",
+        "2、配置完整的生产环境与运行参数",
+        "3) 启动应用并检查服务运行状态",
+        "4）验证生产服务是否成功启动",
+        "10. 执行最终部署流程",
+        "2.3.1 参数说明",
+    ]
+    assert all(not viral_writer._usable_source_sentence(value) for value in headings)
+
+
+def test_fallback_skips_incomplete_and_numbered_sources():
+    article = ArticleBrief(
+        url="https://example.com/filter", canonical_url="https://example.com/filter",
+        title="正文过滤测试",
+        text=(
+            "这是一个长度足够、但明显尚未结束的正文片段，\n"
+            "1. 安装依赖并初始化完整的本地项目开发环境\n"
+            "这是一个语义完整并且可以正常展示的视频正文句子。"
+        ),
+    )
+    plan = viral_writer._fallback_plan(article, 1)
+    selected = plan.content_units[0]
+    assert "明显尚未结束" not in selected.full
+    assert "安装依赖" not in selected.full
+    assert "语义完整并且可以正常展示" in selected.full
+    assert all(value not in selected.short + selected.micro for value in ("明显尚未结束", "安装依赖"))

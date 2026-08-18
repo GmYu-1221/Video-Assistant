@@ -121,6 +121,9 @@ class NarrativeContent(BaseModel):
     micro: str = Field(min_length=1, max_length=180)
     source_kind: Literal["title", "summary", "body", "existing", "generated"] = "existing"
     source_index: int | None = Field(default=None, ge=0)
+    # ``source_index`` remains for backwards compatibility; merged copy can
+    # preserve every paragraph it actually uses through this optional field.
+    source_paragraph_indices: list[int] = Field(default_factory=list, max_length=8)
     source_hash: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
 
     def value(self, variant: ContentVariant) -> str:

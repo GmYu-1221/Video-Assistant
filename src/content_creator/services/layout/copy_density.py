@@ -144,6 +144,8 @@ def expand_project_narratives(project: VideoProject, article: ArticleBrief, inte
         )
         if content is None:
             raise ValueError(f"没有更多可用正文：{segment_id} 无法构建完整总结段落")
+        source_indices = list(dict.fromkeys(index for _, _, index in selected_sources if index is not None))
+        content = content.model_copy(update={"source_paragraph_indices": source_indices})
         contents = [content]
         used_hashes.add(content.source_hash)
         copy_id = f"copy-density-{sha256(f'{segment_id}:{contents[0].source_hash}'.encode()).hexdigest()[:12]}"

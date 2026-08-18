@@ -15,21 +15,34 @@ from content_creator.services.title_normalization import normalize_article_title
 
 _SKILL_COMMIT = "1c76f891fb928ceb22fd101044d100d759f8cee5"
 _FACT_TOKEN = re.compile(r"https?://\S+|(?<![\w.])\d+(?:\.\d+)*(?:%|万|亿|年|月|日|秒|分钟|小时)?")
-_NON_NARRATIVE_PREFIX = re.compile(r"^(?:目录|更新时间|适用版本|第\s*\d+\s*步|\d+(?:\.\d+)+\s*)", re.I)
+_INCOMPLETE_ENDINGS = ("，", ",", "；", ";", "：", ":", "——", "-", "—")
+# Match a short, explicitly numbered heading without treating ordinary years,
+# counts, or decimals as headings. Supported forms include 1., 1.2., 1、,
+# 1), and 1） followed by title text.
+_NON_NARRATIVE_PREFIX = re.compile(
+    r"^(?:目录|更新时间|适用版本|第\s*\d+\s*步\b|"
+    r"(?:\d{1,3}\.){1,3}\d{1,3}\s+|"
+    r"\d{1,3}[.、)]\s*|\d{1,3}）\s*)",
+    re.I,
+)
+
+
+def _has_incomplete_ending(value: str) -> bool:
+    return re.sub(r"\s+", " ", value).strip().endswith(_INCOMPLETE_ENDINGS)
 
 
 def _complete_summary(value: str) -> bool:
     text = re.sub(r"\s+", " ", value).strip()
     if len(text) < 16 or _NON_NARRATIVE_PREFIX.match(text):
         return False
-    if text.endswith(("，", ",", "；", ";", "：", ":", "——", "-")):
+    if _has_incomplete_ending(text):
         return False
     return bool(re.search(r"[。！？!?]$", text))
 
 
 def _usable_source_sentence(value: str) -> bool:
     text = re.sub(r"\s+", " ", value).strip()
-    return len(text) >= 16 and not _NON_NARRATIVE_PREFIX.match(text) and not text.endswith(("：", ":", "；", ";"))
+    return len(text) >= 16 and not _NON_NARRATIVE_PREFIX.match(text) and not _has_incomplete_ending(text)
 
 
 def viral_writer_skill_path() -> Path:
