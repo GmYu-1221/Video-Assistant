@@ -90,9 +90,6 @@ def main() -> None:
         help="Use the Director Agent when a configured LLM is available (default: auto)",
     )
     args = parser.parse_args()
-    if args.agent_mode and args.director is False:
-        parser.error("--agent-mode includes the Director Agent and cannot be combined with --no-director")
-
     project, analysis = _create_project(args)
     director_provider = get_agent_provider("director")
     director_enabled = args.director if args.director is not None else director_provider.model_name != "mock"
