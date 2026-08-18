@@ -63,6 +63,19 @@ def apply_director(project: VideoProject, analysis: BeatAnalysis, style: str) ->
         return compile_render_plan(project, storyboard)
 
 
+def apply_agent_workflow(project: VideoProject, analysis: BeatAnalysis, style: str) -> VideoProject:
+    """Run the LangGraph planning pipeline once, preserving the original beat grid."""
+    from content_creator.workflow import build_graph
+
+    result = build_graph().invoke({
+        "project": project,
+        "style": style,
+        "beat_analysis": analysis,
+        "errors": [],
+    })
+    return result["project"]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate a beat-synchronized image video locally")
     parser.add_argument("--images", required=True); parser.add_argument("--audio", required=True); parser.add_argument("--output", default="output")
@@ -76,19 +89,23 @@ def main() -> None:
         default=None,
         help="Use the Director Agent when a configured LLM is available (default: auto)",
     )
-    args = parser.parse_args(); project, analysis = _create_project(args)
+    args = parser.parse_args()
+    if args.agent_mode and args.director is False:
+        parser.error("--agent-mode includes the Director Agent and cannot be combined with --no-director")
+
+    project, analysis = _create_project(args)
     director_provider = get_agent_provider("director")
     director_enabled = args.director if args.director is not None else director_provider.model_name != "mock"
-    if director_enabled:
+
+    if args.agent_mode:
+        print(f"Content Creator\nLLM: {director_provider.model_name}\nAgents: Director={director_provider.model_name}, Remotion={get_agent_provider('remotion').model_name}, Renderer=local")
+        project = apply_agent_workflow(project, analysis, args.style)
+    elif director_enabled:
         try:
             project = apply_director(project, analysis, args.style)
         except Exception as exc:
             print(f"[Director] Failed, using rule-based storyboard: {type(exc).__name__}: {exc}")
-    if args.agent_mode:
-        print(f"Content Creator\nLLM: {director_provider.model_name}\nAgents: Director={director_provider.model_name}, Remotion={get_agent_provider('remotion').model_name}, Renderer=local")
-        from content_creator.workflow import build_graph
-        result = build_graph().invoke({"project": project, "style": args.style, "errors": []})
-        project = result["project"]
+
     repo_root = Path(__file__).resolve().parents[2]
     export_types(repo_root / "remotion/src/types.ts")
     from content_creator.services.renderer import render_project
