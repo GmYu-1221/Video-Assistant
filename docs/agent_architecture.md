@@ -53,7 +53,7 @@ particle_flip_reveal-> ParticleFlipReveal
 creative_reveal    -> CreativeReveal（默认降级）
 ```
 
-创意转场统一通过 `template_transition` 扩展入口注册。当前正式模板数量为 0。不支持的意图保留在导演方案中；LLM 不可用或输出校验失败时，入场降级为 `creative_reveal`，不生成创意转场。
+场景转场统一通过 `template_transition` 扩展入口注册。当前唯一正式模板是 `qwen3_8`。不支持的意图保留在导演方案中；LLM 不可用或输出校验失败时，`scene_cut` 使用 qwen 确定性参数，过短镜头使用硬切。
 
 ## Render Agent
 

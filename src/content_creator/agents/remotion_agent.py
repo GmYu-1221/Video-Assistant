@@ -396,7 +396,22 @@ def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> Transiti
             continue
         next_item = plan.timeline[index + 1]
         if provider.model_name == "mock":
-            logger.warning("[Remotion Agent] LLM unavailable; skipping creative transition")
+            logger.warning("[Remotion Agent] LLM unavailable; using qwen3_8 fallback")
+            duration = min(27, item.duration_frames, next_item.duration_frames)
+            if duration >= 12:
+                transitions.append(TransitionEffectPlanItem(
+                    from_asset_id=item.asset_id,
+                    to_asset_id=next_item.asset_id,
+                    type=TransitionEffectType.template_transition,
+                    duration_frames=duration,
+                    params={"template_id": "qwen3_8", "parameters": {
+                        "blur_strength": 0.8,
+                        "float_distance": 0.55,
+                        "recovery_speed": 0.7,
+                        "opacity_start": 0.88,
+                    }},
+                    design={"requested_template_id": None, "resolved_template_id": "qwen3_8", "fallback_reason": "model_unavailable"},
+                ))
             continue
         logger.info("[Remotion Agent] transition intent analyzed")
         try:

@@ -58,6 +58,8 @@ class TransitionEffectPlanItem(BaseModel):
         if not isinstance(parameters, dict):
             raise ValueError("template_transition parameters must be an object")
         _validate_json_safe(parameters)
+        if template_id != "qwen3_8":
+            raise ValueError(f"Unknown transition template: {template_id}")
         return self
 
     @model_serializer

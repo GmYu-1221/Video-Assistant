@@ -4,7 +4,6 @@ import {TransitionSeries} from '@remotion/transitions';
 import {RemotionProps, TransitionEffectPlan} from './types';
 import {ImageFrame} from './components/ImageFrame';
 import {AudioTrack} from './components/AudioTrack';
-import {TransitionFactory} from './transitions';
 import {TransitionEffectRenderer} from './transitions/TransitionEffectRenderer';
 import {EffectRenderer} from './effects';
 import {VisualEffectRenderer} from './visual/VisualEffectRenderer';
@@ -22,7 +21,7 @@ export const Slideshow: React.FC<RemotionProps> = (props) => {
         const priority = {transition: 0, entrance: 1, effect: 2, exit: 3, camera: 4};
         const events = [...(item.visual_events ?? [])].sort((a, b) => priority[a.phase] - priority[b.phase] || a.start_frame - b.start_frame);
         const transitionEvent = events.find((event) => event.phase === 'transition');
-        const transitionFrames = isLast ? 0 : transitionEvent?.duration_frames ?? item.transition_effect?.duration_frames ?? item.transition.duration_frames;
+        const transitionFrames = isLast ? 0 : transitionEvent?.duration_frames ?? item.transition_effect?.duration_frames ?? 0;
         const incomingTransition = props.timeline[index - 1]?.visual_events?.find((event) => event.phase === 'transition' && event.target_asset_id === item.asset_id);
         // The incoming transition already controls this scene's reveal during
         // the overlap, so an entrance wrapper would create a competing reveal.
@@ -33,11 +32,6 @@ export const Slideshow: React.FC<RemotionProps> = (props) => {
         </TransitionSeries.Sequence>;
         if (isLast) return [sequence];
         const nextItem = props.timeline[index + 1];
-        const safeTransition = {
-          ...item.transition,
-          duration_frames: Math.min(item.transition.duration_frames, item.duration_frames, nextItem.duration_frames),
-          background_color: asset?.backgroundColor,
-        };
         const safeTransitionEffect = transitionEvent?.type === 'template_transition' ? {
           from_asset_id: item.asset_id,
           to_asset_id: transitionEvent.target_asset_id ?? nextItem.asset_id,
@@ -48,9 +42,13 @@ export const Slideshow: React.FC<RemotionProps> = (props) => {
           ...item.transition_effect,
           duration_frames: Math.min(item.transition_effect.duration_frames, item.duration_frames, nextItem.duration_frames),
         };
-        return [sequence, safeTransitionEffect
-          ? TransitionEffectRenderer(safeTransitionEffect as TransitionEffectPlan, `transition-effect-${item.asset_id}`)
-          : TransitionFactory(safeTransition, `transition-${item.asset_id}`)];
+        // There is deliberately no legacy transition fallback here. A scene
+        // boundary either has the registered qwen3_8 template or is a hard
+        // cut. This prevents old fade/push/etc. effects from leaking into
+        // newly rendered videos.
+        return safeTransitionEffect
+          ? [sequence, TransitionEffectRenderer(safeTransitionEffect as TransitionEffectPlan, `transition-effect-${item.asset_id}`)]
+          : [sequence];
       })}
     </TransitionSeries>
     <AudioTrack src={`${base}/${props.audio.path}`} />

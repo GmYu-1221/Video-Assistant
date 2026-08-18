@@ -1,8 +1,4 @@
-"""Data-only registry for user-provided creative transition templates.
-
-The production registry is intentionally empty until a template is explicitly
-implemented and registered in both Python and Remotion.
-"""
+"""Data-only registry for user-provided creative transition templates."""
 
 from __future__ import annotations
 
@@ -23,7 +19,67 @@ class TransitionTemplateDefinition:
     enabled: bool = True
 
 
-TRANSITION_TEMPLATE_REGISTRY: dict[str, TransitionTemplateDefinition] = {}
+TRANSITION_TEMPLATE_REGISTRY: dict[str, TransitionTemplateDefinition] = {
+    "qwen3_8": TransitionTemplateDefinition(
+        id="qwen3_8",
+        description=(
+            "下一张图片以明显模糊状态进入，并从略低的位置轻柔上浮到位；"
+            "模糊在入场前段快速消退，位移稍后结束，整体平滑、克制、无抖动、无回弹。"
+        ),
+        examples=(
+            "柔和高级转场",
+            "模糊上浮进入",
+            "高级感图片切换",
+            "平滑轻柔切换",
+            "blur then settle",
+            "soft float transition",
+            "premium smooth transition",
+            "elegant image transition",
+        ),
+        avoid_when=(
+            "玻璃破碎",
+            "剧烈震动",
+            "强冲击切换",
+            "水波纹",
+            "穿越镜头",
+            "明显翻转",
+        ),
+        params={
+            "blur_strength": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.8,
+                "description": "下一张图片开始进入时的模糊强度。",
+            },
+            "float_distance": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.55,
+                "description": "下一张图片从下方向上浮入的距离。",
+            },
+            "recovery_speed": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.7,
+                "description": "模糊和位移恢复到静止状态的速度。",
+            },
+            "opacity_start": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.88,
+                "description": "下一张图片在转场开始时的不透明度。",
+            },
+        },
+        duration_min=12,
+        duration_max=45,
+        duration_default=27,
+        enabled=True,
+    ),
+}
 
 
 def get_transition_template(template_id: str) -> TransitionTemplateDefinition:
@@ -42,6 +98,7 @@ def enabled_transition_templates() -> tuple[TransitionTemplateDefinition, ...]:
 def get_transition_template_capabilities() -> dict[str, dict[str, Any]]:
     return {
         item.id: {
+            "id": item.id,
             "description": item.description,
             "examples": list(item.examples),
             "avoid_when": list(item.avoid_when),

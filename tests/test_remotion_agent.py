@@ -28,7 +28,8 @@ def test_runtime_prompt_includes_motion_and_visual_event_skills_only():
     assert "registered template_transition" in prompt["project_visual_event_rules"]
     assert "stretch-motion-design" in prompt["remotion_reference_guidelines"]
     assert "elastic-blur-motion-design" in prompt["remotion_reference_guidelines"]
-    assert "template_transition" not in prompt["visual_effect_capabilities"]
+    assert "template_transition" in prompt["visual_effect_capabilities"]
+    assert "qwen3_8" in prompt["visual_effect_capabilities"]["template_transition"]["templates"]
     assert "stretch_reveal" in prompt["remotion_reference_guidelines"]["stretch-motion-design"]
     stretch_guidance = prompt["remotion_reference_guidelines"]["stretch-motion-design"]
     assert "There is no registered `stretch_transition`" in stretch_guidance

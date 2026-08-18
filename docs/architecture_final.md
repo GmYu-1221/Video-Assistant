@@ -11,7 +11,7 @@
   -> render_data.json
   -> Remotion Renderer
      -> EffectRenderer
-     -> TransitionEffectRenderer 或基线 TransitionFactory
+     -> TransitionEffectRenderer（qwen3_8）或硬切
   -> MP4
 ```
 
@@ -36,11 +36,11 @@ Director 负责解释意图：它在 `creative_intent` 中描述场景内的运�
 `Composition.tsx` 在每个非最终场景边界应用以下规则：
 
 1. 当存在创意转场事件时，调用 `TransitionEffectRenderer`。
-2. 否则调用基线 `TransitionFactory` 处理 `timeline.transition`。
+2. 没有 qwen 转场事件时直接硬切，不调用任何旧转场工厂。
 
-这样 `fade`、`crossfade`、`wipe`、`slide` 等所有既有基线转场保持兼容，AI 选择的创意转场也不会静默回落到基线转场。
+这样可以确保旧的 `fade`、`crossfade`、`wipe`、`slide` 等转场不会重新进入新成片。只有注册的 `qwen3_8` 才能执行场景转场。
 
-`TransitionEffectRenderer` 与场景 `EffectRenderer` 相互独立。前者只识别 `template_transition` 基础类型，并根据 `template_id` 查询当前为空的 `TemplatePresentationRegistry`。
+`TransitionEffectRenderer` 与场景 `EffectRenderer` 相互独立。前者只识别 `template_transition` 基础类型，并根据 `template_id` 查询只包含 `qwen3_8` 的 `TemplatePresentationRegistry`。
 
 ## 添加一个场景动画
 
@@ -51,7 +51,7 @@ Director 负责解释意图：它在 `creative_intent` 中描述场景内的运�
 
 ## 添加一个转场效果
 
-1. 在 `remotion/src/transitions/presentations/` 下实现 Remotion 转场呈现。
+1. 在 `remotion/src/transitions/templates/` 下实现 Remotion 转场呈现。
 2. 添加类型化的转场事件条目，并在 `TransitionEffectRenderer.tsx` 的 `TransitionEffectRegistry` 中注册。
 3. 在 `transition_effect_plan.py` 与 `remotion_agent.py` 中添加对应的 Python 枚举与能力元数据。
 4. 添加参数校验、LLM 计划、渲染数据和渲染器分发测试。

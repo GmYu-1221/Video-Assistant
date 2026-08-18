@@ -1,11 +1,12 @@
 import React from 'react';
-import {AbsoluteFill, Img, interpolate, useCurrentFrame} from 'remotion';
+import {AbsoluteFill, Img, useCurrentFrame} from 'remotion';
 import type {RemotionPropsWithVisualSpec, VisualSpecLayer, VisualSpecScene, VisualSpecTrack} from '../types';
 import {trackValue} from './TrackEvaluator';
 import {AudioTrack} from '../components/AudioTrack';
 import {SceneLayoutRenderer} from '../layout/SceneLayoutRenderer';
 import {PersistentTitleRenderer} from '../layout/PersistentTitleRenderer';
 import {BackgroundVideoLayer} from '../components/BackgroundVideoLayer';
+import {getQwen38TransitionState} from '../transitions/templates/qwen3-8-state';
 
 const Layer: React.FC<{layer: VisualSpecLayer; region: {x: number; y: number; width: number; height: number; overflow?: 'visible'|'hidden'}; frame: number; props: RemotionPropsWithVisualSpec; transitionTracks?: VisualSpecTrack[]}> = ({layer, region, frame, props, transitionTracks}) => {
   const style = layer.style ?? {};
@@ -41,20 +42,22 @@ export const VisualSpecComposition: React.FC<RemotionPropsWithVisualSpec> = (pro
   const timelineItem = props.timeline.find((item) => frame >= item.start_frame && frame < item.end_frame);
   if (timelineItem?.layout && timelineItem.narrative && timelineItem.resolved_state) {
     const localFrame = frame - timelineItem.start_frame;
-    const boundary = timelineItem.resolved_state.boundary_action;
     const previous = props.timeline[Math.max(0, props.timeline.indexOf(timelineItem) - 1)];
-    const transitionFrames = Math.min(9, timelineItem.duration_frames);
-    const mediaChanged = previous?.resolved_state?.resolved_media_id !== timelineItem.resolved_state.resolved_media_id;
-    const transitionActive = mediaChanged && (boundary === 'accent' || boundary === 'scene_cut') && localFrame < transitionFrames;
-    const progress = interpolate(localFrame, [0, Math.max(1, transitionFrames - 2)], [0, 1], {extrapolateLeft:'clamp',extrapolateRight:'clamp'});
-    const flash = interpolate(localFrame, [0, 2, transitionFrames - 1], [0, boundary === 'scene_cut' ? .75 : .95, 0], {extrapolateLeft:'clamp',extrapolateRight:'clamp'});
-    const incomingMediaStyle: React.CSSProperties = transitionActive ? {opacity: .35 + progress * .65, filter: `blur(${(1 - progress) * (boundary === 'scene_cut' ? 28 : 24)}px)`, transform: boundary === 'scene_cut' ? `scale(1.06, ${1 + (1 - progress) * .12})` : `scale(${1 + (1 - progress) * .12})`, transformOrigin:'center'} : {};
+    const qwenEffect = previous?.transition_effect?.params.template_id === 'qwen3_8' ? previous.transition_effect : undefined;
+    const transitionFrames = Math.min(qwenEffect?.duration_frames ?? 0, timelineItem.duration_frames);
+    const transitionActive = Boolean(qwenEffect) && localFrame < transitionFrames;
+    const progress = transitionActive ? Math.min(1, localFrame / Math.max(1, transitionFrames - 1)) : 1;
+    const qwenState = getQwen38TransitionState(progress, qwenEffect?.params.parameters ?? {});
+    const incomingMediaStyle: React.CSSProperties = transitionActive ? {
+      opacity: qwenState.opacity,
+      filter: qwenState.blurPx === 0 ? 'none' : `blur(${qwenState.blurPx}px)`,
+      transform: qwenState.translateYPct === 0 ? 'none' : `translateY(${qwenState.translateYPct}%)`,
+    } : {};
     return <AbsoluteFill style={{background: props.background_video ? 'transparent' : '#000'}}>
       <BackgroundVideoLayer config={props.background_video} mediaBaseUrl={props.media_base_url} tintColor={(timelineItem.layout as any).background?.color ?? '#101214'}/>
       <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={timelineItem.resolved_state.visibility !== 'hidden'} showMedia={!transitionActive} transparentBackground={Boolean(props.background_video)}/>
-      {transitionActive && previous?.layout && previous.narrative && <SceneLayoutRenderer layout={previous.layout} narrative={previous.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={{opacity:1-progress}} transparentBackground/>}
+      {transitionActive && previous?.layout && previous.narrative && <SceneLayoutRenderer layout={previous.layout} narrative={previous.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} transparentBackground/>}
       {transitionActive && <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={incomingMediaStyle} transparentBackground/>}
-      {transitionActive && <div style={{position:'absolute',left:0,top:655,width:1080,height:610,background:'#fff',opacity:flash,zIndex:10,pointerEvents:'none'}}/>}
       <PersistentTitleRenderer title={props.persistent_title}/>
       <AudioTrack src={`${props.media_base_url ?? ''}/${props.audio.path}`} />
     </AbsoluteFill>;

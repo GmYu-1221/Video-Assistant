@@ -54,3 +54,32 @@ def test_valid_entrance_event_remains_supported():
     ]}]})
     result = create_remotion_creative_plan(plan(creative_intent={"description": "图片进入"}), provider=provider)
     assert result.plans[0].visual_events[0].type == "stretch_reveal"
+
+
+def test_registered_qwen3_8_transition_event_is_validated():
+    provider = Provider({"plans": [{"scene_id": "image-001", "visual_events": [
+        {
+            "type": "template_transition",
+            "phase": "transition",
+            "start_frame": 30,
+            "duration_frames": 24,
+            "source_asset_id": "image-001",
+            "target_asset_id": "image-002",
+            "params": {
+                "template_id": "qwen3_8",
+                "parameters": {
+                    "blur_strength": 0.8,
+                    "float_distance": 0.55,
+                    "recovery_speed": 0.7,
+                    "opacity_start": 0.88,
+                },
+            },
+        },
+    ]}]})
+    result = create_remotion_creative_plan(
+        plan(transition_intent={"description": "柔和高级图片转场"}),
+        provider=provider,
+    )
+    event = result.plans[0].visual_events[0]
+    assert event.type == "template_transition"
+    assert event.params["template_id"] == "qwen3_8"

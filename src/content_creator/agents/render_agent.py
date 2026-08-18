@@ -8,6 +8,35 @@ from content_creator.services.visual_spec_adapter import project_to_visual_spec
 
 logger = logging.getLogger(__name__)
 
+_QWEN_TRANSITION_PARAMS = {
+    "blur_strength": 0.8,
+    "float_distance": 0.55,
+    "recovery_speed": 0.7,
+    "opacity_start": 0.88,
+}
+
+
+def _default_qwen_transition(scene, next_scene) -> TransitionEffectPlanItem | None:
+    """Use the sole production transition when a scene cut has no effect event.
+
+    The legacy ``TransitionConfig`` remains in the serialized schema for old
+    projects, but it must never silently select fade/push/etc. at render time.
+    Very short segments cannot satisfy qwen's minimum duration and therefore
+    use a hard cut instead of reviving a legacy transition.
+    """
+    duration = min(27, scene.duration_frames, next_scene.duration_frames)
+    if duration < 12:
+        return None
+    return TransitionEffectPlanItem(
+        from_asset_id=scene.asset_id,
+        to_asset_id=next_scene.asset_id,
+        type=TransitionEffectType.template_transition,
+        duration_frames=duration,
+        params={"template_id": "qwen3_8", "parameters": dict(_QWEN_TRANSITION_PARAMS)},
+        implementation="new",
+        design={"source": "production_default"},
+    )
+
 def _normalize_transition_event(event: VisualEvent, scene) -> VisualEvent:
     """Keep a validated template event inside the owning scene."""
     duration = min(event.duration_frames, scene.duration_frames)
@@ -78,6 +107,18 @@ def compile_render_plan(project: VideoProject, storyboard, creative_plan: Remoti
         if legacy_transition is None and transition_event and transition_event.type in {item.value for item in TransitionEffectType} and transition_event.target_asset_id:
             legacy_transition = TransitionEffectPlanItem(from_asset_id=transition_event.source_asset_id or scene.asset_id, to_asset_id=transition_event.target_asset_id, type=TransitionEffectType(transition_event.type), duration_frames=transition_event.duration_frames, params=transition_event.params)
         existing = project.timeline[len(timeline)] if len(timeline) < len(project.timeline) else None
+        # qwen3_8 is the only production transition. Do not fall back to the
+        # legacy TransitionConfig (fade/push/whip) when an agent omitted an
+        # effect event for a real scene cut.
+        next_scene = storyboard.scenes[len(timeline) + 1] if len(timeline) + 1 < len(storyboard.scenes) else None
+        if (
+            legacy_transition is None
+            and next_scene is not None
+            and existing is not None
+            and existing.resolved_state is not None
+            and existing.resolved_state.boundary_action.value == "scene_cut"
+        ):
+            legacy_transition = _default_qwen_transition(scene, next_scene)
         if existing and existing.resolved_state and existing.resolved_state.boundary_action.value != "scene_cut":
             events = [event for event in events if event.phase != "transition"]
             legacy_transition = None

@@ -108,7 +108,7 @@ uv run python -m content_creator.main \
 | `--width` / `--height` | 画布尺寸（默认 1920x1080） |
 | `--fps` | 帧率（默认 30） |
 | `--preview` | 预览渲染（较低 scale，更快） |
-| `--transition-mode` | 基线转场选择策略：`random` / `sequential` / `weighted`（默认 `sequential`） |
+| `--transition-mode` | 已废弃的旧转场策略参数；新生产链路只使用 `qwen3_8` 或硬切 |
 | `--style` | 风格预设（见下表） |
 | `--agent-mode` | 启用 LangGraph 工作流编排 Vision、Director、Creative、Render 节点 |
 | `--director` / `--no-director` | 控制 Director Agent（默认自动：有可用 LLM 时启用） |
@@ -117,14 +117,7 @@ uv run python -m content_creator.main \
 
 | 预设 | 基线转场 |
 | --- | --- |
-| `cinematic` | crossfade、black_flash、iris、light_leak |
-| `modern` | fade、crossfade、slide、digital_wipe |
-| `minimal` | fade、crossfade、push |
-| `dynamic` | push、whip、digital_wipe、white_flash |
-| `social_media` | whip、pixel_reveal、white_flash、push |
-| `tech` | glitch、digital_wipe、pixel_reveal、clock_wipe |
-| `news` | push、digital_wipe、crossfade |
-| `documentary` | crossfade、black_flash、iris |
+| 所有风格 | `scene_cut` 使用 `qwen3_8`；`continuous`/`accent` 不运行完整转场 |
 
 输出项目目录：
 
@@ -184,7 +177,7 @@ uv run python -m content_creator.director_chat \
 
 ## 7. Remotion Creative Agent
 
-Creative Agent 将 `DirectorPlan` 中的创意意图转为实现中立的计划，再由 Render Agent 写入 `render_data.json`。当前统一入口为 `create_remotion_creative_plan`：一次性输出 `RemotionCreativePlan`（每个场景的 `visual_events` 列表，事件包含 `entrance` / `camera` / `effect` / `transition` 阶段）。逐边界 `TransitionEffectPlan` 仅保留模板基础数据链路。
+Creative Agent 将 `DirectorPlan` 中的创意意图转为实现中立的计划，再由 Render Agent 写入 `render_data.json`。当前统一入口为 `create_remotion_creative_plan`：一次性输出 `RemotionCreativePlan`（每个场景的 `visual_events` 列表，事件包含 `entrance` / `camera` / `effect` / `transition` 阶段）。逐边界 `TransitionEffectPlan` 目前只允许 `qwen3_8`。
 
 入场/场景动画（注册于 `remotion/src/effects/index.tsx`）：
 
@@ -200,9 +193,9 @@ Creative Agent 将 `DirectorPlan` 中的创意意图转为实现中立的计划�
 | `particle_flip_reveal` | ParticleFlipReveal | 粒子面纱翻转入场 |
 | `creative_reveal` | CreativeReveal | 安全蒙版淡入（LLM 不可用时的默认降级） |
 
-创意转场统一使用 `template_transition`，具体视觉由 `template_id` 指向双端注册的模板。当前正式模板数量为 0，因此 transition intent 不会产生创意转场。LLM 不可用或输出校验失败时，入场使用 `creative_reveal`，转场不做视觉 fallback。效果不改变图片 contain 几何，也不使用 `cover`、裁剪、`scaleX` 或 `scaleY`；效果结束后图片恢复完全静止。
+场景转场统一使用 `template_transition`，具体视觉由 `template_id` 指向双端注册的模板。当前唯一正式模板是 `qwen3_8`。LLM 不可用或输出校验失败时，`scene_cut` 使用确定性的 qwen 参数；镜头不足最小时长时使用硬切。效果不改变图片 contain 几何，也不使用 `cover`、裁剪、`scaleX` 或 `scaleY`；效果结束后图片恢复完全静止。
 
-视觉规格决策（`create_visual_spec_decision`）：由 Remotion Agent 额外选择画面布局（`center_stage` / `fullscreen`）与转场预设（`clean_cut` / `crossfade` / `white_flash` / `flash_zoom_blur`），未决策时使用本地默认。
+视觉规格决策（`create_visual_spec_decision`）：由 Remotion Agent 额外选择画面布局（`center_stage` / `fullscreen`）。场景边界转场不再使用旧的 `crossfade`、`white_flash` 或 `flash_zoom_blur` 预设。
 
 ## 8. Web 文章转视频
 

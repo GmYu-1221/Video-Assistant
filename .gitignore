@@ -1,6 +1,7 @@
 .venv/
 .env
 .pytest_cache/
+.layout_preview_props.json
 __pycache__/
 *.pyc
 .DS_Store

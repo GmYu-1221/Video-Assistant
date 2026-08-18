@@ -7,8 +7,17 @@ from content_creator.prompts.director_prompt import director_prompt
 from content_creator.transitions import TRANSITION_TEMPLATE_REGISTRY, TransitionTemplateDefinition
 
 
-def test_director_exposes_no_transition_when_registry_is_empty():
+def test_director_exposes_qwen3_8_from_production_registry():
     assert DIRECTOR_VISUAL_CAPABILITIES["transition"] == []
+    transitions = director_visual_capabilities()["transition"]
+    assert len(transitions) == 1
+    assert transitions[0]["name"] == "template_transition"
+    assert "模糊" in transitions[0]["description"]
+    assert "qwen3_8" in json.loads(director_capability_guidance())["transition"][0]["id"]
+
+
+def test_director_exposes_no_transition_when_registry_is_empty(monkeypatch):
+    monkeypatch.setattr("content_creator.transitions.template_registry.TRANSITION_TEMPLATE_REGISTRY", {})
     assert director_visual_capabilities()["transition"] == []
     assert json.loads(director_capability_guidance())["transition"] == []
 
@@ -18,13 +27,14 @@ def test_director_capabilities_are_generated_from_registry(monkeypatch):
         id="test_template", description="test only", examples=("test",),
     ))
     transitions = director_visual_capabilities()["transition"]
-    assert transitions[0]["name"] == "template_transition"
-    assert transitions[0]["description"] == "test only"
+    test_template = next(item for item in transitions if item["id"] == "test_template")
+    assert test_template["name"] == "template_transition"
+    assert test_template["description"] == "test only"
 
 
 def test_director_prompt_uses_dynamic_catalog():
     payload = json.loads(director_prompt([], {}, "cinematic", "guidance"))
-    assert payload["available_visual_capabilities"]["transition"] == []
+    assert payload["available_visual_capabilities"]["transition"][0]["id"] == "qwen3_8"
     assert payload["available_visual_capabilities"]["entrance"]
 
 
@@ -35,4 +45,4 @@ def test_director_chat_uses_dynamic_catalog(tmp_path):
         current_plan=None, conversation_history=[],
     )
     payload = json.loads(_chat_prompt(session, "更强烈一点"))
-    assert payload["available_visual_capabilities"]["transition"] == []
+    assert payload["available_visual_capabilities"]["transition"][0]["id"] == "qwen3_8"

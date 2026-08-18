@@ -43,7 +43,7 @@ class DirectorTimelineAction(BaseModel):
     boundary_action: BoundaryAction
     replacement_media_id: str | None = None
     narrative_source_ids: list[str] = Field(default_factory=list)
-    transition: TransitionConfig = Field(default_factory=TransitionConfig)
+    transition: TransitionConfig = Field(default_factory=TransitionConfig, exclude=True)
     reason: str = Field(default="", max_length=500)
 
     @model_validator(mode="after")
@@ -65,7 +65,7 @@ class PartialTimelineItem(BaseModel):
     layout_action: LayoutAction
     boundary_action: BoundaryAction
     narrative_source_ids: list[str] = Field(default_factory=list)
-    transition: TransitionConfig
+    transition: TransitionConfig = Field(exclude=True)
 
 
 class ResolvedTimelineItem(BaseModel):
@@ -82,7 +82,7 @@ class ResolvedTimelineItem(BaseModel):
     requested_layout_action: LayoutAction
     resolved_layout_action: LayoutAction
     override_reason: str | None = None
-    transition: TransitionConfig
+    transition: TransitionConfig = Field(exclude=True)
 
 
 class DirectorTimelineRecord(BaseModel):

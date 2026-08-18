@@ -63,13 +63,13 @@ Creative Agent 读取 `.agents/skills/` 下的项目技能文档，将创意意�
 }
 ```
 
-事件按阶段划分：`entrance`（入场）、`camera`（镜头）、`effect`（效果）、`transition`（场景边界转场）。逐场景的 `AnimationPlan` 与逐边界的 `TransitionEffectPlan` 能力表仍然保留，作为注册能力来源与旧路径兼容。
+事件按阶段划分：`entrance`（入场）、`camera`（镜头）、`effect`（效果）、`transition`（场景边界转场）。逐场景的 `AnimationPlan` 与逐边界的 `TransitionEffectPlan` 能力表仍然保留；场景转场目前只允许 `qwen3_8`。
 
 每条事件都要通过阶段、帧范围、参数范围校验；非法事件被丢弃并记录日志，全部事件非法时回退到安全方案。另有一个独立的视觉规格决策 `create_visual_spec_decision`：选择画面布局（`center_stage` / `fullscreen`）与转场预设（`clean_cut` / `crossfade` / `white_flash` / `flash_zoom_blur`），决策失败时使用本地默认。
 
 ## 5. Remotion 渲染设计
 
-`Composition.tsx` 负责组合 `TransitionSeries.Sequence`、`ImageFrame`、EffectRenderer 和 Audio。`EffectRegistry` 负责把动画名称映射到独立效果组件；Composition 不维护大量动画类型判断。Timeline 末帧决定视频总时长，音频适配到该时长。场景边界按优先级渲染：存在 `transition_effect` 时走 `TransitionEffectRenderer`，否则走基线 `TransitionFactory`，保证 AI 选择的创意转场不会静默回落到基线转场。
+`Composition.tsx` 负责组合 `TransitionSeries.Sequence`、`ImageFrame`、EffectRenderer 和 Audio。`EffectRegistry` 负责把动画名称映射到独立效果组件；Composition 不维护大量动画类型判断。Timeline 末帧决定视频总时长，音频适配到该时长。场景边界存在 qwen `transition_effect` 时走 `TransitionEffectRenderer`，否则直接硬切，不再调用旧转场工厂。
 
 另注册了 `VisualSpec`、`TypographyFontShowcase`、`LayoutPreview` 三个 Composition，用于竖屏视觉规格渲染、字体展示与排版预览。
 
@@ -99,9 +99,9 @@ Creative Agent 读取 `.agents/skills/` 下的项目技能文档，将创意意�
 
 转场意图通过 Python `TransitionConfig`（基线）与 `TransitionEffectPlan`（创意）分别进入 Remotion。动画 Registry 与转场 Registry 分离，两者都不能破坏 contain 规则。
 
-基线转场注册于 `TransitionRegistry`：`fade`、`crossfade`、`black_flash`、`white_flash`、`push`、`whip`、`stretch_whip`、`digital_wipe`、`iris`、`clock_wipe`、`blinds`、`pixel_reveal`、`glitch`、`light_leak`、`slide`、`wipe`、`flip`、`zoom_blur` 等，由风格预设（`PRESETS`）决定可选集合。
+旧的基线转场注册表已经删除，不再由风格预设决定场景边界效果。
 
-创意转场通过 `template_transition` 和双端模板注册表接入。当前正式模板数量为 0；未知、禁用或无可靠选择的模板不会生成创意转场，也不会回退到其它模板。
+场景转场通过 `template_transition` 和双端模板注册表接入。当前唯一正式模板是 `qwen3_8`；未知、禁用或非法模板会被拒绝，无法满足最小时长时使用硬切。
 
 ## 9. 视觉规格与排版系统
 

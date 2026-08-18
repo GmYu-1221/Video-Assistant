@@ -69,7 +69,7 @@ class TimelineItem(BaseModel):
     start_frame: int = Field(ge=0)
     end_frame: int = Field(gt=0)
     duration_frames: int = Field(gt=0)
-    transition: TransitionConfig
+    transition: TransitionConfig = Field(default_factory=TransitionConfig, exclude=True)
     animation: AnimationEffect | None = None
     transition_effect: TransitionEffectPlanItem | None = None
     visual_events: list[VisualEvent] = Field(default_factory=list)
