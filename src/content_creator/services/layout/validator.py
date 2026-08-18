@@ -20,8 +20,10 @@ def validate_scene_layout(spec: SceneLayoutSpec, narrative: SceneNarrative, prof
     if len(ids) != len(set(ids)):
         issues.append(LayoutIssue(code="duplicate_block_id", severity="critical", message="block IDs must be unique"))
     for media in spec.media_blocks:
-        if media.bbox != media.bbox.model_copy(update={"x": 0, "y": 430, "width": 1080, "height": 610}) or media.fit != "contain":
-            issues.append(LayoutIssue(code="media_stage_contract", severity="critical", block_id=media.block_id, message="URL media must use the fixed 1080x610 center stage with contain fit"))
+        if media.bbox != media.bbox.model_copy(update={"x": 0, "y": 655, "width": 1080, "height": 610}) or media.fit != "contain":
+            issues.append(LayoutIssue(code="media_stage_contract", severity="critical", block_id=media.block_id, message="URL media must use the fixed centered 1080x610 stage with contain fit"))
+    if len(spec.text_blocks) != 1:
+        issues.append(LayoutIssue(code="summary_block_count", severity="critical", message="URL scenes must render exactly one summary paragraph"))
     for text in spec.text_blocks:
         if text.bbox.x < SAFE or text.bbox.y < SAFE or text.bbox.x + text.bbox.width > 1080 - SAFE or text.bbox.y + text.bbox.height > 1920 - SAFE:
             issues.append(LayoutIssue(code="unsafe_text_margin", block_id=text.block_id, message="text must remain inside the 60px safe area"))
@@ -42,15 +44,10 @@ def validate_scene_layout(spec: SceneLayoutSpec, narrative: SceneNarrative, prof
             issues.append(LayoutIssue(code="unknown_typography_role", severity="critical", block_id=text.block_id, message="unregistered typography role"))
         if intersects(text.bbox, PERSISTENT_TITLE_BBOX):
             issues.append(LayoutIssue(code="persistent_title_collision", severity="critical", block_id=text.block_id, message="dynamic copy must not overlap the persistent top title"))
-    if narrative.scene_purpose == "opening" and len(narrative.contents) > 1:
-        top = [block for block in spec.text_blocks if block.content_id == narrative.contents[0].content_id and block.bbox.y >= 360 and block.bbox.y + block.bbox.height <= 430]
-        bottom = [block for block in spec.text_blocks if block.content_id == narrative.contents[1].content_id and block.bbox.y >= 1040]
-        if not top or top[0].alignment != "center" or top[0].caption_style_intent.value != "reference_emphasis":
-            issues.append(LayoutIssue(code="opening_summary_hierarchy", severity="critical", message="opening summary must be a centered reference-emphasis line above the media stage"))
-        if not bottom:
-            issues.append(LayoutIssue(code="opening_explanation_missing", severity="critical", message="opening must retain an article-grounded explanation below the media stage"))
-        if any(block.typography_role == TypographyRole.display for block in spec.text_blocks):
-            issues.append(LayoutIssue(code="fabricated_image_headline", severity="critical", message="opening dynamic copy cannot fabricate an additional display headline over the image"))
+        if text.bbox.y < 1265:
+            issues.append(LayoutIssue(code="summary_above_media", severity="critical", block_id=text.block_id, message="summary paragraph must remain below the centered media stage"))
+    if narrative.scene_purpose == "opening" and any(block.typography_role == TypographyRole.display for block in spec.text_blocks):
+        issues.append(LayoutIssue(code="fabricated_image_headline", severity="critical", message="opening dynamic copy cannot fabricate an additional display headline over the image"))
     overlay = {frozenset(pair) for pair in spec.overlay_policy.allowed_pairs}
     for i, left in enumerate(blocks):
         for right in blocks[i + 1:]:

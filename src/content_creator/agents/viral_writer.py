@@ -68,7 +68,7 @@ def _fallback_plan(brief: ArticleBrief, target_count: int) -> ViralCopyPlan:
     if summary_only:
         sources = [brief.summary]
     units: list[ViralCopyUnit] = []
-    desired = min(24, max(1, target_count * 2))
+    desired = min(24, max(1, target_count))
     # Sample across the whole article. A fast reel should cover the opening,
     # representative evidence, and conclusion rather than narrating only the
     # first paragraphs when the model is unavailable.
@@ -133,6 +133,55 @@ def _strip_json(raw: str) -> str:
     return cleaned.strip()
 
 
+def _normalize_agent_payload(payload: dict) -> dict:
+    """Repair harmless reference-shape errors without changing copy facts."""
+    units = payload.get("content_units")
+    if not isinstance(units, list):
+        return payload
+    normalized = []
+    seen_semantic: set[str] = set()
+    seen_content: set[str] = set()
+    for index, raw_unit in enumerate(units):
+        if not isinstance(raw_unit, dict):
+            normalized.append(raw_unit)
+            continue
+        unit = dict(raw_unit)
+        semantic_id = str(unit.get("semantic_unit_id", "")).strip()
+        content_id = str(unit.get("content_id", "")).strip()
+        if not semantic_id or semantic_id in seen_semantic:
+            semantic_id = f"viral-unit-{index:03d}"
+        if not content_id or content_id in seen_content:
+            content_id = f"viral-content-{index:03d}"
+        unit["semantic_unit_id"] = semantic_id
+        unit["content_id"] = content_id
+        seen_semantic.add(semantic_id)
+        seen_content.add(content_id)
+        indices = unit.get("source_paragraph_indices", [])
+        if isinstance(indices, list):
+            unit["source_paragraph_indices"] = list(dict.fromkeys(indices))[:8]
+        normalized.append(unit)
+    return {**payload, "content_units": normalized}
+
+
+def _select_scene_units(units: list[ViralCopyUnit], target_count: int) -> list[ViralCopyUnit]:
+    target = max(1, min(target_count, len(units)))
+    if len(units) <= target:
+        selected = list(units)
+    elif target == 1:
+        selected = [next((unit for unit in units if unit.purpose == "opening"), units[0])]
+    else:
+        opening = next((unit for unit in units if unit.purpose == "opening"), units[0])
+        conclusion = next((unit for unit in reversed(units) if unit.purpose == "conclusion" and unit is not opening), units[-1])
+        middle = [unit for unit in units if unit is not opening and unit is not conclusion]
+        needed = target - 2
+        if needed and len(middle) > needed:
+            positions = [round(index * (len(middle) - 1) / max(1, needed - 1)) for index in range(needed)]
+            middle = [middle[position] for position in dict.fromkeys(positions)]
+            middle += [unit for unit in units if unit is not opening and unit is not conclusion and unit not in middle][:needed - len(middle)]
+        selected = [opening, *middle[:needed], conclusion]
+    return [unit.model_copy(update={"purpose": "opening" if index == 0 else "conclusion" if index == len(selected) - 1 else unit.purpose}) for index, unit in enumerate(selected)]
+
+
 def _validate_and_normalize(plan: ViralCopyPlan, brief: ArticleBrief, target_count: int) -> ViralCopyPlan:
     paragraphs = article_sentences(brief.text)
     source_article_hash = sha256(brief.text.encode("utf-8")).hexdigest()
@@ -142,7 +191,7 @@ def _validate_and_normalize(plan: ViralCopyPlan, brief: ArticleBrief, target_cou
         raise ValueError("Viral Writer returned an English explanatory title")
     if validate_localized_display_text([value for unit in plan.content_units for value in (unit.full, unit.short, unit.micro)]):
         raise ValueError("Viral Writer returned English explanatory copy")
-    minimum_units = min(24, max(1, target_count * 2))
+    minimum_units = min(24, max(1, target_count))
     if len(plan.content_units) < minimum_units:
         raise ValueError(f"Viral Writer returned too few semantic units: {len(plan.content_units)}/{minimum_units}")
     normalized_units: list[ViralCopyUnit] = []
@@ -162,7 +211,7 @@ def _validate_and_normalize(plan: ViralCopyPlan, brief: ArticleBrief, target_cou
     return plan.model_copy(update={
         "selected_title_id": selected.candidate_id,
         "final_title": selected.text,
-        "content_units": normalized_units,
+        "content_units": _select_scene_units(normalized_units, target_count),
     })
 
 
@@ -179,16 +228,17 @@ def create_viral_copy_plan(brief: ArticleBrief, image_tags: list[ImageTag], targ
         return fallback, diagnostics | {"mode": "deterministic_fallback"}
     paragraphs = article_sentences(brief.text)
     prompt = json.dumps({
-        "task": "使用 Viral Writer 的 11 个洞见维度，为 URL 竖屏短视频生成简体中文标题候选和冻结正文语义单元。只返回符合 schema 的 JSON。不要提问、保存 Markdown、生成配图建议或执行文件操作。采用快节奏剪辑：只保留核心观点、关键证据和结论，删除重复观点和次要章节，覆盖文章首尾及有代表性的中段，不要为了数量复制素材或文案。允许金句、类比、情绪和互动钩子；禁止虚构数字、人物、产品能力、案例或外部事实。普通英文说明必须翻译成中文，技术名、代码、命令和 URL 可保留。full/short/micro 必须是同一语义且长度严格递减，优先让 short/micro 在约 3.5 秒内可读。包含数字、URL 或可验证事实的单元必须列出支持它的 source_paragraph_indices。",
+        "task": "使用 Viral Writer 的 11 个洞见维度，为 URL 竖屏短视频生成简体中文标题候选和逐幕总结。只返回符合 schema 的 JSON。每一幕只生成一个 content unit，它必须是一段逻辑完整、自然、可朗读的中文总结，不得输出章节标题、目录项、步骤残片、冒号结尾或半句话。只保留核心观点、关键证据和结论，覆盖文章首尾及有代表性的中段。允许自然重组原文，但禁止虚构数字、人物、产品能力、案例或外部事实。普通英文说明必须翻译成中文，技术名、代码、命令和 URL 可保留。full/short/micro 必须属于同一语义并以完整句子结束；short 建议 28-55 个中文字符，micro 建议 18-32 个中文字符。包含数字、URL 或可验证事实的单元必须列出支持它的 source_paragraph_indices，每个单元最多 8 个索引。",
         "platform": "抖音短视频", "target_audience": "根据主题推断", "target_segment_count": target_count,
         "article": {"title": brief.title, "summary": brief.summary, "topics": brief.topics, "mood": brief.mood, "paragraphs": [{"source_index": index, "text": text} for index, text in enumerate(paragraphs)]},
         "image_semantics": [{"image_id": tag.image_id, "role": tag.role.value, "topics": tag.topics, "entities": tag.entities, "headline_text": tag.embedded_headline_text, "headline_title_match_score": tag.headline_title_match_score} for tag in image_tags],
-        "requirements": {"title_candidates": 5, "content_units_min": min(24, max(1, target_count * 2)), "content_units_max": min(24, max(2, target_count * 2)), "source_article_hash": fallback.source_article_hash},
+        "requirements": {"title_candidates": 5, "content_units_min": target_count, "content_units_max": target_count, "one_summary_paragraph_per_scene": True, "source_article_hash": fallback.source_article_hash},
         "output_schema": ViralCopyPlan.model_json_schema(),
         "viral_writer_skill": load_viral_writer_skill(),
     }, ensure_ascii=False)
     try:
-        candidate = ViralCopyPlan.model_validate(json.loads(_strip_json(provider.complete_json(prompt))))
+        payload = _normalize_agent_payload(json.loads(_strip_json(provider.complete_json(prompt))))
+        candidate = ViralCopyPlan.model_validate(payload)
         candidate = _validate_and_normalize(candidate, brief, target_count)
         return candidate, diagnostics | {"mode": "model_success"}
     except Exception as exc:

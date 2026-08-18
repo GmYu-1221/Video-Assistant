@@ -27,12 +27,39 @@ def article_sentences(text: str) -> list[str]:
     return [part for part in parts if len(part) >= 12 and not any(token in part for token in boilerplate) and not any(token in part for token in ui_tokens)]
 
 
-def _prefix_at_boundary(text: str, target: int) -> str:
+_PUNCT = r"[，、；：。！？,.!?;:]"
+
+
+def _cut_with_ellipsis(text: str, index: int) -> str:
+    """Cut at index, drop trailing Chinese punctuation/spaces, and mark the omission.
+
+    English sentence punctuation is intentionally preserved so downstream
+    language validation can still flag an English-only fragment.
+    """
+    return text[:index].rstrip(" ，、；：。！？") + "…"
+
+
+def _prefix_at_boundary(text: str, target: int, hard_limit: int | None = None) -> str:
     if len(text) <= target:
         return text
-    floor = max(8, target // 2)
-    positions = [match.end() for match in re.finditer(r"[，、；：。！？,.!?;:]|\s+", text[:target]) if match.end() >= floor]
-    return text[:positions[-1] if positions else target].strip()
+    window = text[:target]
+    # Prefer the last sentence punctuation inside the window.
+    puncts = [match.end() for match in re.finditer(_PUNCT, window) if match.end() >= max(4, target // 2)]
+    if puncts:
+        return _cut_with_ellipsis(text, puncts[-1])
+    # Otherwise fall back to the last space inside the window.
+    spaces = [match.end() for match in re.finditer(r"\s+", window) if match.end() >= 3]
+    if spaces:
+        return _cut_with_ellipsis(text, spaces[-1])
+    # No safe boundary in the window: extend past target to the next
+    # punctuation/space instead of slicing a word in half.
+    following = re.search(rf"{_PUNCT}|\s+", text[target:])
+    if following and (hard_limit is None or target + following.end() < hard_limit):
+        cut = target + following.end()
+        if cut < len(text):
+            return _cut_with_ellipsis(text, cut)
+    cut = min(target, hard_limit - 1) if hard_limit is not None else target
+    return _cut_with_ellipsis(text, cut)
 
 
 def build_variants(text: str) -> tuple[str, str, str] | None:
@@ -42,10 +69,10 @@ def build_variants(text: str) -> tuple[str, str, str] | None:
     short_target = min(400, max(10, int(len(clean) * .7)))
     micro_target = min(180, max(8, int(len(clean) * .4)))
     short = _prefix_at_boundary(clean, short_target)
-    micro = _prefix_at_boundary(clean, min(micro_target, len(short) - 1))
-    if not (len(clean) > len(short) > len(micro) >= 8):
-        short = clean[:max(9, min(len(clean) - 1, short_target))].strip()
-        micro = short[:max(8, min(len(short) - 1, micro_target))].strip()
+    micro = _prefix_at_boundary(clean, min(micro_target, len(short) - 1), hard_limit=len(short))
+    if not (len(clean) > len(short) > len(micro) >= 4):
+        short = _cut_with_ellipsis(clean, max(9, min(len(clean) - 1, short_target)))
+        micro = _cut_with_ellipsis(clean, max(4, min(len(short) - 1, micro_target)))
     if not (len(clean) > len(short) > len(micro)):
         return None
     return clean, short, micro

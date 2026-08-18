@@ -45,7 +45,7 @@ def create_layout_plan(items: list[tuple[SceneNarrative, ImageSemanticProfile | 
     if provider.model_name == "mock":
         return fallback, diagnostics
     prompt = json.dumps({
-        "task": "Design dynamic Chinese subtitle typography for a mobile video. This is a fast-paced 15-28 second reel: prefer short/micro variants that can be read within about 3.5 seconds and avoid stuffing multiple long paragraphs into one scene. The fixed yellow outlined article title occupies x=60,y=80,width=960,height=280 and must never be covered, repeated, moved, or rewritten. Return only JSON LayoutPlan. Select concrete font_id values only from font_registry. Keep every media block exactly x=0,y=430,width=1080,height=610,fit=contain. If the opening has two frozen contents, place the first as one centered white reference_emphasis summary line in y=360..430 and the second as a centered explanatory block below y=1040. The prominent display headline must come from the selected image pixels; never create an extra display text block for it. Later scenes use explanatory or minimal styling with reduced decoration. You may choose only registered outline, shadow, emphasis_color, letter_spacing, and caption_style_intent tokens from the schema. When copy_density_intent is increase, every frozen content_id is required outside the protected title and media regions. Use at most two font IDs across the video. No English explanatory copy, CSS, font paths, new copy, media changes or transition changes.",
+        "task": "Design Chinese subtitle typography for a mobile video. Every scene has exactly one Agent-authored summary paragraph. Render it as one coherent text block entirely below the centered media stage, normally within x=80,y=1335,width=920,height=465. Do not split it into a headline above and an explanation below, and do not create a second support block. Prefer the complete short variant for the fast 15-28 second reel. The fixed yellow article title occupies x=60,y=80,width=960,height=280 and must never be covered, repeated, moved, or rewritten. Keep every media block exactly x=0,y=655,width=1080,height=610,fit=contain so the primary media is vertically centered while the background video fills the canvas. Return only JSON LayoutPlan, use registered font IDs and at most two fonts. No English explanatory copy, CSS, font paths, new copy, media changes or transition changes.",
         "canvas": [1080, 1920], "global_style": global_style,
         "font_registry": [font for font in public_font_metadata() if font["id"] in palette], "locked_font_palette": palette, "preference_memory": preferences or {},
         "article_context": context or {}, "revision_feedback": feedback_reason,
@@ -66,11 +66,10 @@ def create_layout_plan(items: list[tuple[SceneNarrative, ImageSemanticProfile | 
         hard_issues = []
         for scene in candidate.scenes:
             narrative, profile = item_by_scene[scene.scene_id]
-            if len(narrative.contents) > 1:
-                required = {content.content_id for content in narrative.contents}
-                selected = {block.content_id for block in scene.text_blocks}
-                if not required.issubset(selected):
-                    raise ValueError("layout response omitted required localized content blocks")
+            if len(scene.text_blocks) != 1:
+                raise ValueError("layout response must render exactly one summary paragraph per scene")
+            if scene.text_blocks[0].bbox.y < 1265:
+                raise ValueError("summary paragraph must remain below the centered media stage")
             hard_issues.extend(validate_scene_layout(scene, narrative, profile))
         if hard_issues:
             raise ValueError("layout response failed deterministic validation: " + ",".join(sorted({issue.code for issue in hard_issues})))

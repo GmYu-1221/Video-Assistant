@@ -25,9 +25,9 @@ def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None,
     dense = bool(profile and (profile.contains_text or profile.is_screenshot or profile.is_data_chart))
     # URL video contract: media geometry is fixed. Layout freedom belongs to
     # typography only, and `contain` guarantees that the full image is visible.
-    media_bbox = Rect(x=0, y=430, width=1080, height=610)
+    media_bbox = Rect(x=0, y=655, width=1080, height=610)
     first = narrative.contents[0]
-    text_role = TypographyRole.caption if dense else TypographyRole.headline
+    text_role = TypographyRole.caption if dense else TypographyRole.body
     palette = font_palette or [DEFAULT_FONT_ID]
     preferred_font = palette[-1] if text_role in {TypographyRole.display, TypographyRole.headline, TypographyRole.quote} else palette[0]
     try:
@@ -38,33 +38,15 @@ def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None,
             validate_font_for_role(preferred_font, text_role.value)
         except ValueError:
             preferred_font = DEFAULT_FONT_ID
-    purpose = narrative.scene_purpose
-    is_opening = purpose == "opening"
-    if purpose in {"explanation", "conclusion", "quote"}:
-        text_bbox = Rect(x=80, y=1120, width=920, height=420 if dense else 300)
-    else:
-        text_bbox = Rect(x=80, y=1120, width=920, height=300)
-    first_variant = ContentVariant.micro if copy_density_intent == CopyDensityIntent.reduce or fast_pace else ContentVariant.short if len(narrative.contents) > 1 or dense else ContentVariant.micro
-    opening_has_support = is_opening and len(narrative.contents) > 1 and copy_density_intent != CopyDensityIntent.reduce
-    if opening_has_support:
-        first_variant = ContentVariant.micro
-        primary_bbox = Rect(x=80, y=366, width=920, height=56)
-        primary_role = TypographyRole.metadata
-        primary_lines = 1
-        primary_alignment = "center"
-        primary_color = "#FFFFFF"
-        primary_outline = TextOutline.dark_thin
-        primary_shadow = TextShadow.soft
-        primary_intent = CaptionStyleIntent.reference_emphasis
-    else:
-        primary_bbox = text_bbox if len(narrative.contents) == 1 else Rect(x=80, y=1100, width=920, height=250)
-        primary_role = text_role
-        primary_lines = 3 if dense or len(narrative.contents) > 1 else 2
-        primary_alignment = "center"
-        primary_color = "#DCE74A" if not is_opening else "#FFFFFF"
-        primary_outline = TextOutline.dark_thin if not is_opening else TextOutline.none
-        primary_shadow = TextShadow.soft
-        primary_intent = CaptionStyleIntent.explanatory if not is_opening else CaptionStyleIntent.reference_emphasis
+    first_variant = ContentVariant.micro if copy_density_intent == CopyDensityIntent.reduce else ContentVariant.short if fast_pace else ContentVariant.full
+    primary_bbox = Rect(x=80, y=1335, width=920, height=465)
+    primary_role = text_role
+    primary_lines = 6 if dense else 5
+    primary_alignment = "left"
+    primary_color = "#FFFFFF"
+    primary_outline = TextOutline.none
+    primary_shadow = TextShadow.soft
+    primary_intent = CaptionStyleIntent.explanatory
     try:
         validate_font_for_role(preferred_font, primary_role.value)
     except ValueError:
@@ -73,17 +55,7 @@ def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None,
             validate_font_for_role(preferred_font, primary_role.value)
         except ValueError:
             preferred_font = DEFAULT_FONT_ID
-    text_blocks = [TextBlock(block_id="primary-copy", content_id=first.content_id, semantic_unit_id=first.semantic_unit_id, variant_id=first_variant, content_hash=first.content_hash(first_variant), bbox=primary_bbox, alignment=primary_alignment, typography_role=primary_role, font_id=preferred_font, style_intent=StyleIntent.readable_serif if global_style == "editorial" else StyleIntent.modern_sans, weight="bold", color=primary_color, max_lines=primary_lines, outline=primary_outline, shadow=primary_shadow, emphasis_color="#DCE74A", caption_style_intent=primary_intent)]
-    if len(narrative.contents) > 1 and copy_density_intent != CopyDensityIntent.reduce:
-        support = narrative.contents[1]
-        support_font = palette[0]
-        try:
-            validate_font_for_role(support_font, TypographyRole.body.value)
-        except ValueError:
-            support_font = DEFAULT_FONT_ID
-        support_variant = ContentVariant.short if fast_pace else ContentVariant.full
-        support_bbox = Rect(x=80, y=1110, width=920, height=690) if is_opening else Rect(x=80, y=1390, width=920, height=450)
-        text_blocks.append(TextBlock(block_id="support-copy", content_id=support.content_id, semantic_unit_id=support.semantic_unit_id, variant_id=support_variant, content_hash=support.content_hash(support_variant), bbox=support_bbox, alignment="center" if is_opening else "left", typography_role=TypographyRole.body, font_id=support_font, style_intent=StyleIntent.readable_serif if global_style == "editorial" else StyleIntent.modern_sans, weight="regular", color="#FFFFFF", max_lines=8, shadow=TextShadow.soft, caption_style_intent=CaptionStyleIntent.reference_emphasis if is_opening else CaptionStyleIntent.explanatory))
+    text_blocks = [TextBlock(block_id="primary-copy", content_id=first.content_id, semantic_unit_id=first.semantic_unit_id, variant_id=first_variant, content_hash=first.content_hash(first_variant), bbox=primary_bbox, alignment=primary_alignment, typography_role=primary_role, font_id=preferred_font, style_intent=StyleIntent.readable_serif if global_style == "editorial" else StyleIntent.modern_sans, weight="regular", color=primary_color, max_lines=primary_lines, outline=primary_outline, shadow=primary_shadow, emphasis_color="#DCE74A", caption_style_intent=primary_intent)]
     return SceneLayoutSpec(
         layout_id=f"layout-{narrative.scene_id}",
         scene_id=narrative.scene_id,

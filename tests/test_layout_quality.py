@@ -18,7 +18,7 @@ def test_solver_uses_immutable_content_hash_and_no_default_overlay():
     narrative = _narrative()
     scene = solve_scene(narrative, ImageSemanticProfile())
     assert not validate_scene_layout(scene, narrative, ImageSemanticProfile())
-    assert scene.media_blocks[0].bbox.model_dump() == {"x": 0, "y": 430, "width": 1080, "height": 610}
+    assert scene.media_blocks[0].bbox.model_dump() == {"x": 0, "y": 655, "width": 1080, "height": 610}
     assert scene.media_blocks[0].fit == "contain"
     assert scene.text_blocks[0].content_hash == narrative.contents[0].content_hash(scene.text_blocks[0].variant_id)
 
@@ -93,18 +93,17 @@ def test_persistent_title_selection_falls_back_after_chromium_overflow(monkeypat
     assert attempts[0]["issues"] == ["rendered_overflow"]
 
 
-def test_opening_uses_reference_hierarchy_without_display_overlay():
+def test_opening_uses_one_summary_paragraph_below_media():
     summary = NarrativeContent(semantic_unit_id="summary", content_id="summary", full="这是文章摘要说明", short="文章摘要说明", micro="摘要说明")
     body = NarrativeContent(semantic_unit_id="body", content_id="body", full="这是来自文章正文的完整中文解释。", short="来自正文的中文解释。", micro="中文解释")
     narrative = SceneNarrative(copy_id="opening", scene_id="opening", asset_id="image", scene_purpose="opening", contents=[summary, body])
     layout = solve_scene(narrative, ImageSemanticProfile(contains_prominent_headline=True, headline_analysis_status="verified"))
-    top, bottom = layout.text_blocks
-    assert top.bbox.y >= 360 and top.bbox.y + top.bbox.height <= 430
-    assert top.alignment == "center"
-    assert top.caption_style_intent == CaptionStyleIntent.reference_emphasis
-    assert bottom.bbox.y >= 1040 and bottom.alignment == "center"
-    assert bottom.variant_id == ContentVariant.full
-    assert all(block.typography_role != TypographyRole.display for block in layout.text_blocks)
+    assert len(layout.text_blocks) == 1
+    paragraph = layout.text_blocks[0]
+    assert paragraph.bbox.y >= 1265
+    assert paragraph.alignment == "left"
+    assert paragraph.caption_style_intent == CaptionStyleIntent.explanatory
+    assert paragraph.typography_role != TypographyRole.display
     assert not validate_scene_layout(layout, narrative, ImageSemanticProfile(contains_prominent_headline=True, headline_analysis_status="verified"))
 
 

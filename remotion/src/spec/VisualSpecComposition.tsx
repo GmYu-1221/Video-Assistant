@@ -54,7 +54,7 @@ export const VisualSpecComposition: React.FC<RemotionPropsWithVisualSpec> = (pro
       <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={timelineItem.resolved_state.visibility !== 'hidden'} showMedia={!transitionActive} transparentBackground={Boolean(props.background_video)}/>
       {transitionActive && previous?.layout && previous.narrative && <SceneLayoutRenderer layout={previous.layout} narrative={previous.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={{opacity:1-progress}} transparentBackground/>}
       {transitionActive && <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={incomingMediaStyle} transparentBackground/>}
-      {transitionActive && <div style={{position:'absolute',left:0,top:430,width:1080,height:610,background:'#fff',opacity:flash,zIndex:10,pointerEvents:'none'}}/>}
+      {transitionActive && <div style={{position:'absolute',left:0,top:655,width:1080,height:610,background:'#fff',opacity:flash,zIndex:10,pointerEvents:'none'}}/>}
       <PersistentTitleRenderer title={props.persistent_title}/>
       <AudioTrack src={`${props.media_base_url ?? ''}/${props.audio.path}`} />
     </AbsoluteFill>;

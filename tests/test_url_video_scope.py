@@ -35,7 +35,7 @@ def _bundle(segment_count: int, characters: int, density: float = .35):
         )
         layout = SceneLayoutSpec(
             layout_id=f"layout-{index}", scene_id=f"scene-{index}", background=BackgroundTreatment(),
-            media_blocks=[MediaBlock(block_id="media", asset_id=media_id, bbox=Rect(x=0, y=430, width=1080, height=610), fit="contain")],
+            media_blocks=[MediaBlock(block_id="media", asset_id=media_id, bbox=Rect(x=0, y=655, width=1080, height=610), fit="contain")],
             text_blocks=[block], overlay_policy=OverlayPolicy(),
         )
         transition = TransitionConfig(duration_frames=6)

@@ -136,7 +136,7 @@ def validate_rendered_persistent_title(title: PersistentTitleSpec, remotion_publ
         layout_id="persistent-title-audit",
         scene_id="persistent-title",
         background=BackgroundTreatment(),
-        media_blocks=[MediaBlock(block_id="media", asset_id="persistent-title-placeholder", bbox=Rect(x=0, y=430, width=1080, height=610), fit="contain")],
+        media_blocks=[MediaBlock(block_id="media", asset_id="persistent-title-placeholder", bbox=Rect(x=0, y=655, width=1080, height=610), fit="contain")],
         text_blocks=[block],
         overlay_policy=OverlayPolicy(),
     )

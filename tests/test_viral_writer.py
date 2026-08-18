@@ -99,7 +99,7 @@ def test_model_plan_is_selected_and_frozen_without_rewriting(monkeypatch):
         body=article.text, summary=article.summary, copy_plan=plan,
     )
     contents = bundle.segment_narratives["segment-000"].contents
-    assert [item.semantic_unit_id for item in contents] == ["viral-opening", "viral-explanation"]
+    assert [item.semantic_unit_id for item in contents] == ["viral-opening"]
     assert contents[0].full == plan.content_units[0].full
     assert contents[0].source_hash == plan.content_units[0].source_hash
 

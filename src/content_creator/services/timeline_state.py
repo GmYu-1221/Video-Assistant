@@ -135,10 +135,10 @@ def _freeze_viral_narratives(partial: list[PartialTimelineItem], plan: ViralCopy
             else:
                 preferred += [unit for unit in unused if unit.purpose in {"explanation", "evidence"} and unit not in preferred]
             preferred += [unit for unit in unused if unit not in preferred]
-            # Reserve at least one immutable semantic unit for every later
-            # copy replacement. Rich sources still receive two text levels.
-            available_for_current = len(unused) - max(0, remaining_replacements - 1)
-            selected = preferred[:2 if available_for_current >= 2 else 1]
+            # URL reels use one Agent-authored summary paragraph per segment.
+            # Typography may style that paragraph, but must not split the idea
+            # into unrelated headline and support fragments.
+            selected = preferred[:1]
             if not selected:
                 raise ValueError("Viral Writer copy plan has no unused semantic unit")
             contents = [NarrativeContent(
@@ -183,9 +183,7 @@ def freeze_narratives(partial: list[PartialTimelineItem], *, title: str, body: s
     for index, item in enumerate(partial):
         if item.copy_action == CopyAction.replace:
             purpose = item.scene_purpose or ("opening" if index == 0 else "conclusion" if index == len(partial) - 1 else "evidence")
-            # Freeze two independent, article-grounded semantic units whenever
-            # the source has enough text. The layout solver can then create a
-            # title/explanation hierarchy instead of repeating one short line.
+            # Fallback keeps one complete article-grounded statement per scene.
             sources: list[tuple[str, str, int | None]] = []
             if purpose == "opening":
                 if summary:
@@ -199,7 +197,7 @@ def freeze_narratives(partial: list[PartialTimelineItem], *, title: str, body: s
             else:
                 while sentence_cursor < len(sentences) and re.sub(r"\s+", " ", sentences[sentence_cursor]).strip() in used_sources:
                     sentence_cursor += 1
-                for offset in range(2):
+                for offset in range(1):
                     source_index = sentence_cursor + offset
                     if source_index < len(sentences):
                         sources.append((sentences[source_index], "body", source_index))
@@ -207,7 +205,7 @@ def freeze_narratives(partial: list[PartialTimelineItem], *, title: str, body: s
             if not sources:
                 sources = [(summary or body or title, "summary" if summary else "body", None)]
             contents: list[NarrativeContent] = []
-            for content_index, (source, source_kind, source_index) in enumerate(sources[:2]):
+            for content_index, (source, source_kind, source_index) in enumerate(sources[:1]):
                 normalized_source = re.sub(r"\s+", " ", source).strip()
                 if normalized_source in used_sources and len(sources) > 1:
                     continue
