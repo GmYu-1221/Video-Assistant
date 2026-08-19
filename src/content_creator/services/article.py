@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from difflib import SequenceMatcher
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
 
@@ -21,7 +22,7 @@ import trafilatura
 from bs4 import BeautifulSoup
 from PIL import Image, ImageOps
 
-from content_creator.schemas import ArticleBrief, ArticleExtractionResult, ArticleImage, ArticleTextCandidate, AssetCandidate, AssetDecision, AssetKind, CandidatePreview, ImageRole, ImageTag, TransitionContext, TransitionRelation, VideoCopy
+from content_creator.schemas import ArticleBrief, ArticleExtractionResult, ArticleImage, ArticleTextCandidate, AssetCandidate, AssetDecision, AssetKind, CandidatePreview, CandidateVisualProfile, ImageRole, ImageTag, TransitionContext, TransitionRelation, VideoCopy
 from content_creator.services.llm.router import get_agent_provider
 
 MAX_HTML_BYTES = 5_000_000
@@ -30,6 +31,10 @@ MAX_REDIRECTS = 5
 MIN_IMAGE_EDGE = 180
 MIN_IMAGE_PIXELS = 100_000
 SCREENSHOT_SIZE = (1280, 720)
+ARTICLE_SCREENSHOT_LIMIT = 1
+CANDIDATE_THUMBNAIL_LIMIT = 24
+CANDIDATE_THUMBNAIL_EDGE = 512
+CANDIDATE_VISION_BATCH_SIZE = 6
 logger = logging.getLogger(__name__)
 _SRCSET_PART = re.compile(r"^\s*(\S+)(?:\s+(\d+(?:\.\d+)?)([wx]))?")
 _DIRECT_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov"}
@@ -37,6 +42,19 @@ _IMAGE_EXTENSIONS = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
 _UI_TOKEN = re.compile(r"(?:^|[-_/.])(icons?|avatar|logo|wordmark|button|badge|lock|protection|toolbar|tobar|heart|thumb|collect|comment|share|wechat|weixin|alipay|pay|reward|vip|close|coupon|follow|like|unlike)(?:[-_/.]|$)", re.I)
 _UI_SUBSTRING = re.compile(r"(?:toolbar|tobar|heart|thumb|collect|comment|share|wechat|weixin|alipay|reward|vip|coupon|follow|like|unlike|identityvip|identity|readcount|pay-help|guide-red)", re.I)
 _UI_TEXT_TOKEN = re.compile(r"(?:用户.{0,12}主页|个人主页|头像|profile picture|author avatar)", re.I)
+_QR_TOKEN = re.compile(
+    r"(?:^|[-_/.])(?:qr|qrcode|qr-code|barcode|share[-_]?code|scan[-_]?code|"
+    r"new_qr_img|qrcode_img|qrcode_image)(?:[-_/.?]|$)", re.I,
+)
+_QR_TEXT_TOKEN = re.compile(r"(?:二维码|扫描二维码|扫码下载|分享码|下载码|scan\s*(?:this\s*)?code)", re.I)
+_PARTNER_UI_TOKEN = re.compile(
+    r"(?:合作伙伴|合作品牌|友情链接|广告|app\s*下载|下载客户端|copyright|powered\s*by|"
+    r"阿里云|火山引擎|高德|个推|partner|sponsor|footer)", re.I,
+)
+_EDITORIAL_SIGNAL = re.compile(
+    r"(?:图表|数据|趋势|营收|销量|报告|统计|架构|流程|示意|产品|界面|代码|"
+    r"chart|diagram|dashboard|screenshot|interface|architecture|workflow|data|trend)", re.I,
+)
 _ARTICLE_UI_PHRASES = {
     "notifications", "notification settings", "fork", "star", "code", "issues",
     "pull requests", "actions", "projects", "security and quality", "insights",
@@ -562,6 +580,14 @@ def capture_article_screenshots(source_url: str, project_dir: str | Path, start_
     allow the original HTTP fetch but reject Chromium with a 403, so screenshot
     fallback renders the trusted extraction result locally instead.
     """
+    requested_count = count
+    count = min(count, ARTICLE_SCREENSHOT_LIMIT)
+    if diagnostics is not None:
+        diagnostics.setdefault("screenshot_fallback", {}).update({
+            "requested_count": requested_count,
+            "allowed_count": max(0, count),
+            "screenshot_limit": ARTICLE_SCREENSHOT_LIMIT,
+        })
     if count <= 0:
         return []
     if not chromium_available():
@@ -653,13 +679,18 @@ def capture_article_screenshots(source_url: str, project_dir: str | Path, start_
             if len(result) < count:
                 if diagnostics is not None:
                     diagnostics["screenshot_fallback"].update({
-                        "requested_count": count,
                         "generated_count": len(result),
-                        "shortfall": count - len(result),
+                        "shortfall": max(0, requested_count - len(result)),
                         "reduction_reason": "duplicate_or_insufficient_article_regions",
                     })
                 if not result:
                     raise ValueError(f"正文截图内容重复，尝试 {len(anchors)} 个段落位置后未生成可用截图")
+            elif diagnostics is not None:
+                diagnostics["screenshot_fallback"].update({
+                    "generated_count": len(result),
+                    "shortfall": max(0, requested_count - len(result)),
+                    **({"reduction_reason": "screenshot_limit_reached"} if requested_count > count else {}),
+                })
             return result
     except Exception as exc:
         raise ValueError(f"本地正文截图失败：{exc}") from exc
@@ -878,7 +909,7 @@ def discover_asset_candidates(soup: BeautifulSoup, brief: ArticleBrief) -> tuple
 
 
 def basic_asset_filter(candidates: list[AssetCandidate], diagnostics: dict) -> list[AssetCandidate]:
-    reasons = {"size": 0, "mime": 0, "icon_avatar_logo": 0, "format": 0, "other": 0}
+    reasons = {"size": 0, "mime": 0, "icon_avatar_logo": 0, "qr_code": 0, "format": 0, "other": 0}
     rejected: list[dict] = []
     kept: list[AssetCandidate] = []
     for candidate in candidates:
@@ -887,6 +918,13 @@ def basic_asset_filter(candidates: list[AssetCandidate], diagnostics: dict) -> l
         suffix = Path(parsed.path).suffix.lower()
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             reason = "other"
+        elif candidate.kind == AssetKind.image and (
+            _QR_TOKEN.search(f"{parsed.path} {parsed.query}")
+            or _QR_TEXT_TOKEN.search(f"{candidate.alt} {candidate.caption}")
+        ):
+            reason = "qr_code"
+        elif candidate.kind == AssetKind.image and _PARTNER_UI_TOKEN.search(f"{candidate.alt} {candidate.caption} {candidate.nearby_text}"):
+            reason = "icon_avatar_logo"
         elif candidate.kind == AssetKind.image and (_UI_TOKEN.search(f"{parsed.path} {candidate.alt}") or _UI_SUBSTRING.search(f"{parsed.path} {candidate.alt} {candidate.caption}") or _UI_TEXT_TOKEN.search(f"{candidate.alt} {candidate.caption}")):
             reason = "icon_avatar_logo"
         elif candidate.kind == AssetKind.video and suffix and suffix not in _DIRECT_VIDEO_EXTENSIONS:
@@ -902,11 +940,164 @@ def basic_asset_filter(candidates: list[AssetCandidate], diagnostics: dict) -> l
     return kept
 
 
+def _looks_like_qr_code(path: str | Path) -> bool:
+    """Detect three stable QR finder patterns without an optional CV dependency."""
+    with Image.open(path).convert("L") as source:
+        source.thumbnail((600, 600), Image.Resampling.LANCZOS)
+        width, height = source.size
+        pixels = source.load()
+
+        def runs(values: list[bool]) -> list[tuple[bool, int, int]]:
+            output: list[tuple[bool, int, int]] = []
+            start, current = 0, values[0]
+            for index in range(1, len(values) + 1):
+                value = values[index] if index < len(values) else not current
+                if value != current:
+                    output.append((current, start, index - start))
+                    start, current = index, value
+            return output
+
+        def ratio(lengths: list[int]) -> bool:
+            unit = sum(lengths) / 7
+            return unit >= 1.2 and all(abs(lengths[index] - unit) <= unit * .8 for index in (0, 1, 3, 4)) and abs(lengths[2] - 3 * unit) <= 3 * unit * .45
+
+        matches: list[tuple[int, int]] = []
+        for y in range(height):
+            horizontal = runs([pixels[x, y] < 128 for x in range(width)])
+            for index in range(len(horizontal) - 4):
+                pattern = horizontal[index:index + 5]
+                lengths = [item[2] for item in pattern]
+                if [item[0] for item in pattern] != [True, False, True, False, True] or not ratio(lengths):
+                    continue
+                x = round(pattern[0][1] + lengths[0] + lengths[1] + lengths[2] / 2)
+                vertical = runs([pixels[x, row] < 128 for row in range(height)])
+                if any([item[0] for item in part] == [True, False, True, False, True] and part[2][1] <= y < part[2][1] + part[2][2] and ratio([item[2] for item in part]) for part in (vertical[offset:offset + 5] for offset in range(len(vertical) - 4))):
+                    matches.append((x, y))
+        clusters: list[list[float]] = []
+        for x, y in matches:
+            for cluster in clusters:
+                count = cluster[2]
+                if abs(x - cluster[0] / count) < 20 and abs(y - cluster[1] / count) < 20:
+                    cluster[0] += x
+                    cluster[1] += y
+                    cluster[2] += 1
+                    break
+            else:
+                clusters.append([float(x), float(y), 1.0])
+        minimum_cluster_size = max(8, min(width, height) * .025)
+        return sum(cluster[2] >= minimum_cluster_size for cluster in clusters) >= 3
+
+
+def prepare_candidate_thumbnails(candidates: list[AssetCandidate], project_dir: str | Path, diagnostics: dict, *, limit: int = CANDIDATE_THUMBNAIL_LIMIT) -> tuple[list[AssetCandidate], list[dict]]:
+    ranked = sorted((item for item in candidates if item.kind == AssetKind.image and not item.is_svg), key=lambda item: (-_candidate_preference(item), item.original_index, item.id))[:limit]
+    output = Path(project_dir) / "asset_thumbnails"
+    output.mkdir(parents=True, exist_ok=True)
+    records: list[dict] = []
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; VideoAssistant/1.0)", "Accept": "image/avif,image/webp,image/*;q=0.8,*/*;q=0.1"}
+    with httpx.Client(headers=headers, timeout=httpx.Timeout(20, connect=8), trust_env=True) as client:
+        for index, candidate in enumerate(ranked):
+            record = {"asset_id": candidate.id, "source_url": candidate.source_url, "status": "failed", "local_path": None}
+            try:
+                response = _download_with_retry(client, candidate.source_url, MAX_IMAGE_BYTES)
+                if not response.headers.get("content-type", "").lower().startswith("image/"):
+                    raise ValueError("mime_not_image")
+                with Image.open(BytesIO(response.content)) as source:
+                    source.seek(0)
+                    image = ImageOps.exif_transpose(source).convert("RGB")
+                    original_size = image.size
+                    image.thumbnail((CANDIDATE_THUMBNAIL_EDGE, CANDIDATE_THUMBNAIL_EDGE), Image.Resampling.LANCZOS)
+                    target = output / f"{index:03d}-{candidate.id}.jpg"
+                    image.save(target, "JPEG", quality=75, optimize=True)
+                record.update({"status": "ready", "local_path": str(target), "original_size": list(original_size), "thumbnail_size": list(image.size), "sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+            except (httpx.HTTPError, OSError, ValueError, Image.DecompressionBombError) as exc:
+                record["error"] = f"{type(exc).__name__}: {exc}"
+            records.append(record)
+    diagnostics["candidate_thumbnails"] = {"limit": limit, "edge_px": CANDIDATE_THUMBNAIL_EDGE, "candidate_count": len(candidates), "shortlisted_count": len(ranked), "ready_count": sum(item["status"] == "ready" for item in records), "omitted_count": max(0, len(candidates) - len(ranked)), "items": records}
+    return ranked, records
+
+
+def _fallback_candidate_profile(candidate: AssetCandidate, thumbnail: dict | None = None) -> CandidateVisualProfile:
+    metadata = f"{candidate.source_url} {candidate.alt} {candidate.caption} {candidate.nearby_text}"
+    qr = bool(_QR_TOKEN.search(candidate.source_url) or _QR_TEXT_TOKEN.search(f"{candidate.alt} {candidate.caption}"))
+    if thumbnail and thumbnail.get("status") == "ready" and thumbnail.get("local_path"):
+        try:
+            qr = qr or _looks_like_qr_code(thumbnail["local_path"])
+        except (OSError, ValueError):
+            pass
+    partner = bool(_PARTNER_UI_TOKEN.search(metadata))
+    page_ui = bool(_UI_TOKEN.search(metadata) or _UI_SUBSTRING.search(metadata) or _UI_TEXT_TOKEN.search(metadata))
+    app_download = bool(re.search(r"(?:app\s*下载|下载客户端|ios\s*&\s*android)", metadata, re.I))
+    role = ImageRole.data if _EDITORIAL_SIGNAL.search(metadata) else ImageRole.hero if "og:image" in candidate.source_types else ImageRole.evidence
+    eligible = not (qr or partner or page_ui or app_download)
+    return CandidateVisualProfile(asset_id=candidate.id, analysis_status="fallback", role=role if eligible else ImageRole.irrelevant, topics=candidate.alt.split()[:4], relevance=max(.05, min(.95, .25 + _candidate_preference(candidate) / 180)), visual_quality=.6, is_qr_code=qr, is_advertisement=partner, is_page_ui=page_ui, is_logo=page_ui, is_app_download=app_download, eligible=eligible, exclusion_reason="qr_code" if qr else "partner_or_advertisement" if partner else "page_ui_or_logo" if page_ui else "app_download" if app_download else "")
+
+
+def analyze_candidate_thumbnails(brief: ArticleBrief, candidates: list[AssetCandidate], thumbnail_records: list[dict], diagnostics: dict) -> list[CandidateVisualProfile]:
+    provider = get_agent_provider("asset")
+    by_id = {item.id: item for item in candidates}
+    thumbnails = {item["asset_id"]: item for item in thumbnail_records}
+    ready_ids = [item.id for item in candidates if thumbnails.get(item.id, {}).get("status") == "ready"]
+    resolved: dict[str, CandidateVisualProfile] = {}
+    batches: list[dict] = []
+    multimodal = getattr(provider, "complete_multimodal", None)
+
+    def inspect(asset_ids: list[str], attempt: int) -> set[str]:
+        supplied = [by_id[asset_id] for asset_id in asset_ids]
+        prompt = json.dumps({"task": "按输入顺序分析每张候选缩略图，只返回 JSON。识别图片主题与文章相关性，并排除二维码、扫码推广、广告、合作伙伴卡片、页面 UI、logo 和 App 下载素材。正文中的数据表、趋势图、统计图、产品对比表、架构图和证据截图都是有效素材，即使字号较小也不得标记为无可辨识内容。不要在本批次内选择最终图片。role 只能返回一个 allowed_roles 枚举值。图片内主题大标题必须是清晰完整的大字，logo、水印、按钮、代码和图表标签不算。", "article": {"title": brief.title, "summary": brief.summary, "topics": brief.topics}, "images_in_supplied_order": [{"asset_id": item.id, "alt": item.alt, "caption": item.caption, "context": item.nearby_text[:500], "source_types": item.source_types} for item in supplied], "allowed_roles": [role.value for role in ImageRole], "output": {"candidate_profiles": [{"asset_id": "input asset id", "analysis_status": "verified", "role": "hero", "topics": ["string"], "entities": ["string"], "relevance": .8, "visual_quality": .8, "title_match_score": .7, "is_qr_code": False, "is_advertisement": False, "is_page_ui": False, "is_logo": False, "is_app_download": False, "contains_prominent_headline": False, "embedded_headline_text": "", "headline_prominence": 0, "headline_bbox": None, "headline_readability": 0, "eligible": True, "exclusion_reason": ""}]}}, ensure_ascii=False)
+        raw = multimodal(prompt, [thumbnails[item.id]["local_path"] for item in supplied]).strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.I).strip()
+        payload = json.loads(raw).get("candidate_profiles", [])
+        accepted: set[str] = set()
+        for item in payload:
+            try:
+                profile = CandidateVisualProfile.model_validate(item)
+                if profile.asset_id not in asset_ids or profile.asset_id in accepted:
+                    continue
+                blocked = profile.is_qr_code or profile.is_advertisement or profile.is_page_ui or profile.is_logo or profile.is_app_download
+                if blocked:
+                    profile = profile.model_copy(update={"eligible": False, "role": ImageRole.irrelevant, "exclusion_reason": profile.exclusion_reason or "visual_non_editorial_asset"})
+                elif not profile.eligible and "article-content" in by_id[profile.asset_id].source_types and not re.search(r"(?:与文章无关|不相关|unrelated|irrelevant)", profile.exclusion_reason, re.I):
+                    profile = profile.model_copy(update={"eligible": True, "role": ImageRole.evidence if profile.role == ImageRole.irrelevant else profile.role, "relevance": max(.3, profile.relevance), "exclusion_reason": f"vision_uncertain_preserved_for_global_ranking: {profile.exclusion_reason}"[:400]})
+                resolved[profile.asset_id] = profile.model_copy(update={"analysis_status": "verified"})
+                accepted.add(profile.asset_id)
+            except (ValueError, TypeError):
+                continue
+        batches.append({"attempt": attempt, "asset_ids": asset_ids, "accepted_ids": sorted(accepted), "missing_ids": sorted(set(asset_ids) - accepted)})
+        return accepted
+
+    if provider.model_name != "mock" and callable(multimodal):
+        for start in range(0, len(ready_ids), CANDIDATE_VISION_BATCH_SIZE):
+            batch_ids = ready_ids[start:start + CANDIDATE_VISION_BATCH_SIZE]
+            accepted: set[str] = set()
+            try:
+                accepted = inspect(batch_ids, 1)
+            except Exception as exc:
+                batches.append({"attempt": 1, "asset_ids": batch_ids, "accepted_ids": [], "missing_ids": batch_ids, "error": f"{type(exc).__name__}: {exc}"})
+            missing = [asset_id for asset_id in batch_ids if asset_id not in accepted]
+            suspicious = [asset_id for asset_id in accepted if "article-content" in by_id[asset_id].source_types and not resolved[asset_id].eligible and not any((resolved[asset_id].is_qr_code, resolved[asset_id].is_advertisement, resolved[asset_id].is_page_ui, resolved[asset_id].is_logo, resolved[asset_id].is_app_download))]
+            retry_ids = list(dict.fromkeys([*missing, *suspicious]))
+            if retry_ids:
+                for asset_id in retry_ids:
+                    try:
+                        inspect([asset_id], 2)
+                    except Exception as exc:
+                        batches.append({"attempt": 2, "asset_ids": [asset_id], "accepted_ids": [], "missing_ids": [asset_id], "error": f"{type(exc).__name__}: {exc}"})
+    for candidate in candidates:
+        resolved.setdefault(candidate.id, _fallback_candidate_profile(candidate, thumbnails.get(candidate.id)))
+    profiles = [resolved[item.id] for item in candidates]
+    diagnostics["candidate_visual_analysis"] = {"model": provider.model_name, "batch_size": CANDIDATE_VISION_BATCH_SIZE, "mode": "multimodal_with_fallback" if any(item.analysis_status == "verified" for item in profiles) else "deterministic_fallback", "verified_count": sum(item.analysis_status == "verified" for item in profiles), "fallback_count": sum(item.analysis_status != "verified" for item in profiles), "eligible_count": sum(item.eligible for item in profiles), "excluded_count": sum(not item.eligible for item in profiles), "batches": batches}
+    return profiles
+
+
 def _candidate_preference(item: AssetCandidate) -> float:
     """Deterministic editorial ranking when semantic selection is unavailable."""
     score = 0.0
     if item.kind == AssetKind.image:
         score += 100
+    metadata = f"{item.source_url} {item.alt} {item.caption} {item.nearby_text}"
+    if _QR_TOKEN.search(metadata) or _QR_TEXT_TOKEN.search(f"{item.alt} {item.caption}"):
+        return -1000
     if "article-content" in item.source_types:
         score += 50
     if "data-original" in item.source_types:
@@ -915,6 +1106,10 @@ def _candidate_preference(item: AssetCandidate) -> float:
         score += 20
     if item.nearby_text:
         score += 8
+    if _EDITORIAL_SIGNAL.search(metadata):
+        score += 28
+    if _PARTNER_UI_TOKEN.search(metadata):
+        score -= 70
     if "srcset" in item.source_types and "data-original" not in item.source_types:
         score -= 15
     if item.is_svg:
@@ -933,23 +1128,36 @@ def _ordered_candidate_pool(candidates: list[AssetCandidate], decisions: list[As
     ))
 
 
-def _local_asset_decisions(candidates: list[AssetCandidate], target_count: int = 6) -> list[AssetDecision]:
+def _local_asset_decisions(candidates: list[AssetCandidate], target_count: int = 3) -> list[AssetDecision]:
     ordered = sorted(candidates, key=lambda item: (-_candidate_preference(item), item.original_index, item.id))
     chosen = {item.id for item in ordered[:target_count]}
     first_id = ordered[0].id if ordered else ""
     return [AssetDecision(asset_id=item.id, selected=item.id in chosen, role=ImageRole.hero if item.id == first_id else ImageRole.evidence, topics=item.alt.split()[:4], relevance=max(.05, min(.95, .25 + _candidate_preference(item) / 180)) if item.kind == AssetKind.image else .05, visual_quality=.6, reason="deterministic candidate-pool fallback") for item in candidates]
 
 
-def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidate], diagnostics: dict, target_count: int = 6) -> list[AssetDecision]:
-    fallback = _local_asset_decisions(candidates, target_count)
+def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidate], diagnostics: dict, target_count: int = 3, *, visual_profiles: list[CandidateVisualProfile] | None = None) -> list[AssetDecision]:
+    profile_by_id = {item.asset_id: item for item in visual_profiles or []}
+    eligible_candidates = []
+    for candidate in candidates:
+        profile = profile_by_id.get(candidate.id)
+        if profile is None:
+            profile = _fallback_candidate_profile(candidate)
+        if profile.eligible:
+            eligible_candidates.append(candidate)
+    if visual_profiles is not None:
+        ranked_profiles = sorted((profile_by_id[item.id] for item in eligible_candidates), key=lambda item: (-item.title_match_score, -item.relevance, -item.visual_quality, item.asset_id))
+        selected_ids = {item.asset_id for item in ranked_profiles[:target_count]}
+        fallback = [AssetDecision(asset_id=item.id, selected=item.id in selected_ids, role=profile_by_id[item.id].role, topics=profile_by_id[item.id].topics, entities=profile_by_id[item.id].entities, relevance=profile_by_id[item.id].relevance, visual_quality=profile_by_id[item.id].visual_quality, title_match_score=profile_by_id[item.id].title_match_score, reason="candidate visual profile ranking") for item in eligible_candidates]
+    else:
+        fallback = _local_asset_decisions(eligible_candidates, target_count)
     diagnostics["asset_agent"] = {"sent": len(candidates), "mode": "local_fallback", "selected": 0, "decisions": [], "attempts": []}
-    if not candidates:
+    if not eligible_candidates:
         return fallback
     provider = get_agent_provider("asset")
     if provider.model_name == "mock":
         decisions = fallback
     else:
-        prompt = json.dumps({"task": "为文章素材做完整排序并选择约 target_count 个。第一项优先选择能让观众快速理解大标题的 hero/overview 图片。只能引用 input asset_id；不得生成 URL；必须返回所有 asset_id 的完整决定。", "target_count": target_count, "article": {"title": brief.title, "text": brief.text[:9000]}, "assets": [item.model_dump(mode="json") for item in candidates], "output": {"asset_decisions": [{"asset_id": "input asset id", "selected": True, "role": "hero|overview|evidence|data|diagram|demo|product|quote|result|portrait|brand|other|irrelevant", "topics": ["string"], "entities": ["string"], "relevance": "0..1", "visual_quality": "0..1", "title_match_score": "0..1", "reason": "short reason"}]}}, ensure_ascii=False)
+        prompt = json.dumps({"task": "根据已经合并完成的候选视觉档案做一次全局排序，选择约 target_count 个互补素材。优先正文图表、数据图、流程/架构图、与标题匹配的大标题图、产品界面和关键证据。只能引用输入 asset_id，必须返回全部输入项。role 只能返回一个 allowed_roles 枚举值，禁止 hero|overview 组合值。", "target_count": target_count, "article": {"title": brief.title, "text": brief.text[:9000]}, "assets": [{"candidate": item.model_dump(mode="json"), "visual_profile": profile_by_id[item.id].model_dump(mode="json") if item.id in profile_by_id else None} for item in eligible_candidates], "allowed_roles": [role.value for role in ImageRole], "output": {"asset_decisions": [{"asset_id": "input asset id", "selected": True, "role": "hero", "topics": ["string"], "entities": ["string"], "relevance": "0..1", "visual_quality": "0..1", "title_match_score": "0..1", "reason": "short reason"}]}}, ensure_ascii=False)
         decisions = fallback
         for attempt in range(2):
             try:
@@ -961,7 +1169,7 @@ def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidat
                 if not raw:
                     raise ValueError("empty_model_response")
                 parsed = [AssetDecision.model_validate(item) for item in json.loads(raw)["asset_decisions"]]
-                if {item.asset_id for item in parsed} != {item.id for item in candidates}:
+                if {item.asset_id for item in parsed} != {item.id for item in eligible_candidates}:
                     raise ValueError("asset agent returned incomplete or unknown asset IDs")
                 decisions = parsed
                 diagnostics["asset_agent"]["mode"] = "text_success" if attempt == 0 else "text_retry_success"
@@ -971,17 +1179,49 @@ def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidat
                 diagnostics["asset_agent"]["attempts"].append({"attempt": attempt + 1, "status": "failed", "error": f"{type(exc).__name__}: {exc}"})
         if decisions is fallback:
             diagnostics["asset_agent"]["error"] = diagnostics["asset_agent"]["attempts"][-1]["error"]
-    if sum(item.selected for item in decisions) < min(target_count, len(candidates)):
+    if sum(item.selected for item in decisions) < min(target_count, len(eligible_candidates)):
         ranked = sorted(decisions, key=lambda item: (-item.title_match_score, -item.relevance, -item.visual_quality, item.asset_id))
         selected_ids = {item.asset_id for item in ranked if item.selected}
         for item in ranked:
-            if len(selected_ids) >= min(target_count, len(candidates)):
+            if len(selected_ids) >= min(target_count, len(eligible_candidates)):
                 break
             item.selected = True
             item.reason = item.reason or "deterministic target-count backfill"
             selected_ids.add(item.asset_id)
-    diagnostics["asset_agent"].update({"target_count": target_count, "selected": sum(item.selected for item in decisions), "decisions": [item.model_dump(mode="json") for item in decisions if item.selected]})
+    elif sum(item.selected for item in decisions) > target_count:
+        ranked_selected = sorted((item for item in decisions if item.selected), key=lambda item: (-item.title_match_score, -item.relevance, -item.visual_quality, item.asset_id))
+        selected_ids = {item.asset_id for item in ranked_selected[:target_count]}
+        for item in decisions:
+            item.selected = item.asset_id in selected_ids
+    globally_ranked = sorted(decisions, key=lambda item: (
+        not item.selected,
+        -item.title_match_score,
+        -item.relevance,
+        -item.visual_quality,
+        item.asset_id,
+    ))
+    diagnostics["asset_agent"].update({
+        "target_count": target_count,
+        "eligible_count": len(eligible_candidates),
+        "excluded_before_selection": len(candidates) - len(eligible_candidates),
+        "selected": sum(item.selected for item in decisions),
+        "global_ranked_asset_ids": [item.asset_id for item in globally_ranked],
+        "decisions": [item.model_dump(mode="json") for item in decisions if item.selected],
+    })
     return decisions
+
+
+def image_tags_from_candidate_profiles(images: list[ArticleImage], candidates: list[AssetCandidate], profiles: list[CandidateVisualProfile]) -> list[ImageTag]:
+    by_asset_id = {item.asset_id: item for item in profiles}
+    profile_by_url = {candidate.source_url: by_asset_id[candidate.id] for candidate in candidates if candidate.id in by_asset_id}
+    tags: list[ImageTag] = []
+    for image in images:
+        profile = profile_by_url.get(image.source_url)
+        if profile is None:
+            tags.append(_fallback_tag(image))
+            continue
+        tags.append(ImageTag(image_id=image.id, candidate_profile_id=profile.asset_id, role=profile.role, topics=profile.topics, entities=profile.entities, salience=profile.relevance, visual_quality=profile.visual_quality, section_index=image.source_index, contains_prominent_headline=profile.contains_prominent_headline, embedded_headline_text=profile.embedded_headline_text, headline_prominence=profile.headline_prominence, headline_title_match_score=profile.title_match_score, headline_bbox=profile.headline_bbox, headline_readability=profile.headline_readability, headline_analysis_status="verified" if profile.analysis_status == "verified" else "unavailable", headline_exclusion_reason=profile.exclusion_reason))
+    return tags
 
 
 def _extension_for(content_type: str, candidate: AssetCandidate) -> str:

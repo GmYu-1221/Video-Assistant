@@ -13,7 +13,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from content_creator.schemas import AudioConfig, BackgroundVideoConfig, BoundaryAction, CaptionTemplatePlan, CaptionTemplateSlotBinding, CopyAction, ImageSemanticProfile, ImageTag, LayoutAction, LayoutPlan, TimelineItem, VideoCopy, VideoOutput, VideoProject
-from content_creator.services.article import _brief_from_extraction, _is_verified_title_card, _title_match_score, augment_soup_with_selected_html, basic_asset_filter, capture_article_screenshots, chromium_available, classify_content_sufficiency, discover_asset_candidates, download_selected_assets, extract_article_html, fetch_article_with_extraction, log_asset_diagnostics, order_images, select_assets_with_agent, tag_images
+from content_creator.services.article import _brief_from_extraction, _is_verified_title_card, _title_match_score, analyze_candidate_thumbnails, augment_soup_with_selected_html, basic_asset_filter, capture_article_screenshots, chromium_available, classify_content_sufficiency, discover_asset_candidates, download_selected_assets, extract_article_html, fetch_article_with_extraction, image_tags_from_candidate_profiles, log_asset_diagnostics, order_images, prepare_candidate_thumbnails, select_assets_with_agent
 from content_creator.services.assets import scan_and_process
 from content_creator.services.music import analyze_audio, load_catalog, select_track
 from content_creator.services.timeline import build_timeline
@@ -37,6 +37,7 @@ URL_SEGMENT_MAX_SECONDS = 3.5
 URL_COPY_CHARS_PER_SECOND = 8.0
 URL_SEGMENT_BUFFER_SECONDS = 0.8
 BACKGROUND_VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
+SCREENSHOT_REAL_IMAGE_THRESHOLD = 4
 
 
 def _asset_target_count(body_char_count: int) -> int:
@@ -54,6 +55,16 @@ def _asset_target_count(body_char_count: int) -> int:
     except ValueError:
         maximum = max(minimum, 8)
     return min(maximum, max(minimum, math.ceil(body_char_count / per_asset)))
+
+
+def _screenshot_fallback_policy(downloaded_count: int, target_count: int, candidate_pool_exhausted: bool) -> tuple[bool, str]:
+    if downloaded_count >= target_count:
+        return False, "not_needed"
+    if downloaded_count >= SCREENSHOT_REAL_IMAGE_THRESHOLD:
+        return False, "downloaded_images_at_least_4"
+    if candidate_pool_exhausted:
+        return True, "selected_and_downloaded_images_below_dynamic_target"
+    return False, "download_pool_incomplete_using_available_assets"
 
 
 def _select_background_video(source_dir: str | Path, project_dir: str | Path, *, rng=None) -> BackgroundVideoConfig:
@@ -197,11 +208,21 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         (project_dir / "asset_diagnostics.json").write_text(json.dumps(diagnostics, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         log_asset_diagnostics(diagnostics)
 
-    def persist_manifest(candidates, decisions) -> None:
+    def persist_manifest(candidates, decisions, visual_profiles=None, downloaded_images=None, final_images=None, final_tags=None) -> None:
         manifest = {
             "candidates": [item.model_dump(mode="json") for item in candidates],
+            "thumbnails": diagnostics.get("candidate_thumbnails", {}).get("items", []),
+            "visual_profiles": [item.model_dump(mode="json") for item in visual_profiles or []],
             "decisions": [item.model_dump(mode="json") for item in decisions],
+            "global_ranked_candidate_ids": diagnostics.get("asset_agent", {}).get("global_ranked_asset_ids", []),
             "downloads": diagnostics.get("downloader", {}).get("items", []),
+            "original_download_order": [
+                item["asset_id"] for item in diagnostics.get("downloader", {}).get("items", [])
+                if item.get("status") == "downloaded"
+            ],
+            "downloaded_images": [item.model_dump(mode="json") for item in downloaded_images or []],
+            "final_images": [item.model_dump(mode="json") for item in final_images or []],
+            "final_image_tags": [item.model_dump(mode="json") for item in final_tags or []],
         }
         (project_dir / "asset_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -218,11 +239,18 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     diagnostics.update(discovery)
     progress("过滤网页素材")
     filtered = basic_asset_filter(candidates, diagnostics)
-    progress("分析网页素材")
-    decisions = select_assets_with_agent(brief, filtered, diagnostics, asset_target_count)
+    progress("生成候选图片缩略图")
+    visual_candidates, thumbnail_records = prepare_candidate_thumbnails(filtered, project_dir, diagnostics)
+    progress("识别候选图片语义")
+    visual_profiles = analyze_candidate_thumbnails(brief, visual_candidates, thumbnail_records, diagnostics)
+    (project_dir / "candidate_visual_profiles.json").write_text(json.dumps({"profiles": [item.model_dump(mode="json") for item in visual_profiles], "thumbnails": diagnostics.get("candidate_thumbnails", {}), "analysis": diagnostics.get("candidate_visual_analysis", {})}, ensure_ascii=False, indent=2), encoding="utf-8")
+    eligible_ids = {item.asset_id for item in visual_profiles if item.eligible}
+    eligible_candidates = [item for item in visual_candidates if item.id in eligible_ids]
+    progress("全局排序网页素材")
+    decisions = select_assets_with_agent(brief, visual_candidates, diagnostics, asset_target_count, visual_profiles=visual_profiles)
     progress("下载已选素材")
-    article_images = download_selected_assets(filtered, decisions, project_dir, diagnostics, browser_imported=imported_html is not None, max_renderable=asset_target_count)
-    persist_manifest(filtered, decisions)
+    article_images = download_selected_assets(eligible_candidates, decisions, project_dir, diagnostics, browser_imported=imported_html is not None, max_renderable=asset_target_count)
+    persist_manifest(filtered, decisions, visual_profiles)
     downloader = diagnostics.get("downloader", {})
     protected_assets = downloader.get("browser_asset_required", 0)
     summary = {
@@ -239,8 +267,11 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     progress(f"素材状态：发现 {summary['discovered']} 个，优先选择 {summary['agent_preferred']} 个，成功下载 {summary['downloaded']} 个")
     if protected_assets:
         progress(f"已跳过 {protected_assets} 个浏览器受保护素材")
-    if len(article_images) < asset_target_count and downloader.get("candidate_pool_exhausted"):
-        diagnostics["screenshot_fallback"] = {"triggered": True, "reason": "selected_and_downloaded_images_below_dynamic_target", "project_images_before_fallback": len(article_images), "missing": asset_target_count - len(article_images), "target_count": asset_target_count}
+    should_capture_screenshot, screenshot_reason = _screenshot_fallback_policy(
+        len(article_images), asset_target_count, bool(downloader.get("candidate_pool_exhausted")),
+    )
+    if should_capture_screenshot:
+        diagnostics["screenshot_fallback"] = {"triggered": True, "reason": screenshot_reason, "project_images_before_fallback": len(article_images), "missing": asset_target_count - len(article_images), "target_count": asset_target_count, "screenshot_limit": 1}
         persist_diagnostics()
         progress("准备正文截图引擎" if not chromium_available() else "补充正文截图")
         try:
@@ -264,34 +295,20 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
             diagnostics["screenshot_fallback"]["reduced_after_error"] = True
             progress(f"正文截图未补足，使用现有 {len(article_images)} 个素材缩短视频")
     elif len(article_images) < asset_target_count:
-        diagnostics["screenshot_fallback"] = {"triggered": False, "reason": "download_pool_incomplete_using_available_assets", "project_images_before_fallback": len(article_images), "missing": asset_target_count - len(article_images)}
+        diagnostics["screenshot_fallback"] = {"triggered": False, "reason": screenshot_reason, "project_images_before_fallback": len(article_images), "missing": asset_target_count - len(article_images), "screenshot_limit": 1}
+        if screenshot_reason == "downloaded_images_at_least_4":
+            diagnostics["screenshot_fallback"]["skipped_reason"] = screenshot_reason
         if not article_images:
             raise ValueError("正文有效，但候选素材池没有产生可渲染画面")
     else:
         diagnostics["screenshot_fallback"] = {"triggered": False, "reason": "not_needed", "project_images_before_fallback": len(article_images), "missing": 0}
-    progress("分析图片与生成文案")
-    if imported_html is not None and protected_assets:
-        # Browser import only supplied page HTML. Preserve the first Agent
-        # decision set and avoid a second model call to compensate for assets
-        # that the server is not authorized to download.
-        candidates_by_id = {candidate.id: candidate for candidate in filtered}
-        decisions_by_url = {
-            candidates_by_id[decision.asset_id].source_url: decision
-            for decision in decisions
-            if decision.selected and decision.asset_id in candidates_by_id
-        }
-        tags = []
-        for image in article_images:
-            decision = decisions_by_url.get(image.source_url)
-            if decision is None:
-                tags.append(ImageTag(image_id=image.id, role="evidence", salience=.5, visual_quality=.6, section_index=image.source_index))
-            else:
-                tags.append(ImageTag(image_id=image.id, role=decision.role, topics=decision.topics, entities=decision.entities, salience=decision.relevance, visual_quality=decision.visual_quality, section_index=image.source_index))
-        copy = VideoCopy(headline=brief.title[:80], subtitle=(brief.site_name or "文章要点")[:40], body=brief.text[:400])
-        brief = brief.model_copy(update={"summary": brief.text[:1200], "topics": [topic for tag in tags for topic in tag.topics][:12]})
-        diagnostics.setdefault("asset_agent", {})["tagging_skipped_due_browser_assets"] = True
-    else:
-        brief, copy, tags = tag_images(brief, article_images)
+    progress("合并候选图片语义")
+    tags = image_tags_from_candidate_profiles(article_images, filtered, visual_profiles)
+    copy = VideoCopy(headline=brief.title[:80], subtitle=(brief.site_name or "文章要点")[:40], body=brief.text[:400])
+    brief = brief.model_copy(update={"summary": brief.summary or brief.text[:1200], "topics": list(dict.fromkeys(topic for tag in tags for topic in tag.topics))[:12]})
+    diagnostics.setdefault("candidate_visual_analysis", {})["final_image_tags_reused"] = True
+    diagnostics["candidate_visual_analysis"]["final_profile_ids"] = [tag.candidate_profile_id or "screenshot_fallback" for tag in tags]
+    persist_manifest(filtered, decisions, visual_profiles, article_images)
     progress("翻译中文说明文案")
     brief, localized_copy, localization_diagnostics = localize_article_copy(brief)
     copy = build_localized_video_copy(brief, localized_copy, preferred=copy)
@@ -332,6 +349,8 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         "reduction_reason": "available_nonduplicate_assets_below_target" if len(selected) < asset_target_count else None,
     })
     tag_by_id = {tag.image_id: tag for tag in tags}
+    selected_tags = [tag_by_id[image.id] for image in selected]
+    persist_manifest(filtered, decisions, visual_profiles, article_images, selected, selected_tags)
     opening_tag = tag_by_id.get(selected[0].id)
     opening_has_verified_headline = _is_verified_title_card(selected[0], opening_tag)
     opening_reason = "verified_prominent_headline_title_match" if opening_has_verified_headline else "prominent_headline_unavailable"

@@ -72,6 +72,28 @@ def test_asset_target_allows_one_asset_by_default(monkeypatch):
     assert url_video._asset_target_count(120) == 1
 
 
+def test_screenshot_fallback_is_limited_to_fewer_than_four_real_images():
+    assert url_video._screenshot_fallback_policy(0, 8, True) == (
+        True, "selected_and_downloaded_images_below_dynamic_target",
+    )
+    assert url_video._screenshot_fallback_policy(3, 8, True) == (
+        True, "selected_and_downloaded_images_below_dynamic_target",
+    )
+    assert url_video._screenshot_fallback_policy(4, 8, True) == (
+        False, "downloaded_images_at_least_4",
+    )
+    assert url_video._screenshot_fallback_policy(5, 8, True) == (
+        False, "downloaded_images_at_least_4",
+    )
+
+
+def test_screenshot_fallback_is_not_used_when_target_is_met_or_pool_remains():
+    assert url_video._screenshot_fallback_policy(3, 3, True) == (False, "not_needed")
+    assert url_video._screenshot_fallback_policy(2, 3, False) == (
+        False, "download_pool_incomplete_using_available_assets",
+    )
+
+
 def test_single_segment_is_retimed_between_two_point_five_and_three_point_five_seconds():
     bundle, profiles = _bundle(1, 8)
     diagnostics = url_video._retime_resolved_bundle(bundle, profiles, bpm=120, fps=30)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
@@ -146,8 +147,39 @@ class AssetDecision(BaseModel):
     reason: str = Field(default="", max_length=400)
 
 
+class CandidateVisualProfile(BaseModel):
+    asset_id: str = Field(min_length=1, max_length=80)
+    analysis_status: Literal["verified", "fallback", "failed"] = "fallback"
+    role: ImageRole = ImageRole.other
+    topics: list[str] = Field(default_factory=list, max_length=8)
+    entities: list[str] = Field(default_factory=list, max_length=12)
+    relevance: float = Field(default=0.0, ge=0, le=1)
+    visual_quality: float = Field(default=0.5, ge=0, le=1)
+    title_match_score: float = Field(default=0.0, ge=0, le=1)
+    is_qr_code: bool = False
+    is_advertisement: bool = False
+    is_page_ui: bool = False
+    is_logo: bool = False
+    is_app_download: bool = False
+    contains_prominent_headline: bool = False
+    embedded_headline_text: str = Field(default="", max_length=500)
+    headline_prominence: float = Field(default=0.0, ge=0, le=1)
+    headline_bbox: tuple[float, float, float, float] | None = None
+    headline_readability: float = Field(default=0.0, ge=0, le=1)
+    eligible: bool = True
+    exclusion_reason: str = Field(default="", max_length=400)
+
+    @field_validator("headline_bbox")
+    @classmethod
+    def normalized_headline_bbox(cls, value):
+        if value is not None and (any(item < 0 or item > 1 for item in value) or value[2] <= 0 or value[3] <= 0 or value[0] + value[2] > 1 or value[1] + value[3] > 1):
+            raise ValueError("headline_bbox must be normalized x,y,width,height inside the image")
+        return value
+
+
 class ImageTag(BaseModel):
     image_id: str
+    candidate_profile_id: str | None = Field(default=None, max_length=80)
     role: ImageRole = ImageRole.other
     topics: list[str] = Field(default_factory=list, max_length=8)
     entities: list[str] = Field(default_factory=list, max_length=12)

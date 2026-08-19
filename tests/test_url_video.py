@@ -1,9 +1,10 @@
+import json
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
-from content_creator.schemas import ArticleBrief, ArticleExtractionResult, ArticleImage, AssetCandidate, AssetDecision, AssetKind, BackgroundVideoConfig, ImageTag, VideoCopy
+from content_creator.schemas import ArticleBrief, ArticleExtractionResult, ArticleImage, AssetCandidate, AssetDecision, AssetKind, BackgroundVideoConfig, CandidateVisualProfile, ImageTag, VideoCopy
 from content_creator.services import url_video
 
 
@@ -37,7 +38,7 @@ def test_url_projects_force_reference_canvas(tmp_path, monkeypatch):
         stages.append("filter")
         return found
 
-    def select(*_args):
+    def select(*_args, **_kwargs):
         stages.append("agent")
         return [AssetDecision(asset_id=item.id, selected=True, relevance=.8) for item in candidates]
 
@@ -47,9 +48,11 @@ def test_url_projects_force_reference_canvas(tmp_path, monkeypatch):
 
     monkeypatch.setattr(url_video, "discover_asset_candidates", discover)
     monkeypatch.setattr(url_video, "basic_asset_filter", filter_assets)
+    monkeypatch.setattr(url_video, "prepare_candidate_thumbnails", lambda found, *_args, **_kwargs: (found, []))
+    monkeypatch.setattr(url_video, "analyze_candidate_thumbnails", lambda _brief, found, *_args: [CandidateVisualProfile(asset_id=item.id, role="evidence", relevance=.8) for item in found])
     monkeypatch.setattr(url_video, "select_assets_with_agent", select)
     monkeypatch.setattr(url_video, "download_selected_assets", download)
-    monkeypatch.setattr(url_video, "tag_images", lambda current, images: (current, VideoCopy(headline="标题", subtitle="副标题", body="正文"), [ImageTag(image_id=image.id, salience=.6, section_index=index) for index, image in enumerate(images)]))
+    monkeypatch.setattr(url_video, "image_tags_from_candidate_profiles", lambda images, *_args: [ImageTag(image_id=image.id, salience=.6, section_index=index) for index, image in enumerate(images)])
     monkeypatch.setattr(url_video, "compile_render_plan", lambda project, *_args, **_kwargs: project)
     project, _ = url_video.create_url_project("https://example.com/article", tmp_path / "output")
     assert (project.width, project.height, project.fps) == (1080, 1920, 30)
@@ -61,6 +64,10 @@ def test_url_projects_force_reference_canvas(tmp_path, monkeypatch):
     assert project.video_copy.headline
     assert stages == ["discovery", "filter", "agent", "download"]
     assert (Path(project.output.project_dir) / "asset_manifest.json").is_file()
+    manifest = json.loads((Path(project.output.project_dir) / "asset_manifest.json").read_text(encoding="utf-8"))
+    assert len(manifest["final_images"]) == len(project.images)
+    assert len(manifest["final_image_tags"]) == len(project.images)
+    assert "global_ranked_candidate_ids" in manifest
     assert (Path(project.output.project_dir) / "caption_template_plan.json").is_file()
 
 
@@ -75,14 +82,16 @@ def test_browser_import_protected_asset_skips_second_agent_call(tmp_path, monkey
         candidates.append(AssetCandidate(id=f"asset-{index:03d}", kind=AssetKind.image, source_url=url, page_url="https://example.com/article", original_index=index))
     monkeypatch.setattr(url_video, "discover_asset_candidates", lambda *_: (candidates, {"asset_discovery": {}}))
     monkeypatch.setattr(url_video, "basic_asset_filter", lambda found, _diagnostics: found)
-    monkeypatch.setattr(url_video, "select_assets_with_agent", lambda *_: [AssetDecision(asset_id=item.id, selected=True, role="diagram", relevance=.8) for item in candidates])
+    monkeypatch.setattr(url_video, "prepare_candidate_thumbnails", lambda found, *_args, **_kwargs: (found, []))
+    monkeypatch.setattr(url_video, "analyze_candidate_thumbnails", lambda _brief, found, *_args: [CandidateVisualProfile(asset_id=item.id, role="diagram", relevance=.8) for item in found])
+    monkeypatch.setattr(url_video, "select_assets_with_agent", lambda *_args, **_kwargs: [AssetDecision(asset_id=item.id, selected=True, role="diagram", relevance=.8) for item in candidates])
 
     def protected_download(_found, _decisions, _project_dir, diagnostics, **_kwargs):
         diagnostics["downloader"] = {"browser_asset_required": 1, "items": [{"asset_id": "asset-protected", "status": "browser_asset_required"}]}
         return sources
 
     monkeypatch.setattr(url_video, "download_selected_assets", protected_download)
-    monkeypatch.setattr(url_video, "tag_images", lambda *_: pytest.fail("tag_images must not be called after protected browser assets"))
+    monkeypatch.setattr(url_video, "image_tags_from_candidate_profiles", lambda images, *_args: [ImageTag(image_id=image.id, role="diagram", salience=.8, section_index=index) for index, image in enumerate(images)])
     monkeypatch.setattr(url_video, "compile_render_plan", lambda project, *_args, **_kwargs: project)
     html = "<article><h1>Imported article</h1><p>" + ("正文内容 " * 50) + "</p><p>" + ("更多正文 " * 50) + "</p></article>"
     project, _ = url_video.create_url_project("https://example.com/article", tmp_path / "output", imported_html=html)

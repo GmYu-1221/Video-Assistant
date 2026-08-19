@@ -4,12 +4,13 @@ from pathlib import Path
 
 import httpx
 import pytest
+from PIL import Image
 
 from bs4 import BeautifulSoup
 
-from content_creator.schemas import ArticleBrief, ArticleImage, AssetCandidate, AssetDecision, AssetKind, ImageRole, ImageTag, MusicTrack
+from content_creator.schemas import ArticleBrief, ArticleImage, AssetCandidate, AssetDecision, AssetKind, CandidateVisualProfile, ImageRole, ImageTag, MusicTrack
 from content_creator.services import article as article_service
-from content_creator.services.article import BrowserImportRequired, _assert_public_url, _build_screenshot_document, _clean_imported_article_document, _deduplicate_text_candidates, _discover_text_candidates, _hamming_distance, _is_verified_title_card, _merge_text_candidates, _perceptual_hash, _quality_ok, _select_article_candidates, _screenshot_anchors, analyze_prominent_headlines, basic_asset_filter, capture_article_screenshots, chromium_available, classify_content_sufficiency, discover_asset_candidates, download_selected_assets, extract_article_html, order_images, parse_article_html, select_assets_with_agent
+from content_creator.services.article import BrowserImportRequired, _assert_public_url, _build_screenshot_document, _clean_imported_article_document, _deduplicate_text_candidates, _discover_text_candidates, _hamming_distance, _is_verified_title_card, _merge_text_candidates, _perceptual_hash, _quality_ok, _select_article_candidates, _screenshot_anchors, analyze_candidate_thumbnails, analyze_prominent_headlines, basic_asset_filter, capture_article_screenshots, chromium_available, classify_content_sufficiency, discover_asset_candidates, download_selected_assets, extract_article_html, image_tags_from_candidate_profiles, order_images, parse_article_html, prepare_candidate_thumbnails, select_assets_with_agent
 from content_creator.services.music.catalog import select_track
 
 
@@ -307,7 +308,11 @@ def test_local_screenshot_fallback_never_navigates_to_source_url(tmp_path):
         title="本地正文截图",
     )
     fallback = diagnostics["screenshot_fallback"]
-    assert len(assets) == 2
+    assert len(assets) == 1
+    assert fallback["requested_count"] == 2
+    assert fallback["allowed_count"] == 1
+    assert fallback["screenshot_limit"] == 1
+    assert fallback["reduction_reason"] == "screenshot_limit_reached"
     assert fallback["network_navigation"] is False
     assert fallback["source"] == "selected_html"
     assert all(Path(asset.local_path).is_file() for asset in assets)
@@ -437,3 +442,155 @@ def test_plural_icons_directory_is_filtered_as_page_ui():
     diagnostics = {}
     assert basic_asset_filter([candidate], diagnostics) == []
     assert diagnostics["rule_filter"]["icon_avatar_logo"] == 1
+
+
+def test_qr_code_assets_are_filtered_before_download():
+    candidate = AssetCandidate(
+        id="asset-qr", kind=AssetKind.image,
+        source_url="https://static.36krcdn.com/images/new_qr_img.72d61993.png?x-oss-process=image/resize,p_5",
+        page_url="https://example.com/article",
+    )
+    diagnostics = {}
+    assert basic_asset_filter([candidate], diagnostics) == []
+    assert diagnostics["rule_filter"]["qr_code"] == 1
+    assert diagnostics["rule_filter"]["rejected"][0]["reason"] == "qr_code"
+
+
+def test_qr_download_prompt_in_metadata_is_filtered_but_chart_is_kept():
+    qr = AssetCandidate(
+        id="asset-qr", kind=AssetKind.image,
+        source_url="https://cdn.example.com/share.png",
+        page_url="https://example.com/article", alt="扫描二维码下载 App",
+    )
+    chart = AssetCandidate(
+        id="asset-chart", kind=AssetKind.image,
+        source_url="https://cdn.example.com/revenue-chart.png",
+        page_url="https://example.com/article", alt="季度营收趋势图",
+        caption="数据图表：销量和毛利率变化", source_types=["article-content"],
+    )
+    diagnostics = {}
+    kept = basic_asset_filter([qr, chart], diagnostics)
+    assert [item.id for item in kept] == ["asset-chart"]
+    assert diagnostics["rule_filter"]["qr_code"] == 1
+
+
+def test_deterministic_asset_fallback_prefers_editorial_chart_over_partner_asset():
+    partner = AssetCandidate(
+        id="asset-partner", kind=AssetKind.image,
+        source_url="https://cdn.example.com/footer-partner.png",
+        page_url="https://example.com/article", alt="合作伙伴 阿里云",
+    )
+    chart = AssetCandidate(
+        id="asset-chart", kind=AssetKind.image,
+        source_url="https://cdn.example.com/chart.png",
+        page_url="https://example.com/article", alt="模型性能数据图表",
+        source_types=["article-content"],
+    )
+    decisions = article_service._local_asset_decisions([partner, chart], target_count=1)
+    assert next(item for item in decisions if item.selected).asset_id == "asset-chart"
+
+
+def test_candidate_thumbnail_analysis_batches_six_and_returns_all_profiles(tmp_path, monkeypatch):
+    candidates = []
+    records = []
+    for index in range(13):
+        path = tmp_path / f"thumb-{index}.jpg"
+        Image.new("RGB", (64, 48), (index, 20, 40)).save(path)
+        asset_id = f"asset-{index:03d}"
+        candidates.append(AssetCandidate(id=asset_id, kind=AssetKind.image, source_url=f"https://example.com/{index}.jpg", page_url="https://example.com/article"))
+        records.append({"asset_id": asset_id, "status": "ready", "local_path": str(path)})
+
+    calls = []
+
+    class Provider:
+        model_name = "vision-model"
+
+        def complete_multimodal(self, prompt, paths):
+            payload = json.loads(prompt)
+            ids = [item["asset_id"] for item in payload["images_in_supplied_order"]]
+            calls.append((ids, paths))
+            return json.dumps({"candidate_profiles": [{"asset_id": asset_id, "analysis_status": "verified", "role": "evidence", "relevance": .8, "visual_quality": .7, "eligible": True} for asset_id in ids]})
+
+    monkeypatch.setattr(article_service, "get_agent_provider", lambda _: Provider())
+    diagnostics = {}
+    brief = ArticleBrief(url="https://example.com/article", canonical_url="https://example.com/article", title="文章标题", text="正文内容")
+    profiles = analyze_candidate_thumbnails(brief, candidates, records, diagnostics)
+    assert [len(ids) for ids, _ in calls] == [6, 6, 1]
+    assert all(len(paths) <= 6 for _, paths in calls)
+    assert len(profiles) == 13
+    assert diagnostics["candidate_visual_analysis"]["verified_count"] == 13
+
+
+def test_candidate_thumbnail_pool_is_limited_and_preserves_aspect_ratio(tmp_path, monkeypatch):
+    buffer = BytesIO()
+    Image.new("RGB", (1000, 500), "#336699").save(buffer, "PNG")
+    response = httpx.Response(200, headers={"content-type": "image/png"}, content=buffer.getvalue())
+    monkeypatch.setattr(article_service, "_download_with_retry", lambda *_args, **_kwargs: response)
+    candidates = [AssetCandidate(id=f"asset-{index:03d}", kind=AssetKind.image, source_url=f"https://example.com/{index}.png", page_url="https://example.com", original_index=index, source_types=["article-content"]) for index in range(30)]
+    diagnostics = {}
+    pool, records = prepare_candidate_thumbnails(candidates, tmp_path, diagnostics)
+    assert len(pool) == 24
+    assert len(records) == 24
+    assert diagnostics["candidate_thumbnails"]["omitted_count"] == 6
+    assert all(record["thumbnail_size"] == [512, 256] for record in records)
+
+
+def test_visual_exclusions_cannot_enter_asset_selection_backfill(monkeypatch):
+    candidates = [
+        AssetCandidate(id="qr", kind=AssetKind.image, source_url="https://example.com/generic.jpg", page_url="https://example.com"),
+        AssetCandidate(id="body", kind=AssetKind.image, source_url="https://example.com/body.jpg", page_url="https://example.com", source_types=["article-content"]),
+    ]
+    profiles = [
+        CandidateVisualProfile(asset_id="qr", analysis_status="verified", role="irrelevant", is_qr_code=True, eligible=False, exclusion_reason="qr_code"),
+        CandidateVisualProfile(asset_id="body", analysis_status="verified", role="evidence", relevance=.9, visual_quality=.8, eligible=True),
+    ]
+    monkeypatch.setattr(article_service, "get_agent_provider", lambda _: type("Provider", (), {"model_name": "mock"})())
+    diagnostics = {}
+    brief = ArticleBrief(url="https://example.com", canonical_url="https://example.com", title="标题", text="正文")
+    decisions = select_assets_with_agent(brief, candidates, diagnostics, target_count=2, visual_profiles=profiles)
+    assert [item.asset_id for item in decisions] == ["body"]
+    assert decisions[0].selected is True
+    assert diagnostics["asset_agent"]["excluded_before_selection"] == 1
+    assert diagnostics["asset_agent"]["global_ranked_asset_ids"] == ["body"]
+
+
+def test_uncertain_article_content_is_preserved_but_explicit_qr_is_excluded(tmp_path, monkeypatch):
+    paths = []
+    candidates = []
+    records = []
+    for asset_id in ("uncertain", "qr"):
+        path = tmp_path / f"{asset_id}.jpg"
+        Image.new("RGB", (64, 48), "white").save(path)
+        paths.append(str(path))
+        candidates.append(AssetCandidate(id=asset_id, kind=AssetKind.image, source_url=f"https://example.com/{asset_id}.jpg", page_url="https://example.com", source_types=["article-content"]))
+        records.append({"asset_id": asset_id, "status": "ready", "local_path": str(path)})
+
+    class Provider:
+        model_name = "vision-model"
+
+        def complete_multimodal(self, prompt, _paths):
+            ids = [item["asset_id"] for item in json.loads(prompt)["images_in_supplied_order"]]
+            profiles = []
+            for asset_id in ids:
+                profiles.append({"asset_id": asset_id, "analysis_status": "verified", "role": "irrelevant", "eligible": False, "is_qr_code": asset_id == "qr", "exclusion_reason": "二维码" if asset_id == "qr" else "无内容"})
+            return json.dumps({"candidate_profiles": profiles}, ensure_ascii=False)
+
+    monkeypatch.setattr(article_service, "get_agent_provider", lambda _: Provider())
+    brief = ArticleBrief(url="https://example.com", canonical_url="https://example.com", title="标题", text="正文")
+    profiles = analyze_candidate_thumbnails(brief, candidates, records, {})
+    by_id = {item.asset_id: item for item in profiles}
+    assert by_id["uncertain"].eligible is True
+    assert by_id["uncertain"].role == ImageRole.evidence
+    assert by_id["qr"].eligible is False
+
+
+def test_final_image_tags_reuse_candidate_visual_profiles():
+    image = _image(0).model_copy(update={"source_url": "https://example.com/body.jpg"})
+    candidate = AssetCandidate(id="body", kind=AssetKind.image, source_url=image.source_url, page_url="https://example.com")
+    profile = CandidateVisualProfile(asset_id="body", analysis_status="verified", role="diagram", topics=["架构"], relevance=.88, visual_quality=.91, title_match_score=.75, contains_prominent_headline=True, embedded_headline_text="系统架构", headline_prominence=.8, headline_bbox=(.1, .1, .8, .2), headline_readability=.9)
+    tags = image_tags_from_candidate_profiles([image], [candidate], [profile])
+    assert len(tags) == 1
+    assert tags[0].role == ImageRole.diagram
+    assert tags[0].topics == ["架构"]
+    assert tags[0].candidate_profile_id == "body"
+    assert tags[0].headline_analysis_status == "verified"
