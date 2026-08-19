@@ -4,9 +4,9 @@
 
 - **命令行**：本地图片目录 + 本地 BGM 的节奏视频生成器。扫描并预处理 JPG/JPEG/PNG/WEBP 图片，用 librosa 分析 WAV/MP3/M4A/FLAC 的 BPM 和 beat，构建图片时间轴，通过 localhost Media Server 和 Remotion 输出 MP4。
 - **交互式 Director Workspace**：终端对话迭代导演方案（图片顺序、停留帧数、创意入场动画、转场、文案），预览或正式渲染。
-- **Web 文章转视频**：输入公开文章 URL，自动提取正文与图片，生成竖屏 1080x1920 短视频，并支持字幕版本反馈与字体偏好学习。
+- **Web 文章转视频**：输入公开文章 URL，自动提取并中文化正文；先用最多 24 张低细节缩略图识别二维码、广告、页面 UI 与正文素材，再全局排序并下载原图，生成竖屏 1080x1920 短视频。
 
-导演方案由 Director Agent（LLM，可回退到本地规则）生成，创意入场动画与转场由 Remotion Creative Agent 从已注册能力中选择，效果注册表含 9 种入场动画与 9 种创意转场。
+导演方案由 Director Agent（LLM，可回退到本地规则）生成，创意入场动画与转场由 Remotion Creative Agent 从已注册能力中选择；当前场景转场注册表启用 `qwen3_8` 与 `zoom_whip_v2`。
 
 ## 环境
 
@@ -48,6 +48,8 @@ Web 文章转视频：
 ```bash
 make web     # 打开 http://127.0.0.1:8000
 ```
+
+Web 页面会实时显示正文提取、候选缩略图、视觉识别、全局素材排序、文案编排和渲染进度。生成后可切换视频版本，并提交字幕排版反馈。
 
 输出位于 `output/projects/<project_id>/`，包括 `materials/images`、`materials/processed`、`audio`、`render_data.json` 和 `render/final.mp4`。
 

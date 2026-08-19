@@ -23,6 +23,9 @@ def test_web_page_contains_accessible_stage_progress_bar():
     assert 'role="progressbar"' in _PAGE
     assert 'aria-valuenow="0"' in _PAGE
     assert "renderProgress(job)" in _PAGE
+    assert "缩略图视觉筛选" in _PAGE
+    assert 'id="statusBadge"' in _PAGE
+    assert 'class="videoFrame"' in _PAGE
 
 
 def test_job_progress_is_monotonic_and_completes_with_job_status():
@@ -30,13 +33,13 @@ def test_job_progress_is_monotonic_and_completes_with_job_status():
     job.event("抓取文章")
     assert job.progress == 8
     job.event("下载已选素材")
-    assert job.progress == 42
+    assert job.progress == 45
     job.event("正文识别：迟到的旧阶段事件")
-    assert job.progress == 42
+    assert job.progress == 45
     job.status = "failed"
     job.event("生成失败")
-    assert job.progress == 42
-    assert _job_payload(job)["progress"] == 42
+    assert job.progress == 45
+    assert _job_payload(job)["progress"] == 45
     job.status = "completed"
     job.event("已完成")
     assert job.progress == 100

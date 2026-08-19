@@ -63,7 +63,7 @@ Creative Agent 读取 `.agents/skills/` 下的项目技能文档，将创意意�
 }
 ```
 
-事件按阶段划分：`entrance`（入场）、`camera`（镜头）、`effect`（效果）、`transition`（场景边界转场）。逐场景的 `AnimationPlan` 与逐边界的 `TransitionEffectPlan` 能力表仍然保留；场景转场目前只允许 `qwen3_8`。
+事件按阶段划分：`entrance`（入场）、`camera`（镜头）、`effect`（效果）、`transition`（场景边界转场）。逐场景的 `AnimationPlan` 与逐边界的 `TransitionEffectPlan` 能力表仍然保留；场景转场可选择注册表中启用的 `qwen3_8` 或 `zoom_whip_v2`。
 
 每条事件都要通过阶段、帧范围、参数范围校验；非法事件被丢弃并记录日志，全部事件非法时回退到安全方案。另有一个独立的视觉规格决策 `create_visual_spec_decision`：选择画面布局（`center_stage` / `fullscreen`）与转场预设（`clean_cut` / `crossfade` / `white_flash` / `flash_zoom_blur`），决策失败时使用本地默认。
 
@@ -101,7 +101,7 @@ Creative Agent 读取 `.agents/skills/` 下的项目技能文档，将创意意�
 
 旧的基线转场注册表已经删除，不再由风格预设决定场景边界效果。
 
-场景转场通过 `template_transition` 和双端模板注册表接入。当前唯一正式模板是 `qwen3_8`；未知、禁用或非法模板会被拒绝，无法满足最小时长时使用硬切。
+场景转场通过 `template_transition` 和双端模板注册表接入。当前启用 `qwen3_8` 与 `zoom_whip_v2`；未知、禁用或非法模板会被拒绝，URL 图片边界的非法选择确定性回退到 qwen。
 
 ## 9. 视觉规格与排版系统
 
@@ -114,7 +114,9 @@ Web 文章转视频模式引入竖屏视觉规格与排版子系统：
 
 ## 10. Web 文章转视频
 
-`content_creator.web`（FastAPI）提供单输入 Web 应用：提交文章 URL 后由 `create_url_project` 完成抓取、正文/图片提取（`trafilatura` + BeautifulSoup）、LLM 素材选择、BGM 目录选曲、竖屏时间轴与渲染。任务在单 worker 队列中串行执行，进度通过 SSE 推送。
+`content_creator.web`（FastAPI）提供单输入 Web 应用：提交文章 URL 后由 `create_url_project` 完成抓取、正文提取（`trafilatura` + BeautifulSoup）、中文化、候选缩略图视觉识别、全局素材排序、BGM 目录选曲、竖屏时间轴与渲染。任务在单 worker 队列中串行执行，进度通过 SSE 推送。
+
+URL 素材采用“先看图、后选择”：规则过滤后的候选按正文来源信号预排，最多 24 张生成最长边 512px 的 JPEG 缩略图；多模态 Asset Agent 每批分析最多 6 张并返回 `CandidateVisualProfile`。所有批次合并后才统一排序，只有 `eligible=true` 的候选可进入原图下载及失败补位池。最终 `ImageTag` 直接继承视觉档案，避免对入选原图重复调用视觉模型。
 
 - 网站禁止抓取时任务进入"等待浏览器导入"：页面提供 bookmarklet，用户在浏览器点击后把页面 DOM 回传本地服务（`/api/browser-import`，带令牌校验）。
 - 每个任务保存版本快照（`versions/v001/` 等），支持按版本切换与反馈修订。

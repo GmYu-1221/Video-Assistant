@@ -53,7 +53,7 @@ particle_flip_reveal-> ParticleFlipReveal
 creative_reveal    -> CreativeReveal（默认降级）
 ```
 
-场景转场统一通过 `template_transition` 扩展入口注册。当前唯一正式模板是 `qwen3_8`。不支持的意图保留在导演方案中；LLM 不可用或输出校验失败时，`scene_cut` 使用 qwen 确定性参数，过短镜头使用硬切。
+场景转场统一通过 `template_transition` 扩展入口注册。当前启用 `qwen3_8` 与 `zoom_whip_v2`。不支持的意图保留在导演方案中；LLM 不可用或输出校验失败时，图片边界使用 qwen 确定性参数。
 
 ## Render Agent
 
@@ -65,7 +65,7 @@ Render Agent 将 DirectorPlan 转为 Storyboard，再编译绝对时间轴。它
 
 ## Web 文章转视频
 
-`content_creator.web` 提供本地 Web 服务：提交文章 URL 后，Article/Asset Agent 提取正文与图片，BGM 目录选曲，生成竖屏 1080x1920 视频。禁止抓取的网站可把 bookmarklet 拖到书签栏，在文章页点击后把 DOM 回传本地服务。视频支持版本化反馈：负反馈触发 Layout Director 重新设计字体与字幕（`revise_typography`），生成 `vNNN` 新版本；用户偏好记录在 `output/preferences/`。
+`content_creator.web` 提供本地 Web 服务：提交文章 URL 后，Article Agent 提取并中文化正文；Asset Agent 先分批识别候选缩略图，生成视觉档案，再对完整档案做全局排序并下载合格原图。BGM 从本地目录选曲，最终生成竖屏 1080x1920 视频。禁止抓取的网站可把 bookmarklet 拖到书签栏，在文章页点击后把 DOM 回传本地服务。视频支持版本化反馈：负反馈触发 Layout Director 重新设计字体与字幕（`revise_typography`），生成 `vNNN` 新版本；用户偏好记录在 `output/preferences/`。
 
 ## 未来 Agent
 

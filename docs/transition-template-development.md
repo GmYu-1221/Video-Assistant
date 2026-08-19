@@ -1,14 +1,13 @@
 # 转场模板开发说明
 
-当前生产环境只启用一个转场模板：`qwen3_8`。它让下一张图片以模糊、略微下移的状态进入，并在 27 帧内平滑恢复清晰和静止位置。
+当前生产环境启用两个转场模板：`qwen3_8` 和 `zoom_whip_v2`。前者是克制的模糊上浮，后者是快速横向甩镜。
 
 ## 当前规则
 
-- `continuous`：保持当前画面，不执行场景转场。
-- `accent`：只做场景内局部强调，不执行完整转场。
-- `scene_cut`：统一使用 `qwen3_8`。
-- 镜头时长不足模板最小 12 帧时使用硬切，不回退到其他旧转场。
-- Agent 只能输出 `template_transition` 和已注册的 `template_id`，目前唯一合法值是 `qwen3_8`。
+- URL 视频首图没有 incoming transition；每个相邻图片边界都必须使用一个完整注册转场，末图没有 outgoing transition。
+- Agent 只能输出 `template_transition` 和当前启用的 `qwen3_8` / `zoom_whip_v2`。
+- Agent 未返回合法模板、参数非法或模型不可用时，确定性回退到 `qwen3_8`。
+- 镜头时长必须满足所选模板最小时长；不能满足时明确失败，不恢复旧转场。
 - Agent 不得输出组件、源码、路径、导入、CSS 或其他 Remotion 实现细节。
 
 ## qwen3_8 参数
@@ -22,6 +21,13 @@ Python 和 Remotion 两端必须使用同一份参数契约：
 - 时长范围：`12–45` 帧，默认 `27` 帧。
 
 模板实现位于 `remotion/src/transitions/templates/`，注册信息位于 Python 的 `TRANSITION_TEMPLATE_REGISTRY` 和 Remotion 的 `TemplatePresentationRegistry`。
+
+## zoom_whip_v2 参数
+
+- `zoom`：最大缩放，默认 `1.08`，范围 `1.0–1.2`。
+- `distance`：横向甩镜距离百分比，默认 `12`，范围 `3–30`。
+- `blur`：最大模糊像素，默认 `10`，范围 `0–24`。
+- 时长范围：`9–36` 帧，默认 `20` 帧（约 650ms）。
 
 ## 添加新模板
 

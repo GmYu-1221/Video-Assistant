@@ -52,9 +52,9 @@ Creative Agent 只输出实现中立的视觉事件计划，不让 LLM 直接生
 
 ## 5. 创意转场实现
 
-场景转场统一使用 `template_transition` 基础设施，并由 Python 与 Remotion 两端的模板注册表共同注册。当前唯一正式模板是 `qwen3_8`，Agent 不得选择其他模板。
+场景转场统一使用 `template_transition` 基础设施，并由 Python 与 Remotion 两端的模板注册表共同注册。当前正式模板为 `qwen3_8` 与 `zoom_whip_v2`，Agent 不得选择未注册模板。
 
-`TransitionEffectRenderer` 只负责渲染已注册的模板转场。旧的 `TransitionFactory` 和 `fade`、`crossfade`、`wipe`、`slide`、`push`、`whip` 等场景转场已删除；没有 qwen effect 时直接硬切。
+`TransitionEffectRenderer` 只负责渲染已注册的模板转场。旧的 `TransitionFactory` 和 `fade`、`crossfade`、`wipe`、`slide`、`push`、`whip` 等场景转场已删除；URL 图片边界缺少合法 effect 时由 Python 计划层回退到 `qwen3_8`。
 
 ## 6. 代码边界与验证
 

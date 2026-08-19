@@ -11,7 +11,7 @@
   -> render_data.json
   -> Remotion Renderer
      -> EffectRenderer
-     -> TransitionEffectRenderer（qwen3_8）或硬切
+     -> TransitionEffectRenderer（qwen3_8 / zoom_whip_v2）
   -> MP4
 ```
 
@@ -38,9 +38,9 @@ Director 负责解释意图：它在 `creative_intent` 中描述场景内的运�
 1. 当存在创意转场事件时，调用 `TransitionEffectRenderer`。
 2. 没有 qwen 转场事件时直接硬切，不调用任何旧转场工厂。
 
-这样可以确保旧的 `fade`、`crossfade`、`wipe`、`slide` 等转场不会重新进入新成片。只有注册的 `qwen3_8` 才能执行场景转场。
+这样可以确保旧的 `fade`、`crossfade`、`wipe`、`slide` 等转场不会重新进入新成片。只有注册的 `qwen3_8` 与 `zoom_whip_v2` 才能执行场景转场。
 
-`TransitionEffectRenderer` 与场景 `EffectRenderer` 相互独立。前者只识别 `template_transition` 基础类型，并根据 `template_id` 查询只包含 `qwen3_8` 的 `TemplatePresentationRegistry`。
+`TransitionEffectRenderer` 与场景 `EffectRenderer` 相互独立。前者只识别 `template_transition` 基础类型，并根据 `template_id` 查询包含 `qwen3_8` 与 `zoom_whip_v2` 的 `TemplatePresentationRegistry`。
 
 ## 添加一个场景动画
 
