@@ -58,8 +58,12 @@ class TransitionEffectPlanItem(BaseModel):
         if not isinstance(parameters, dict):
             raise ValueError("template_transition parameters must be an object")
         _validate_json_safe(parameters)
-        if template_id != "qwen3_8":
-            raise ValueError(f"Unknown transition template: {template_id}")
+        # Keep the schema extensible while delegating capability and parameter
+        # validation to the enabled production registry.
+        from content_creator.transitions import validate_transition_template_params
+
+        clean_parameters = validate_transition_template_params(template_id, parameters, self.duration_frames)
+        self.params = {"template_id": template_id, "parameters": clean_parameters}
         return self
 
     @model_serializer

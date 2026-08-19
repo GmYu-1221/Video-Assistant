@@ -40,13 +40,13 @@ def test_transition_effect_type_is_only_template_infrastructure():
 
 
 def test_production_template_registry_contains_qwen3_8():
-    assert set(TRANSITION_TEMPLATE_REGISTRY) == {"qwen3_8"}
+    assert set(TRANSITION_TEMPLATE_REGISTRY) == {"qwen3_8", "zoom_whip_v2"}
     definition = get_transition_template("qwen3_8")
     assert definition.enabled
     assert definition.duration_min == 12
     assert definition.duration_max == 45
     assert definition.duration_default == 27
-    assert enabled_transition_templates() == (definition,)
+    assert enabled_transition_templates() == (definition, get_transition_template("zoom_whip_v2"))
     assert "柔和高级转场" in definition.examples
     assert "玻璃破碎" in definition.avoid_when
 
@@ -70,19 +70,27 @@ def test_unknown_and_disabled_templates_are_rejected(monkeypatch):
         get_transition_template("disabled")
 
 
-def test_non_qwen_template_is_rejected_even_if_registry_is_mutated(monkeypatch):
-    monkeypatch.setitem(TRANSITION_TEMPLATE_REGISTRY, "test_template", TransitionTemplateDefinition(
-        id="test_template", description="test only", params={"intensity": {"type": "number", "minimum": 0, "maximum": 1}},
-        duration_min=12, duration_max=36, duration_default=18,
-    ))
+def test_unregistered_template_is_rejected():
     provider = RecordingProvider({
         "type": "template_transition",
         "duration_frames": 18,
-        "params": {"template_id": "test_template", "parameters": {"intensity": 0.7}},
+        "params": {"template_id": "missing_template", "parameters": {}},
     })
     result = create_transition_effect_plan(transition_plan(), provider=provider)
     assert provider.calls == 1
-    assert result.transitions == []
+    assert len(result.transitions) == 1
+    assert result.transitions[0].params["template_id"] == "qwen3_8"
+    assert result.transitions[0].design["fallback_reason"] == "invalid_response"
+
+
+def test_zoom_whip_v2_default_contract():
+    definition = get_transition_template("zoom_whip_v2")
+    assert definition.duration_min == 9
+    assert definition.duration_max == 36
+    assert definition.duration_default == 20
+    assert validate_transition_template_params("zoom_whip_v2", {"zoom": 1.08, "distance": 12, "blur": 10}, 20) == {"zoom": 1.08, "distance": 12, "blur": 10}
+    with pytest.raises(ValueError, match="Invalid parameter"):
+        validate_transition_template_params("zoom_whip_v2", {"zoom": 1.3}, 20)
 
 
 def test_template_parameter_and_duration_validation(monkeypatch):

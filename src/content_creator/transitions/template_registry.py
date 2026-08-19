@@ -79,6 +79,24 @@ TRANSITION_TEMPLATE_REGISTRY: dict[str, TransitionTemplateDefinition] = {
         duration_default=27,
         enabled=True,
     ),
+    "zoom_whip_v2": TransitionTemplateDefinition(
+        id="zoom_whip_v2",
+        description=(
+            "当前画面横向甩出并放大模糊，下一张画面从反方向高速进入并回到中心；"
+            "适合节奏较快、图片切换明显的场景。"
+        ),
+        examples=("zoom whip", "甩镜放大", "快速图片切换", "动感转场"),
+        avoid_when=("需要完全静止", "极简淡入", "主体边缘非常敏感"),
+        params={
+            "zoom": {"type": "number", "minimum": 1.0, "maximum": 1.2, "default": 1.08, "description": "转场期间的最大缩放倍数。"},
+            "distance": {"type": "number", "minimum": 3, "maximum": 30, "default": 12, "description": "横向甩镜距离，单位百分比。"},
+            "blur": {"type": "number", "minimum": 0, "maximum": 24, "default": 10, "description": "转场期间的最大动态模糊像素值。"},
+        },
+        duration_min=9,
+        duration_max=36,
+        duration_default=20,
+        enabled=True,
+    ),
 }
 
 

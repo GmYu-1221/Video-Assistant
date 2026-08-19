@@ -7,13 +7,13 @@ from content_creator.prompts.director_prompt import director_prompt
 from content_creator.transitions import TRANSITION_TEMPLATE_REGISTRY, TransitionTemplateDefinition
 
 
-def test_director_exposes_qwen3_8_from_production_registry():
+def test_director_exposes_enabled_templates_from_production_registry():
     assert DIRECTOR_VISUAL_CAPABILITIES["transition"] == []
     transitions = director_visual_capabilities()["transition"]
-    assert len(transitions) == 1
-    assert transitions[0]["name"] == "template_transition"
-    assert "模糊" in transitions[0]["description"]
-    assert "qwen3_8" in json.loads(director_capability_guidance())["transition"][0]["id"]
+    assert {item["id"] for item in transitions} == {"qwen3_8", "zoom_whip_v2"}
+    assert all(item["name"] == "template_transition" for item in transitions)
+    assert "模糊" in next(item["description"] for item in transitions if item["id"] == "qwen3_8")
+    assert {item["id"] for item in json.loads(director_capability_guidance())["transition"]} == {"qwen3_8", "zoom_whip_v2"}
 
 
 def test_director_exposes_no_transition_when_registry_is_empty(monkeypatch):

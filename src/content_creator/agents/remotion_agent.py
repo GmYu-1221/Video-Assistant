@@ -391,27 +391,34 @@ def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> Transiti
         return TransitionEffectPlan(transitions=[])
     provider = provider or get_agent_provider("remotion")
     transitions: list[TransitionEffectPlanItem] = []
+
+    def qwen_fallback(item, next_item, reason: str) -> TransitionEffectPlanItem | None:
+        duration = min(27, item.duration_frames, next_item.duration_frames)
+        if duration < 12:
+            return None
+        return TransitionEffectPlanItem(
+            from_asset_id=item.asset_id,
+            to_asset_id=next_item.asset_id,
+            type=TransitionEffectType.template_transition,
+            duration_frames=duration,
+            params={"template_id": "qwen3_8", "parameters": {
+                "blur_strength": 0.8,
+                "float_distance": 0.55,
+                "recovery_speed": 0.7,
+                "opacity_start": 0.88,
+            }},
+            design={"requested_template_id": None, "resolved_template_id": "qwen3_8", "fallback_reason": reason},
+        )
+
     for index, item in enumerate(plan.timeline[:-1]):
         if item.transition_intent is None:
             continue
         next_item = plan.timeline[index + 1]
         if provider.model_name == "mock":
             logger.warning("[Remotion Agent] LLM unavailable; using qwen3_8 fallback")
-            duration = min(27, item.duration_frames, next_item.duration_frames)
-            if duration >= 12:
-                transitions.append(TransitionEffectPlanItem(
-                    from_asset_id=item.asset_id,
-                    to_asset_id=next_item.asset_id,
-                    type=TransitionEffectType.template_transition,
-                    duration_frames=duration,
-                    params={"template_id": "qwen3_8", "parameters": {
-                        "blur_strength": 0.8,
-                        "float_distance": 0.55,
-                        "recovery_speed": 0.7,
-                        "opacity_start": 0.88,
-                    }},
-                    design={"requested_template_id": None, "resolved_template_id": "qwen3_8", "fallback_reason": "model_unavailable"},
-                ))
+            fallback = qwen_fallback(item, next_item, "model_unavailable")
+            if fallback:
+                transitions.append(fallback)
             continue
         logger.info("[Remotion Agent] transition intent analyzed")
         try:
@@ -419,14 +426,26 @@ def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> Transiti
             raw = complete_json(_transition_prompt(item.transition_intent, item, next_item))
             logger.debug("[Remotion Transition RAW RESPONSE] %s", _safe_raw_response_log(raw))
             transitions.append(_parse_llm_transition_effect(raw, item, next_item))
-        except (OSError, TimeoutError, ConnectionError):
-            logger.warning("[Remotion Agent] LLM unavailable; skipping creative transition")
+        except (OSError, TimeoutError, ConnectionError) as exc:
+            logger.warning("[Remotion Agent] LLM unavailable; using qwen3_8 fallback")
+            fallback = qwen_fallback(item, next_item, "model_unavailable")
+            if fallback:
+                transitions.append(fallback)
         except InvalidAnimationResponse as exc:
-            logger.warning("[Remotion Agent] Invalid response; skipping creative transition (%s)", exc)
-        except UnknownTransitionEffect:
-            raise
+            logger.warning("[Remotion Agent] Invalid response; using qwen3_8 fallback (%s)", exc)
+            fallback = qwen_fallback(item, next_item, "invalid_response")
+            if fallback:
+                transitions.append(fallback)
+        except UnknownTransitionEffect as exc:
+            logger.warning("[Remotion Agent] Unavailable transition; using qwen3_8 fallback (%s)", exc)
+            fallback = qwen_fallback(item, next_item, "unknown_template")
+            if fallback:
+                transitions.append(fallback)
         except ValueError as exc:
-            logger.warning("[Remotion Agent] Invalid response; skipping creative transition (%s)", exc)
+            logger.warning("[Remotion Agent] Invalid response; using qwen3_8 fallback (%s)", exc)
+            fallback = qwen_fallback(item, next_item, "invalid_response")
+            if fallback:
+                transitions.append(fallback)
         else:
             logger.info("[Remotion Agent] generated TransitionEffectPlan")
     return TransitionEffectPlan(transitions=transitions)
