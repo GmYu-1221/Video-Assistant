@@ -17,7 +17,7 @@ _QWEN_TRANSITION_PARAMS = {
 
 
 def _default_qwen_transition(scene, next_scene) -> TransitionEffectPlanItem | None:
-    """Use the sole production transition when a scene cut has no effect event.
+    """Use the deterministic transition when an image boundary has no effect.
 
     The legacy ``TransitionConfig`` remains in the serialized schema for old
     projects, but it must never silently select fade/push/etc. at render time.
@@ -34,7 +34,12 @@ def _default_qwen_transition(scene, next_scene) -> TransitionEffectPlanItem | No
         duration_frames=duration,
         params={"template_id": "qwen3_8", "parameters": dict(_QWEN_TRANSITION_PARAMS)},
         implementation="new",
-        design={"source": "production_default"},
+        design={
+            "source": "production_default",
+            "requested_template_id": None,
+            "resolved_template_id": "qwen3_8",
+            "fallback_reason": "missing_registered_transition",
+        },
     )
 
 def _normalize_transition_event(event: VisualEvent, scene) -> VisualEvent:
@@ -107,21 +112,15 @@ def compile_render_plan(project: VideoProject, storyboard, creative_plan: Remoti
         if legacy_transition is None and transition_event and transition_event.type in {item.value for item in TransitionEffectType} and transition_event.target_asset_id:
             legacy_transition = TransitionEffectPlanItem(from_asset_id=transition_event.source_asset_id or scene.asset_id, to_asset_id=transition_event.target_asset_id, type=TransitionEffectType(transition_event.type), duration_frames=transition_event.duration_frames, params=transition_event.params)
         existing = project.timeline[len(timeline)] if len(timeline) < len(project.timeline) else None
-        # qwen3_8 is the only production transition. Do not fall back to the
-        # legacy TransitionConfig (fade/push/whip) when an agent omitted an
-        # effect event for a real scene cut.
+        # Every URL image boundary must have a registered template effect. Do
+        # not fall back to the legacy TransitionConfig (fade/push/whip).
         next_scene = storyboard.scenes[len(timeline) + 1] if len(timeline) + 1 < len(storyboard.scenes) else None
-        if (
-            legacy_transition is None
-            and next_scene is not None
-            and existing is not None
-            and existing.resolved_state is not None
-            and existing.resolved_state.boundary_action.value == "scene_cut"
-        ):
+        if legacy_transition is None and next_scene is not None:
             legacy_transition = _default_qwen_transition(scene, next_scene)
-        if existing and existing.resolved_state and existing.resolved_state.boundary_action.value != "scene_cut":
-            events = [event for event in events if event.phase != "transition"]
-            legacy_transition = None
+            if legacy_transition is None:
+                raise ValueError(f"图片边界 {scene.asset_id}->{next_scene.asset_id} 时长不足，无法满足注册转场最小时长")
+        if next_scene is not None and legacy_transition is None:
+            raise ValueError(f"图片边界 {scene.asset_id}->{next_scene.asset_id} 缺少注册转场效果")
         timeline.append(TimelineItem(asset_id=scene.asset_id, start_frame=cursor, end_frame=end, duration_frames=scene.duration_frames, transition=scene.transition, animation=legacy_animation, transition_effect=legacy_transition, visual_events=events, narrative=existing.narrative if existing else None, layout=existing.layout if existing else None, resolved_state=existing.resolved_state.model_copy(update={"start_frame": cursor, "end_frame": end}) if existing and existing.resolved_state else None))
         cursor = end
     project_dir = Path(project.output.project_dir).resolve()

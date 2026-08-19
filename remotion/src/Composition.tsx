@@ -43,9 +43,8 @@ export const Slideshow: React.FC<RemotionProps> = (props) => {
           duration_frames: Math.min(item.transition_effect.duration_frames, item.duration_frames, nextItem.duration_frames),
         };
         // There is deliberately no legacy transition fallback here. A scene
-        // boundary either has the registered qwen3_8 template or is a hard
-        // cut. This prevents old fade/push/etc. effects from leaking into
-        // newly rendered videos.
+        // Every outgoing image boundary uses a registered template. There is
+        // deliberately no legacy fade/push/etc. fallback.
         return safeTransitionEffect
           ? [sequence, TransitionEffectRenderer(safeTransitionEffect as TransitionEffectPlan, `transition-effect-${item.asset_id}`)]
           : [sequence];

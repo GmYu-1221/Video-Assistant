@@ -7,6 +7,7 @@ import {SceneLayoutRenderer} from '../layout/SceneLayoutRenderer';
 import {PersistentTitleRenderer} from '../layout/PersistentTitleRenderer';
 import {BackgroundVideoLayer} from '../components/BackgroundVideoLayer';
 import {getQwen38TransitionState} from '../transitions/templates/qwen3-8-state';
+import {getZoomWhipV2State} from '../transitions/templates/zoom-whip-v2-state';
 import {CaptionTemplateLayer} from '../caption-templates/CaptionTemplateLayer';
 
 const Layer: React.FC<{layer: VisualSpecLayer; region: {x: number; y: number; width: number; height: number; overflow?: 'visible'|'hidden'}; frame: number; props: RemotionPropsWithVisualSpec; transitionTracks?: VisualSpecTrack[]}> = ({layer, region, frame, props, transitionTracks}) => {
@@ -44,20 +45,33 @@ export const VisualSpecComposition: React.FC<RemotionPropsWithVisualSpec> = (pro
   if (timelineItem?.layout && timelineItem.narrative && timelineItem.resolved_state) {
     const localFrame = frame - timelineItem.start_frame;
     const previous = props.timeline[Math.max(0, props.timeline.indexOf(timelineItem) - 1)];
-    const qwenEffect = previous?.transition_effect?.params.template_id === 'qwen3_8' ? previous.transition_effect : undefined;
-    const transitionFrames = Math.min(qwenEffect?.duration_frames ?? 0, timelineItem.duration_frames);
-    const transitionActive = Boolean(qwenEffect) && localFrame < transitionFrames;
+    const transitionEffect = previous?.transition_effect;
+    const transitionFrames = Math.min(transitionEffect?.duration_frames ?? 0, timelineItem.duration_frames);
+    const transitionActive = Boolean(transitionEffect) && localFrame < transitionFrames;
     const progress = transitionActive ? Math.min(1, localFrame / Math.max(1, transitionFrames - 1)) : 1;
-    const qwenState = getQwen38TransitionState(progress, qwenEffect?.params.parameters ?? {});
-    const incomingMediaStyle: React.CSSProperties = transitionActive ? {
+    const parameters = transitionEffect?.params.parameters ?? {};
+    const templateId = transitionEffect?.params.template_id;
+    const qwenState = getQwen38TransitionState(progress, parameters);
+    const zoomIncoming = getZoomWhipV2State(progress, 'entering', parameters);
+    const zoomOutgoing = getZoomWhipV2State(progress, 'exiting', parameters);
+    const incomingMediaStyle: React.CSSProperties = transitionActive && templateId === 'zoom_whip_v2' ? {
+      opacity: zoomIncoming.opacity,
+      filter: zoomIncoming.blurPx === 0 ? 'none' : `blur(${zoomIncoming.blurPx}px)`,
+      transform: `translateX(${zoomIncoming.translateXPct}%) scale(${zoomIncoming.scale})`,
+    } : transitionActive && templateId === 'qwen3_8' ? {
       opacity: qwenState.opacity,
       filter: qwenState.blurPx === 0 ? 'none' : `blur(${qwenState.blurPx}px)`,
       transform: qwenState.translateYPct === 0 ? 'none' : `translateY(${qwenState.translateYPct}%)`,
     } : {};
+    const outgoingMediaStyle: React.CSSProperties = transitionActive && templateId === 'zoom_whip_v2' ? {
+      opacity: zoomOutgoing.opacity,
+      filter: zoomOutgoing.blurPx === 0 ? 'none' : `blur(${zoomOutgoing.blurPx}px)`,
+      transform: `translateX(${zoomOutgoing.translateXPct}%) scale(${zoomOutgoing.scale})`,
+    } : {};
     return <AbsoluteFill style={{background: props.background_video ? 'transparent' : '#000'}}>
       <BackgroundVideoLayer config={props.background_video} mediaBaseUrl={props.media_base_url} tintColor={(timelineItem.layout as any).background?.color ?? '#101214'}/>
       <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={timelineItem.resolved_state.visibility !== 'hidden'} showMedia={!transitionActive} showText={!props.caption_template_plan} transparentBackground={Boolean(props.background_video)}/>
-      {transitionActive && previous?.layout && previous.narrative && <SceneLayoutRenderer layout={previous.layout} narrative={previous.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} transparentBackground/>}
+      {transitionActive && previous?.layout && previous.narrative && <SceneLayoutRenderer layout={previous.layout} narrative={previous.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={outgoingMediaStyle} transparentBackground/>}
       {transitionActive && <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={incomingMediaStyle} transparentBackground/>}
       {props.caption_template_plan ? <CaptionTemplateLayer
         plan={props.caption_template_plan}

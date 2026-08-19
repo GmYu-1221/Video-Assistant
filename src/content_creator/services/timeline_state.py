@@ -41,11 +41,14 @@ def default_url_actions(timeline, assets) -> list[DirectorTimelineAction]:
             media, copy, layout, boundary, scene = StateAction.replace, CopyAction.replace, LayoutAction.replace, BoundaryAction.continuous, "scene-000"
             sources, purpose = ["article:summary"], "opening"
         else:
-            scene_cut = index % 3 == 0
-            boundary = BoundaryAction.scene_cut if scene_cut else BoundaryAction.accent if index % 2 else BoundaryAction.continuous
-            scene = f"scene-{index // 3:03d}"
+            # Every URL image replacement is a real visual boundary. The
+            # Director may still describe continuity in its raw plan, but the
+            # production normalization below assigns a fresh scene and a
+            # registered full transition for each changed image.
+            boundary = BoundaryAction.scene_cut
+            scene = f"scene-{index:03d}"
             media, copy = StateAction.replace, CopyAction.replace
-            layout = LayoutAction.replace if scene_cut else LayoutAction.adapt
+            layout = LayoutAction.replace
             sources = ["article:conclusion" if index == len(timeline) - 1 else f"article:body:{index - 1}"]
             purpose = "conclusion" if index == len(timeline) - 1 else "explanation" if index == 1 else "evidence"
         actions.append(DirectorTimelineAction(
@@ -58,6 +61,35 @@ def default_url_actions(timeline, assets) -> list[DirectorTimelineAction]:
             reason="Continuity-aware URL Director fallback.",
         ))
     return actions
+
+
+def normalize_image_boundaries(actions: list[DirectorTimelineAction]) -> tuple[list[DirectorTimelineAction], list[dict]]:
+    """Force every URL media replacement after the first item to be a scene cut."""
+    normalized: list[DirectorTimelineAction] = []
+    audit: list[dict] = []
+    for index, action in enumerate(actions):
+        if index == 0 or action.media_action != StateAction.replace:
+            normalized.append(action)
+            continue
+        requested = action.boundary_action
+        changed = requested != BoundaryAction.scene_cut or action.layout_action != LayoutAction.replace
+        updated = action.model_copy(update={
+            "scene_id": f"scene-{index:03d}",
+            "boundary_action": BoundaryAction.scene_cut,
+            "layout_action": LayoutAction.replace,
+            "reason": f"{action.reason} Media replacement requires a registered full transition.",
+        })
+        normalized.append(updated)
+        audit.append({
+            "segment_id": action.segment_id,
+            "requested_boundary_action": requested.value,
+            "resolved_boundary_action": BoundaryAction.scene_cut.value,
+            "requested_layout_action": action.layout_action.value,
+            "resolved_layout_action": LayoutAction.replace.value,
+            "forced_scene_cut": changed,
+            "reason": "media_replace_requires_registered_transition",
+        })
+    return normalized, audit
 
 
 def validate_and_partially_resolve(actions: list[DirectorTimelineAction], media_ids: set[str]) -> list[PartialTimelineItem]:
@@ -252,6 +284,7 @@ def _bind_layout(layout: SceneLayoutSpec, narrative: SceneNarrative, media_id: s
 
 
 def resolve_timeline(actions: list[DirectorTimelineAction], media_profiles: dict[str, ImageSemanticProfile | None], *, title: str, body: str, summary: str, layout_context: dict | None = None, layout_preferences: dict | None = None, copy_plan: ViralCopyPlan | None = None) -> ResolvedBundle:
+    actions, boundary_audit = normalize_image_boundaries(actions)
     partial = validate_and_partially_resolve(actions, set(media_profiles))
     narratives, segment_copy = freeze_narratives(partial, title=title, body=body, summary=summary, copy_plan=copy_plan)
     request_narratives: dict[str, SceneNarrative] = {}
@@ -316,4 +349,4 @@ def resolve_timeline(actions: list[DirectorTimelineAction], media_profiles: dict
         resolved.append(ResolvedTimelineItem(segment_id=item.segment_id, scene_id=item.scene_id, start_frame=cursor, end_frame=end, duration_frames=item.duration_frames, resolved_media_id=item.resolved_media_id, resolved_copy_id=copy_id, resolved_layout_id=layout.layout_id, visibility="visible" if copy_id else "hidden", boundary_action=item.boundary_action, requested_layout_action=requested, resolved_layout_action=resolved_action, override_reason=override_reason, transition=item.transition))
         audit.append({"segment_id": item.segment_id, "requested_layout_action": requested.value, "resolved_layout_action": resolved_action.value, "override_reason": override_reason})
         cursor = end
-    return ResolvedBundle(actions=actions, partial=partial, resolved=resolved, narratives=narratives, layouts=layouts, segment_narratives=segment_narratives, segment_layouts=segment_layouts, audit=audit, layout_diagnostics=layout_diagnostics)
+    return ResolvedBundle(actions=actions, partial=partial, resolved=resolved, narratives=narratives, layouts=layouts, segment_narratives=segment_narratives, segment_layouts=segment_layouts, audit=boundary_audit + audit, layout_diagnostics=layout_diagnostics)

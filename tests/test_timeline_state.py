@@ -1,7 +1,7 @@
 import pytest
 
 from content_creator.schemas import BoundaryAction, ContentVariant, CopyAction, DirectorTimelineAction, ImageSemanticProfile, LayoutAction, StateAction, TransitionConfig
-from content_creator.services.timeline_state import resolve_timeline, validate_and_partially_resolve
+from content_creator.services.timeline_state import normalize_image_boundaries, resolve_timeline, validate_and_partially_resolve
 
 
 def action(segment, scene, *, media=StateAction.hold, copy=CopyAction.hold, layout=LayoutAction.hold, boundary=BoundaryAction.continuous, replacement=None, sources=None):
@@ -45,11 +45,25 @@ def test_required_continuity_combinations_resolve_to_actual_state():
     assert copy_change.resolved_copy_id != first.resolved_copy_id
     assert copy_change.resolved_layout_id == first.resolved_layout_id
     assert media_change.resolved_copy_id == copy_change.resolved_copy_id
-    assert media_change.resolved_layout_action == LayoutAction.adapt
+    assert media_change.boundary_action == BoundaryAction.scene_cut
+    assert media_change.resolved_layout_action == LayoutAction.replace
     assert cut.scene_id != media_change.scene_id
     assert cut.boundary_action == BoundaryAction.scene_cut
     assert cut.resolved_layout_id != media_change.resolved_layout_id
     assert all(not hasattr(state, "media_action") for state in bundle.resolved)
+
+
+def test_every_media_replacement_after_first_is_normalized_to_scene_cut():
+    requested = [
+        initial(),
+        action("s1", "scene-a", media=StateAction.replace, layout=LayoutAction.adapt, boundary=BoundaryAction.continuous, replacement="b"),
+        action("s2", "scene-a", media=StateAction.replace, layout=LayoutAction.adapt, boundary=BoundaryAction.accent, replacement="c"),
+    ]
+    normalized, audit = normalize_image_boundaries(requested)
+    assert normalized[0].boundary_action == BoundaryAction.continuous
+    assert [item.boundary_action for item in normalized[1:]] == [BoundaryAction.scene_cut, BoundaryAction.scene_cut]
+    assert len({item.scene_id for item in normalized}) == 3
+    assert [item["requested_boundary_action"] for item in audit] == ["continuous", "accent"]
 
 
 def test_semantic_variants_share_one_unit_and_hold_layout_rebinds_copy():
@@ -67,4 +81,5 @@ def test_opening_dynamic_narrative_does_not_repeat_persistent_title():
     assert all("固定文章标题" not in content.full for content in narrative.contents)
     blocks = bundle.segment_layouts["s0"].text_blocks
     assert len(blocks) == 1
-    assert blocks[0].bbox.y >= 1265
+    media = bundle.segment_layouts["s0"].media_blocks[0].bbox
+    assert blocks[0].bbox.y + blocks[0].bbox.height <= media.y or blocks[0].bbox.y >= media.y + media.height

@@ -347,7 +347,12 @@ def _parse_llm_transition_effect(raw: str, from_item, to_item) -> TransitionEffe
         duration_frames=duration_frames,
         params=clean_params,
         implementation="new",
-        design={"transition_intent": from_item.transition_intent.model_dump()},
+        design={
+            "transition_intent": from_item.transition_intent.model_dump(),
+            "requested_template_id": template_id,
+            "resolved_template_id": template_id,
+            "fallback_reason": None,
+        },
     )
 
 
@@ -392,7 +397,7 @@ def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> Transiti
     provider = provider or get_agent_provider("remotion")
     transitions: list[TransitionEffectPlanItem] = []
 
-    def qwen_fallback(item, next_item, reason: str) -> TransitionEffectPlanItem | None:
+    def qwen_fallback(item, next_item, reason: str, requested_template_id: str | None = None) -> TransitionEffectPlanItem | None:
         duration = min(27, item.duration_frames, next_item.duration_frames)
         if duration < 12:
             return None
@@ -407,13 +412,26 @@ def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> Transiti
                 "recovery_speed": 0.7,
                 "opacity_start": 0.88,
             }},
-            design={"requested_template_id": None, "resolved_template_id": "qwen3_8", "fallback_reason": reason},
+            design={"requested_template_id": requested_template_id, "resolved_template_id": "qwen3_8", "fallback_reason": reason},
         )
 
+    def requested_template(raw: str | None) -> str | None:
+        if not raw:
+            return None
+        try:
+            payload = extract_json_object(raw)
+            params = payload.get("params", {})
+            return params.get("template_id") if isinstance(params, dict) and isinstance(params.get("template_id"), str) else None
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+
     for index, item in enumerate(plan.timeline[:-1]):
-        if item.transition_intent is None:
-            continue
         next_item = plan.timeline[index + 1]
+        if item.transition_intent is None:
+            fallback = qwen_fallback(item, next_item, "no_transition_intent")
+            if fallback:
+                transitions.append(fallback)
+            continue
         if provider.model_name == "mock":
             logger.warning("[Remotion Agent] LLM unavailable; using qwen3_8 fallback")
             fallback = qwen_fallback(item, next_item, "model_unavailable")
@@ -421,6 +439,7 @@ def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> Transiti
                 transitions.append(fallback)
             continue
         logger.info("[Remotion Agent] transition intent analyzed")
+        raw = None
         try:
             complete_json = getattr(provider, "complete_json", None) or provider.complete
             raw = complete_json(_transition_prompt(item.transition_intent, item, next_item))
@@ -433,17 +452,17 @@ def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> Transiti
                 transitions.append(fallback)
         except InvalidAnimationResponse as exc:
             logger.warning("[Remotion Agent] Invalid response; using qwen3_8 fallback (%s)", exc)
-            fallback = qwen_fallback(item, next_item, "invalid_response")
+            fallback = qwen_fallback(item, next_item, "invalid_response", requested_template(raw))
             if fallback:
                 transitions.append(fallback)
         except UnknownTransitionEffect as exc:
             logger.warning("[Remotion Agent] Unavailable transition; using qwen3_8 fallback (%s)", exc)
-            fallback = qwen_fallback(item, next_item, "unknown_template")
+            fallback = qwen_fallback(item, next_item, "unknown_template", requested_template(raw))
             if fallback:
                 transitions.append(fallback)
         except ValueError as exc:
             logger.warning("[Remotion Agent] Invalid response; using qwen3_8 fallback (%s)", exc)
-            fallback = qwen_fallback(item, next_item, "invalid_response")
+            fallback = qwen_fallback(item, next_item, "invalid_response", requested_template(raw))
             if fallback:
                 transitions.append(fallback)
         else:

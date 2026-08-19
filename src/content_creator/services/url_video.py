@@ -424,6 +424,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     output = VideoOutput(project_dir=str(project_dir), render_data=str(project_dir / "render_data.json"), final_video=str(project_dir / "render" / "final.mp4"))
     progress("Director 编排连续性状态")
     actions = default_url_actions(timeline, assets)
+    requested_actions = list(actions)
     profiles = {asset.id: asset.semantic_profile for asset in assets}
     preference_summary = TypographyPreferenceStore(root).summary_for(brief)
     layout_context = article_context(brief)
@@ -515,7 +516,8 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         narrative = bundle.segment_narratives[state.segment_id]
         independent.append((layout, narrative.scene_purpose, profiles[state.resolved_media_id]))
     qa["layout_monotony"] = [issue.model_dump(mode="json") for issue in detect_layout_monotony(independent)]
-    (project_dir / "director_timeline.json").write_text(json.dumps({"actions": [item.model_dump(mode="json") for item in actions], "partial_state": [item.model_dump(mode="json") for item in bundle.partial], "resolved_state": [item.model_dump(mode="json") for item in bundle.resolved], "safety_overrides": bundle.audit}, ensure_ascii=False, indent=2), encoding="utf-8")
+    director_timeline_payload = {"requested_actions": [item.model_dump(mode="json") for item in requested_actions], "actions": [item.model_dump(mode="json") for item in actions], "partial_state": [item.model_dump(mode="json") for item in bundle.partial], "resolved_state": [item.model_dump(mode="json") for item in bundle.resolved], "safety_overrides": bundle.audit, "transition_resolution": []}
+    (project_dir / "director_timeline.json").write_text(json.dumps(director_timeline_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     (project_dir / "layout_qa.json").write_text(json.dumps(qa, ensure_ascii=False, indent=2), encoding="utf-8")
     final_texts = []
     text_block_count = 0
@@ -555,6 +557,32 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     project = VideoProject(project_id=project_id, fps=REFERENCE_FPS, width=REFERENCE_WIDTH, height=REFERENCE_HEIGHT, images=assets, audio=AudioConfig(path=f"audio/{copied_audio.name}", source_path=f"audio/{copied_audio.name}", duration=actual_duration, sample_rate=analysis.sample_rate, bpm=analysis.bpm), background_video=background_video, timeline=updated_timeline, output=output, video_copy=copy, persistent_title=persistent_title, caption_template_plan=template_plan)
     progress("编排动态布局视频")
     project = compile_render_plan(project, _storyboard_from_timeline(project), creative_plan=None)
+    transition_resolution = []
+    boundary_audit_by_segment = {entry["segment_id"]: entry for entry in bundle.audit if "requested_boundary_action" in entry}
+    for index, item in enumerate(project.timeline):
+        if index == len(project.timeline) - 1:
+            if item.transition_effect is not None:
+                raise ValueError("末图不得包含 outgoing transition_effect")
+            continue
+        next_item = project.timeline[index + 1]
+        effect = item.transition_effect
+        if effect is None:
+            raise ValueError(f"图片边界 {item.asset_id}->{next_item.asset_id} 缺少注册转场效果")
+        if effect.from_asset_id != item.asset_id or effect.to_asset_id != next_item.asset_id:
+            raise ValueError(f"图片边界转场引用不相邻素材：{effect.from_asset_id}->{effect.to_asset_id}")
+        transition_resolution.append({
+            "from_segment_id": item.resolved_state.segment_id,
+            "to_segment_id": next_item.resolved_state.segment_id,
+            "requested_boundary_action": boundary_audit_by_segment.get(next_item.resolved_state.segment_id, {}).get("requested_boundary_action", next_item.resolved_state.boundary_action.value),
+            "resolved_boundary_action": next_item.resolved_state.boundary_action.value,
+            "requested_transition_template_id": effect.design.get("requested_template_id"),
+            "resolved_transition_template_id": effect.params["template_id"],
+            "transition_fallback_reason": effect.design.get("fallback_reason"),
+            "duration_frames": effect.duration_frames,
+            "parameters": effect.params.get("parameters", {}),
+        })
+    director_timeline_payload["transition_resolution"] = transition_resolution
+    (project_dir / "director_timeline.json").write_text(json.dumps(director_timeline_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     # Rendered previews are durable QA evidence and are generated with the
     # exact same composition, bundled fonts, and media URL strategy as final.
     # Render all Chromium stills first, then critique scenes concurrently. A
@@ -613,6 +641,28 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
 
 
 def _storyboard_from_timeline(project: VideoProject):
-    from content_creator.schemas import DirectorPlan, DirectorTimelineItem
+    from content_creator.schemas import CreativeIntent, DirectorPlan, DirectorTimelineItem
     from content_creator.agents.director_agent import plan_to_storyboard
-    return plan_to_storyboard(DirectorPlan(timeline=[DirectorTimelineItem(asset_id=item.asset_id, duration_frames=item.duration_frames, transition=item.transition, transition_strength=item.transition.intensity, reason="URL reference reel") for item in project.timeline]), "reference_reel")
+    timeline = []
+    for index, item in enumerate(project.timeline):
+        next_item = project.timeline[index + 1] if index + 1 < len(project.timeline) else None
+        purpose = item.narrative.scene_purpose if item.narrative else "article"
+        next_purpose = next_item.narrative.scene_purpose if next_item and next_item.narrative else "article"
+        transition_intent = None if next_item is None else CreativeIntent(
+            scene_id=item.asset_id,
+            description=f"为 {purpose} 到 {next_purpose} 的图片边界选择一个已注册的完整转场，保持字幕层稳定。",
+            movement="完整图片边界切换",
+            emotion="快节奏但清晰",
+            timing="在相邻图片边界完成",
+            style="editorial",
+            energy=0.65,
+        )
+        timeline.append(DirectorTimelineItem(
+            asset_id=item.asset_id,
+            duration_frames=item.duration_frames,
+            transition=item.transition,
+            transition_strength=item.transition.intensity,
+            reason="URL registered transition boundary",
+            transition_intent=transition_intent,
+        ))
+    return plan_to_storyboard(DirectorPlan(timeline=timeline), "reference_reel")

@@ -35,6 +35,14 @@ def transition_plan() -> DirectorPlan:
     ]})
 
 
+def transition_plan_without_intent() -> DirectorPlan:
+    return DirectorPlan.model_validate({"timeline": [
+        {"asset_id": "image-001", "duration_frames": 60},
+        {"asset_id": "image-002", "duration_frames": 60},
+        {"asset_id": "image-003", "duration_frames": 60},
+    ]})
+
+
 def test_transition_effect_type_is_only_template_infrastructure():
     assert [item.value for item in TransitionEffectType] == ["template_transition"]
 
@@ -60,6 +68,16 @@ def test_empty_registry_skips_transition_without_calling_llm(caplog, monkeypatch
     assert "No registered transition templates" in caplog.text
 
 
+def test_every_image_boundary_gets_qwen_without_transition_intent():
+    result = create_transition_effect_plan(transition_plan_without_intent(), provider=RecordingProvider())
+    assert len(result.transitions) == 2
+    assert [(item.from_asset_id, item.to_asset_id) for item in result.transitions] == [
+        ("image-001", "image-002"), ("image-002", "image-003"),
+    ]
+    assert all(item.params["template_id"] == "qwen3_8" for item in result.transitions)
+    assert all(item.design["fallback_reason"] == "no_transition_intent" for item in result.transitions)
+
+
 def test_unknown_and_disabled_templates_are_rejected(monkeypatch):
     with pytest.raises(ValueError, match="Unknown transition template"):
         get_transition_template("missing")
@@ -80,6 +98,7 @@ def test_unregistered_template_is_rejected():
     assert provider.calls == 1
     assert len(result.transitions) == 1
     assert result.transitions[0].params["template_id"] == "qwen3_8"
+    assert result.transitions[0].design["requested_template_id"] == "missing_template"
     assert result.transitions[0].design["fallback_reason"] == "invalid_response"
 
 
@@ -173,8 +192,35 @@ def test_remotion_registry_dispatches_qwen3_8_through_generic_framework():
     dispatcher = Path("remotion/src/transitions/templates/TemplateTransition.tsx").read_text(encoding="utf-8")
     assert "template_transition: templateTransition" in renderer
     assert "qwen3_8: Qwen38Transition" in registry
+    assert "zoom_whip_v2: ZoomWhipV2Transition" in registry
     assert "TemplatePresentationRegistry[props.passedProps.template_id]" in dispatcher
     assert "qwen3_8" not in dispatcher
+
+
+def test_zoom_whip_v2_state_animates_both_sides_and_settles():
+    state_path = Path("remotion/src/transitions/templates/zoom-whip-v2-state.ts").resolve()
+    script = r"""
+const fs = require('fs');
+const ts = require('./remotion/node_modules/typescript');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const output = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
+const loaded = {exports: {}};
+new Function('module', 'exports', output)(loaded, loaded.exports);
+const p = {zoom: 1.08, distance: 12, blur: 10};
+process.stdout.write(JSON.stringify({
+  outgoingMid: loaded.exports.getZoomWhipV2State(.68, 'exiting', p),
+  outgoingEnd: loaded.exports.getZoomWhipV2State(1, 'exiting', p),
+  incomingStart: loaded.exports.getZoomWhipV2State(0, 'entering', p),
+  incomingEnd: loaded.exports.getZoomWhipV2State(1, 'entering', p),
+}));
+"""
+    states = json.loads(subprocess.run(["node", "-e", script, str(state_path)], check=True, capture_output=True, text=True).stdout)
+    assert states["outgoingMid"]["translateXPct"] == pytest.approx(-12)
+    assert states["outgoingMid"]["scale"] == pytest.approx(1.08)
+    assert states["outgoingEnd"]["opacity"] == 0
+    assert states["incomingStart"]["translateXPct"] == pytest.approx(18.6)
+    assert states["incomingStart"]["blurPx"] == pytest.approx(10.5)
+    assert states["incomingEnd"] == {"translateXPct": 0, "scale": 1, "blurPx": 0, "opacity": 1}
 
 
 def test_qwen3_8_state_is_deterministic_and_settles_to_identity():
