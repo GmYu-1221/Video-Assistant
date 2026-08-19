@@ -185,6 +185,12 @@ class ImageTag(BaseModel):
     entities: list[str] = Field(default_factory=list, max_length=12)
     salience: float = Field(default=0.5, ge=0, le=1)
     visual_quality: float = Field(default=0.5, ge=0, le=1)
+    analysis_status: Literal["verified", "fallback", "failed"] = "fallback"
+    is_logo: bool = False
+    is_advertisement: bool = False
+    is_page_ui: bool = False
+    information_value: float = Field(default=0.5, ge=0, le=1)
+    source_types: list[str] = Field(default_factory=list, max_length=8)
     section_index: int = Field(default=0, ge=0)
     contains_prominent_headline: bool | None = None
     embedded_headline_text: str = Field(default="", max_length=500)

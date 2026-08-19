@@ -14,9 +14,9 @@ export type ReferenceCaptionTemplateProps = {
 };
 
 const TOP_LINES = [
-  {id: 'top-primary', y: 92, height: 96, size: 62, color: '#FFD83D'},
-  {id: 'top-secondary', y: 210, height: 108, size: 58, color: '#FFD83D'},
-  {id: 'top-tertiary', y: 352, height: 84, size: 48, color: '#FFFFFF'},
+  {id: 'top-primary', y: 48, height: 112, size: 62, color: '#FFD83D'},
+  {id: 'top-secondary', y: 166, height: 112, size: 58, color: '#FFD83D'},
+  {id: 'top-tertiary', y: 292, height: 102, size: 48, color: '#FFFFFF'},
 ] as const;
 
 const textWrap: React.CSSProperties = {
@@ -147,7 +147,7 @@ export const ReferenceCaptionTemplate: React.FC<ReferenceCaptionTemplateProps> =
       >{props.topLines[index]}</div>)}
     </div>
 
-    <div data-template-block="media" style={{position: 'absolute', left: 0, top: 655, width: 1080, height: 610, overflow: 'hidden', zIndex: 5, backgroundColor: '#F1F4F8'}}>
+    <div data-template-block="media" style={{position: 'absolute', left: 0, top: 430, width: 1080, height: 610, overflow: 'hidden', zIndex: 5, backgroundColor: '#F1F4F8'}}>
       {props.mediaUrl ? <Img data-media-image src={props.mediaUrl} style={{display: 'block', width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center'}} /> : null}
     </div>
 
@@ -157,17 +157,17 @@ export const ReferenceCaptionTemplate: React.FC<ReferenceCaptionTemplateProps> =
       style={{
         ...textWrap,
         position: 'absolute',
-        left: 80,
-        top: 1325,
-        width: 920,
-        height: 500,
+        left: 70,
+        top: 1090,
+        width: 940,
+        height: 770,
         zIndex: 10,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         color: '#FFFFFF',
         fontFamily: getFontFamily(props.bodyFontId, 'body'),
-        fontSize: 36,
+        fontSize: 40,
         fontWeight: 400,
         lineHeight: 1.38,
         textAlign: 'center',

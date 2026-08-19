@@ -108,8 +108,8 @@ def validate_layout_audit(audit: dict, expected_frame: int) -> None:
         "top-primary": (60, 92, 960, 96),
         "top-secondary": (60, 210, 960, 108),
         "top-tertiary": (60, 352, 960, 84),
-        "media": (0, 655, 1080, 610),
-        "summary": (80, 1325, 920, 500),
+        "media": (0, 430, 1080, 610),
+        "summary": (70, 1090, 940, 770),
     }
     for block_id, geometry in expected.items():
         block = blocks.get(block_id)

@@ -9,6 +9,7 @@ import {BackgroundVideoLayer} from '../components/BackgroundVideoLayer';
 import {getQwen38TransitionState} from '../transitions/templates/qwen3-8-state';
 import {getZoomWhipV2State} from '../transitions/templates/zoom-whip-v2-state';
 import {CaptionTemplateLayer} from '../caption-templates/CaptionTemplateLayer';
+import {BackgroundImageLayer} from '../components/BackgroundImageLayer';
 
 const Layer: React.FC<{layer: VisualSpecLayer; region: {x: number; y: number; width: number; height: number; overflow?: 'visible'|'hidden'}; frame: number; props: RemotionPropsWithVisualSpec; transitionTracks?: VisualSpecTrack[]}> = ({layer, region, frame, props, transitionTracks}) => {
   const style = layer.style ?? {};
@@ -51,6 +52,8 @@ export const VisualSpecComposition: React.FC<RemotionPropsWithVisualSpec> = (pro
     const progress = transitionActive ? Math.min(1, localFrame / Math.max(1, transitionFrames - 1)) : 1;
     const parameters = transitionEffect?.params.parameters ?? {};
     const templateId = transitionEffect?.params.template_id;
+    const backgroundImageSrc = props.background_image ? `${props.media_base_url ?? ''}/${props.background_image.path}` : undefined;
+    const backgroundTint = (timelineItem.layout as any).background?.color ?? '#07090B';
     const qwenState = getQwen38TransitionState(progress, parameters);
     const zoomIncoming = getZoomWhipV2State(progress, 'entering', parameters);
     const zoomOutgoing = getZoomWhipV2State(progress, 'exiting', parameters);
@@ -68,9 +71,13 @@ export const VisualSpecComposition: React.FC<RemotionPropsWithVisualSpec> = (pro
       filter: zoomOutgoing.blurPx === 0 ? 'none' : `blur(${zoomOutgoing.blurPx}px)`,
       transform: `translateX(${zoomOutgoing.translateXPct}%) scale(${zoomOutgoing.scale})`,
     } : {};
-    return <AbsoluteFill style={{background: props.background_video ? 'transparent' : '#000'}}>
-      <BackgroundVideoLayer config={props.background_video} mediaBaseUrl={props.media_base_url} tintColor={(timelineItem.layout as any).background?.color ?? '#101214'}/>
-      <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={timelineItem.resolved_state.visibility !== 'hidden'} showMedia={!transitionActive} showText={!props.caption_template_plan} transparentBackground={Boolean(props.background_video)}/>
+    return <AbsoluteFill style={{background: '#07090B'}}>
+      {props.background_video ? (
+        <BackgroundVideoLayer config={props.background_video} mediaBaseUrl={props.media_base_url} tintColor={backgroundTint}/>
+      ) : (
+        <BackgroundImageLayer src={backgroundImageSrc} tintColor={backgroundTint} overlayOpacity={props.background_image?.overlay_opacity}/>
+      )}
+      <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={timelineItem.resolved_state.visibility !== 'hidden'} showMedia={!transitionActive} showText={!props.caption_template_plan} transparentBackground/>
       {transitionActive && previous?.layout && previous.narrative && <SceneLayoutRenderer layout={previous.layout} narrative={previous.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={outgoingMediaStyle} transparentBackground/>}
       {transitionActive && <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={incomingMediaStyle} transparentBackground/>}
       {props.caption_template_plan ? <CaptionTemplateLayer

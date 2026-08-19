@@ -19,8 +19,8 @@ def validate_scene_layout(spec: SceneLayoutSpec, narrative: SceneNarrative, prof
     if len(ids) != len(set(ids)):
         issues.append(LayoutIssue(code="duplicate_block_id", severity="critical", message="block IDs must be unique"))
     for media in spec.media_blocks:
-        if media.bbox != media.bbox.model_copy(update={"x": 0, "y": 655, "width": 1080, "height": 610}) or media.fit != "contain":
-            issues.append(LayoutIssue(code="media_stage_contract", severity="critical", block_id=media.block_id, message="URL media must use the fixed centered 1080x610 stage with contain fit"))
+        if media.bbox != media.bbox.model_copy(update={"x": 0, "y": 430, "width": 1080, "height": 610}) or media.fit != "contain":
+            issues.append(LayoutIssue(code="media_stage_contract", severity="critical", block_id=media.block_id, message="URL media must use the template centered 1080x610 stage with contain fit"))
     for text in spec.text_blocks:
         if text.bbox.x < SAFE or text.bbox.y < SAFE or text.bbox.x + text.bbox.width > 1080 - SAFE or text.bbox.y + text.bbox.height > 1920 - SAFE:
             issues.append(LayoutIssue(code="unsafe_text_margin", block_id=text.block_id, message="text must remain inside the 60px safe area"))

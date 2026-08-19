@@ -28,7 +28,7 @@ def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None,
     # The media stage is the only URL-wide geometry contract. Text placement
     # comes from free regions so a caption template can define its own slots;
     # this solver must not smuggle in a legacy title/body rectangle.
-    media_bbox = Rect(x=0, y=655, width=1080, height=610)
+    media_bbox = Rect(x=0, y=430, width=1080, height=610)
     first = narrative.contents[0]
     text_role = TypographyRole.caption if dense else TypographyRole.body
     palette = font_palette or [DEFAULT_FONT_ID]

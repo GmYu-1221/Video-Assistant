@@ -12,7 +12,7 @@ from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 
-from content_creator.schemas import AudioConfig, BackgroundVideoConfig, BoundaryAction, CaptionTemplatePlan, CaptionTemplateSlotBinding, CopyAction, ImageSemanticProfile, ImageTag, LayoutAction, LayoutPlan, TimelineItem, VideoCopy, VideoOutput, VideoProject
+from content_creator.schemas import AudioConfig, BackgroundImageConfig, BackgroundVideoConfig, BoundaryAction, CaptionTemplatePlan, CaptionTemplateSlotBinding, CopyAction, ImageSemanticProfile, ImageTag, LayoutAction, LayoutPlan, TimelineItem, VideoCopy, VideoOutput, VideoProject
 from content_creator.services.article import _brief_from_extraction, _is_verified_title_card, _title_match_score, analyze_candidate_thumbnails, augment_soup_with_selected_html, basic_asset_filter, capture_article_screenshots, chromium_available, classify_content_sufficiency, discover_asset_candidates, download_selected_assets, extract_article_html, fetch_article_with_extraction, image_tags_from_candidate_profiles, log_asset_diagnostics, order_images, prepare_candidate_thumbnails, select_assets_with_agent
 from content_creator.services.assets import scan_and_process
 from content_creator.services.music import analyze_audio, load_catalog, select_track
@@ -28,6 +28,7 @@ from content_creator.services.layout.preferences import TypographyPreferenceStor
 from content_creator.services.article_localization import build_localized_video_copy, localize_article_copy, validate_localized_display_text
 from content_creator.agents.viral_writer import create_viral_copy_plan, ordered_title_texts
 from content_creator.services.caption_templates import build_caption_template_plan, select_caption_template, get_caption_template, validate_caption_template_plan
+from content_creator.transitions import enabled_transition_templates
 
 REFERENCE_WIDTH = 1080
 REFERENCE_HEIGHT = 1920
@@ -37,6 +38,7 @@ URL_SEGMENT_MAX_SECONDS = 3.5
 URL_COPY_CHARS_PER_SECOND = 8.0
 URL_SEGMENT_BUFFER_SECONDS = 0.8
 BACKGROUND_VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
+BACKGROUND_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 SCREENSHOT_REAL_IMAGE_THRESHOLD = 4
 
 
@@ -99,6 +101,29 @@ def _select_background_video(source_dir: str | Path, project_dir: str | Path, *,
         path=f"background/{target.name}", source_filename=selected.name,
         duration=duration, width=width, height=height,
     )
+
+
+def _select_background_image(source_dir: str | Path, project_dir: str | Path, *, rng=None) -> BackgroundImageConfig:
+    source_root = Path(source_dir).expanduser().resolve()
+    if not source_root.is_dir():
+        raise ValueError(f"背景图片目录不存在：{source_root}")
+    candidates = sorted(path for path in source_root.iterdir() if path.is_file() and path.suffix.lower() in BACKGROUND_IMAGE_EXTENSIONS)
+    if not candidates:
+        raise ValueError(f"背景图片目录中没有可用图片：{source_root}")
+    selected = (rng or random.SystemRandom()).choice(candidates)
+    from PIL import Image
+    try:
+        with Image.open(selected) as image:
+            image.verify()
+        with Image.open(selected) as image:
+            width, height = image.size
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"无法读取背景图片：{selected.name}") from exc
+    target_dir = Path(project_dir) / "background"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"background{selected.suffix.lower()}"
+    shutil.copy2(selected, target)
+    return BackgroundImageConfig(path=f"background/{target.name}", source_filename=selected.name, width=width, height=height)
 
 
 def _retime_resolved_bundle(bundle, profiles: dict, *, bpm: float, fps: int) -> list[dict]:
@@ -340,7 +365,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         "article_body_source_hash": sha256(extraction.body.encode("utf-8")).hexdigest(),
     }
     (project_dir / "localized_copy.json").write_text(localized_copy.model_dump_json(indent=2), encoding="utf-8")
-    selected, contexts = order_images(article_images, tags, title=brief.title, target_count=asset_target_count)
+    selected, contexts = order_images(article_images, tags, title=brief.title, target_count=asset_target_count, diagnostics=diagnostics)
     if not selected:
         raise ValueError("正文有效，但没有可用于视频的视觉素材")
     diagnostics["asset_summary"].update({
@@ -353,7 +378,9 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     persist_manifest(filtered, decisions, visual_profiles, article_images, selected, selected_tags)
     opening_tag = tag_by_id.get(selected[0].id)
     opening_has_verified_headline = _is_verified_title_card(selected[0], opening_tag)
-    opening_reason = "verified_prominent_headline_title_match" if opening_has_verified_headline else "prominent_headline_unavailable"
+    opening_ranking = diagnostics.get("opening_image_ranking", {})
+    opening_reason = "verified_prominent_headline_title_match" if opening_has_verified_headline else opening_ranking.get("selection_reason", "highest_qualified_opening_score")
+    opening_score_by_id = {item["image_id"]: item for item in opening_ranking.get("scores", [])}
     diagnostics["selected_asset_order"] = [{
         "image_id": image.id,
         "source_url": image.source_url,
@@ -366,6 +393,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         "headline_readability": tag_by_id.get(image.id).headline_readability if tag_by_id.get(image.id) else 0,
         "headline_analysis_status": tag_by_id.get(image.id).headline_analysis_status if tag_by_id.get(image.id) else "unavailable",
         "opening_selection_reason": opening_reason if image.id == selected[0].id else "",
+        "opening_score": opening_score_by_id.get(image.id),
     } for image in selected]
     diagnostics["opening_image"] = {
         "image_id": selected[0].id,
@@ -400,13 +428,16 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     audio_dir.mkdir()
     copied_audio = audio_dir / source_audio.name
     shutil.copy2(source_audio, copied_audio)
-    progress("选择随机背景视频")
-    background_dir = os.getenv("URL_BACKGROUND_VIDEO_DIR", str(repo_root / "input" / "bgv"))
-    background_video = _select_background_video(background_dir, project_dir)
-    diagnostics["background_video"] = background_video.model_dump(mode="json") | {
+    progress("选择背景图片")
+    background_video = None
+    background_dir = os.getenv("URL_BACKGROUND_IMAGE_DIR", str(repo_root / "input" / "bgv"))
+    background_image = _select_background_image(background_dir, project_dir)
+    diagnostics["background"] = background_image.model_dump(mode="json") | {
+        "type": "library_image",
+        "fit": "cover",
+        "main_image_fit": "contain",
         "selection_mode": "random_once_per_project",
         "main_timeline_unchanged": True,
-        "duration_behavior": "loop_if_short_trim_if_long",
     }
     assets = scan_and_process(selected_dir, project_dir, (1920, 1080))
     selected_by_index = {index: image for index, image in enumerate(selected)}
@@ -573,7 +604,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         "render_path": "url_layout_renderer",
     }
     persist_diagnostics()
-    project = VideoProject(project_id=project_id, fps=REFERENCE_FPS, width=REFERENCE_WIDTH, height=REFERENCE_HEIGHT, images=assets, audio=AudioConfig(path=f"audio/{copied_audio.name}", source_path=f"audio/{copied_audio.name}", duration=actual_duration, sample_rate=analysis.sample_rate, bpm=analysis.bpm), background_video=background_video, timeline=updated_timeline, output=output, video_copy=copy, persistent_title=persistent_title, caption_template_plan=template_plan)
+    project = VideoProject(project_id=project_id, fps=REFERENCE_FPS, width=REFERENCE_WIDTH, height=REFERENCE_HEIGHT, images=assets, audio=AudioConfig(path=f"audio/{copied_audio.name}", source_path=f"audio/{copied_audio.name}", duration=actual_duration, sample_rate=analysis.sample_rate, bpm=analysis.bpm), background_video=background_video, background_image=background_image, timeline=updated_timeline, output=output, video_copy=copy, persistent_title=persistent_title, caption_template_plan=template_plan)
     progress("编排动态布局视频")
     project = compile_render_plan(project, _storyboard_from_timeline(project), creative_plan=None)
     transition_resolution = []
@@ -601,6 +632,15 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
             "parameters": effect.params.get("parameters", {}),
         })
     director_timeline_payload["transition_resolution"] = transition_resolution
+    enabled_template_ids = [item.id for item in enabled_transition_templates()]
+    resolved_template_ids = [item["resolved_transition_template_id"] for item in transition_resolution]
+    director_timeline_payload["transition_sequence"] = {
+        "enabled_template_ids": enabled_template_ids,
+        "boundary_count": len(transition_resolution),
+        "required_distinct_templates": min(2, len(transition_resolution), len(enabled_template_ids)),
+        "resolved_distinct_templates": sorted(set(resolved_template_ids)),
+        "resolved_sequence_template_ids": resolved_template_ids,
+    }
     (project_dir / "director_timeline.json").write_text(json.dumps(director_timeline_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     # Rendered previews are durable QA evidence and are generated with the
     # exact same composition, bundled fonts, and media URL strategy as final.

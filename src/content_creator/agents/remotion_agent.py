@@ -26,6 +26,7 @@ from content_creator.schemas import (
 from content_creator.services.llm.router import get_agent_provider
 from content_creator.transitions import (
     enabled_transition_templates,
+    get_transition_template,
     get_transition_template_capabilities,
     validate_transition_template_params,
 )
@@ -203,25 +204,42 @@ def _remotion_prompt(creative_intent: object, scene_duration: int) -> str:
     }, ensure_ascii=False)
 
 
-def _transition_prompt(transition_intent: object, from_item, to_item) -> str:
-    """Prompt only currently registered transition templates."""
+def _transition_sequence_prompt(plan: DirectorPlan) -> str:
+    """Ask once for a complete, registry-backed boundary sequence."""
     documents = {Path(path).parent.name: Path(path).read_text(encoding="utf-8") for path in load_skill_documents()}
+    boundaries = []
+    for index, item in enumerate(plan.timeline[:-1]):
+        next_item = plan.timeline[index + 1]
+        boundaries.append({
+            "boundary_id": f"boundary-{index:03d}",
+            "from_asset_id": item.asset_id,
+            "to_asset_id": next_item.asset_id,
+            "from_duration_frames": item.duration_frames,
+            "to_duration_frames": next_item.duration_frames,
+            "transition_intent": item.transition_intent.model_dump(mode="json") if item.transition_intent else None,
+        })
     return json.dumps({
         "role": "Remotion Creative Agent",
-        "task": "Turn the Director-owned transition_intent into one registered template transition, or omit it when no template fits.",
-        "transition_intent": transition_intent.model_dump(mode="json"),
-        "from_scene": {"asset_id": from_item.asset_id, "duration_frames": from_item.duration_frames},
-        "to_scene": {"asset_id": to_item.asset_id, "duration_frames": to_item.duration_frames},
+        "task": "Plan the complete image-boundary transition sequence using only enabled Registry templates. Every supplied boundary requires one transition.",
+        "boundaries": boundaries,
         "transition_template_capabilities": get_transition_template_capabilities(),
         "remotion_skill_guidelines": documents,
         "output_contract": {
-            "type": "template_transition",
-            "duration_frames": f"positive integer, at most {min(from_item.duration_frames, to_item.duration_frames)}",
-            "params": "{template_id: string, parameters: JSON-safe object}",
+            "transitions": [{
+                "boundary_id": "exact input boundary_id",
+                "from_asset_id": "exact input from_asset_id",
+                "to_asset_id": "exact input to_asset_id",
+                "type": "template_transition",
+                "duration_frames": "positive integer within the selected template and both scenes",
+                "params": "{template_id: string, parameters: JSON-safe object}",
+                "reason": "short semantic reason",
+            }],
         },
         "rules": [
-            "Return only one JSON object with exactly type, duration_frames, and params, or an empty object when no template is registered. Do not return Markdown.",
+            "Return one JSON object containing transitions. Do not return Markdown.",
+            "Return exactly one item for every supplied boundary and preserve all IDs exactly.",
             "Use only a template_id present in transition_template_capabilities.",
+            "Plan the sequence as a whole. When at least two boundaries and two templates are available, use at least two distinct templates; adjacent repetition is allowed.",
             "Never invent a template, renderer, component, TSX, CSS, path, module, import, or code.",
         ],
     }, ensure_ascii=False)
@@ -348,7 +366,7 @@ def _parse_llm_transition_effect(raw: str, from_item, to_item) -> TransitionEffe
         params=clean_params,
         implementation="new",
         design={
-            "transition_intent": from_item.transition_intent.model_dump(),
+            "transition_intent": from_item.transition_intent.model_dump() if from_item.transition_intent else None,
             "requested_template_id": template_id,
             "resolved_template_id": template_id,
             "fallback_reason": None,
@@ -390,83 +408,119 @@ def create_animation_plan(plan: DirectorPlan, mode: str | None = None, provider=
 
 
 def create_transition_effect_plan(plan: DirectorPlan, provider=None) -> TransitionEffectPlan:
-    """Design registered templates only; an empty registry means no effect."""
-    if not enabled_transition_templates():
+    """Plan all boundaries together, then repair only invalid or monotonous choices."""
+    templates = enabled_transition_templates()
+    if not templates:
         logger.warning("[Remotion Agent] No registered transition templates; skipping creative transition")
         return TransitionEffectPlan(transitions=[])
+    boundaries = list(zip(plan.timeline, plan.timeline[1:]))
+    if not boundaries:
+        return TransitionEffectPlan(transitions=[])
     provider = provider or get_agent_provider("remotion")
-    transitions: list[TransitionEffectPlanItem] = []
+    enabled_ids = [item.id for item in templates]
 
-    def qwen_fallback(item, next_item, reason: str, requested_template_id: str | None = None) -> TransitionEffectPlanItem | None:
-        duration = min(27, item.duration_frames, next_item.duration_frames)
-        if duration < 12:
-            return None
+    def fallback(item, next_item, template_id: str, reason: str, requested_template_id: str | None = None) -> TransitionEffectPlanItem:
+        definition = get_transition_template(template_id)
+        duration = min(definition.duration_default, item.duration_frames, next_item.duration_frames)
+        if duration < definition.duration_min:
+            compatible = [candidate for candidate in templates if min(item.duration_frames, next_item.duration_frames) >= candidate.duration_min]
+            if not compatible:
+                raise ValueError(f"图片边界 {item.asset_id}->{next_item.asset_id} 时长不足以容纳任何已注册转场")
+            definition = compatible[0]
+            template_id = definition.id
+            duration = min(definition.duration_default, item.duration_frames, next_item.duration_frames)
+        parameters = {name: spec.get("default") for name, spec in definition.params.items() if "default" in spec}
         return TransitionEffectPlanItem(
             from_asset_id=item.asset_id,
             to_asset_id=next_item.asset_id,
             type=TransitionEffectType.template_transition,
             duration_frames=duration,
-            params={"template_id": "qwen3_8", "parameters": {
-                "blur_strength": 0.8,
-                "float_distance": 0.55,
-                "recovery_speed": 0.7,
-                "opacity_start": 0.88,
-            }},
-            design={"requested_template_id": requested_template_id, "resolved_template_id": "qwen3_8", "fallback_reason": reason},
+            params={"template_id": template_id, "parameters": parameters},
+            implementation="fallback",
+            design={
+                "transition_intent": item.transition_intent.model_dump() if item.transition_intent else None,
+                "requested_template_id": requested_template_id,
+                "resolved_template_id": template_id,
+                "fallback_reason": reason,
+                "enabled_template_ids": enabled_ids,
+            },
         )
 
-    def requested_template(raw: str | None) -> str | None:
-        if not raw:
+    def requested_template(payload: object) -> str | None:
+        if not isinstance(payload, dict):
             return None
-        try:
-            payload = extract_json_object(raw)
-            params = payload.get("params", {})
-            return params.get("template_id") if isinstance(params, dict) and isinstance(params.get("template_id"), str) else None
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return None
+        params = payload.get("params", {})
+        return params.get("template_id") if isinstance(params, dict) and isinstance(params.get("template_id"), str) else None
 
-    for index, item in enumerate(plan.timeline[:-1]):
-        next_item = plan.timeline[index + 1]
-        if item.transition_intent is None:
-            fallback = qwen_fallback(item, next_item, "no_transition_intent")
-            if fallback:
-                transitions.append(fallback)
-            continue
-        if provider.model_name == "mock":
-            logger.warning("[Remotion Agent] LLM unavailable; using qwen3_8 fallback")
-            fallback = qwen_fallback(item, next_item, "model_unavailable")
-            if fallback:
-                transitions.append(fallback)
-            continue
-        logger.info("[Remotion Agent] transition intent analyzed")
-        raw = None
+    parsed_entries: dict[tuple[str, str], dict] = {}
+    sequence_error = "model_unavailable" if provider.model_name == "mock" else None
+    if provider.model_name != "mock":
+        logger.info("[Remotion Agent] planning %d transition boundaries as one sequence", len(boundaries))
         try:
             complete_json = getattr(provider, "complete_json", None) or provider.complete
-            raw = complete_json(_transition_prompt(item.transition_intent, item, next_item))
+            raw = complete_json(_transition_sequence_prompt(plan))
             logger.debug("[Remotion Transition RAW RESPONSE] %s", _safe_raw_response_log(raw))
-            transitions.append(_parse_llm_transition_effect(raw, item, next_item))
-        except (OSError, TimeoutError, ConnectionError) as exc:
-            logger.warning("[Remotion Agent] LLM unavailable; using qwen3_8 fallback")
-            fallback = qwen_fallback(item, next_item, "model_unavailable")
-            if fallback:
-                transitions.append(fallback)
-        except InvalidAnimationResponse as exc:
-            logger.warning("[Remotion Agent] Invalid response; using qwen3_8 fallback (%s)", exc)
-            fallback = qwen_fallback(item, next_item, "invalid_response", requested_template(raw))
-            if fallback:
-                transitions.append(fallback)
-        except UnknownTransitionEffect as exc:
-            logger.warning("[Remotion Agent] Unavailable transition; using qwen3_8 fallback (%s)", exc)
-            fallback = qwen_fallback(item, next_item, "unknown_template", requested_template(raw))
-            if fallback:
-                transitions.append(fallback)
-        except ValueError as exc:
-            logger.warning("[Remotion Agent] Invalid response; using qwen3_8 fallback (%s)", exc)
-            fallback = qwen_fallback(item, next_item, "invalid_response", requested_template(raw))
-            if fallback:
-                transitions.append(fallback)
+            payload = extract_json_object(raw)
+            entries = payload.get("transitions")
+            if not isinstance(entries, list):
+                # Keep one-boundary provider compatibility while the production
+                # prompt uses the sequence contract.
+                entries = [payload] if len(boundaries) == 1 else []
+            valid_keys = {(item.asset_id, next_item.asset_id) for item, next_item in boundaries}
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                key = (entry.get("from_asset_id"), entry.get("to_asset_id"))
+                if len(boundaries) == 1 and key == (None, None):
+                    key = next(iter(valid_keys))
+                if key in valid_keys and key not in parsed_entries:
+                    parsed_entries[key] = entry
+        except (OSError, TimeoutError, ConnectionError):
+            sequence_error = "model_unavailable"
+        except (InvalidAnimationResponse, ValueError, TypeError, json.JSONDecodeError) as exc:
+            logger.warning("[Remotion Agent] Invalid transition sequence; using Registry fallback (%s)", exc)
+            sequence_error = "invalid_sequence_response"
+
+    transitions: list[TransitionEffectPlanItem] = []
+    for index, (item, next_item) in enumerate(boundaries):
+        entry = parsed_entries.get((item.asset_id, next_item.asset_id))
+        if entry is not None:
+            try:
+                effect = _parse_llm_transition_effect(json.dumps(entry), item, next_item)
+                effect.design["enabled_template_ids"] = enabled_ids
+                effect.design["boundary_index"] = index
+                transitions.append(effect)
+                continue
+            except (InvalidAnimationResponse, UnknownTransitionEffect, ValueError) as exc:
+                logger.warning("[Remotion Agent] Invalid boundary %s->%s; repairing (%s)", item.asset_id, next_item.asset_id, exc)
+                reason = "invalid_response" if entry is not None else "invalid_boundary_response"
         else:
-            logger.info("[Remotion Agent] generated TransitionEffectPlan")
+            reason = sequence_error or "missing_boundary_response"
+        # Registry order is the stable deterministic fallback order. Cycling
+        # guarantees diversity without binding policy to concrete template IDs.
+        template_id = enabled_ids[index % len(enabled_ids)]
+        transitions.append(fallback(item, next_item, template_id, reason, requested_template(entry)))
+
+    required_distinct = min(2, len(boundaries), len(enabled_ids))
+    used_ids = {item.params["template_id"] for item in transitions}
+    if len(used_ids) < required_distinct:
+        alternatives = [template_id for template_id in enabled_ids if template_id not in used_ids]
+        if alternatives:
+            # Preserve all other Agent choices and replace only the final
+            # compatible boundary. Adjacent repetitions remain valid.
+            for index in range(len(transitions) - 1, -1, -1):
+                item, next_item = boundaries[index]
+                compatible = [template_id for template_id in alternatives if min(item.duration_frames, next_item.duration_frames) >= get_transition_template(template_id).duration_min]
+                if not compatible:
+                    continue
+                original = transitions[index]
+                repaired = fallback(item, next_item, compatible[0], "single_template_sequence_repaired", original.params["template_id"])
+                repaired.design["original_agent_design"] = original.design
+                transitions[index] = repaired
+                break
+    for item in transitions:
+        item.design["required_distinct_templates"] = required_distinct
+        item.design["resolved_sequence_template_ids"] = [effect.params["template_id"] for effect in transitions]
     return TransitionEffectPlan(transitions=transitions)
 
 

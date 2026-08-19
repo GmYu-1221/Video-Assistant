@@ -36,8 +36,8 @@ def _repair_rendered_overflow(layout, narrative, rendered):
         center = block.bbox.x + block.bbox.width / 2
         x = max(60, min(round(center - width / 2), 1020 - width))
         needed = block.bbox.height + vertical_overflow + (8 if vertical_overflow else 0)
-        if block.bbox.y < 655:
-            maximum = max(block.bbox.height, 655 - block.bbox.y)
+        if block.bbox.y < 430:
+            maximum = max(block.bbox.height, 430 - block.bbox.y)
         else:
             maximum = max(block.bbox.height, 1860 - block.bbox.y)
         updates: dict[str, Any] = {"bbox": block.bbox.model_copy(update={"x": x, "width": width, "height": min(maximum, max(block.bbox.height, needed))})}

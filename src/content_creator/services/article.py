@@ -1169,11 +1169,19 @@ def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidat
                 if not raw:
                     raise ValueError("empty_model_response")
                 parsed = [AssetDecision.model_validate(item) for item in json.loads(raw)["asset_decisions"]]
-                if {item.asset_id for item in parsed} != {item.id for item in eligible_candidates}:
-                    raise ValueError("asset agent returned incomplete or unknown asset IDs")
-                decisions = parsed
-                diagnostics["asset_agent"]["mode"] = "text_success" if attempt == 0 else "text_retry_success"
-                diagnostics["asset_agent"]["attempts"].append({"attempt": attempt + 1, "status": "success"})
+                expected_ids = {item.id for item in eligible_candidates}
+                parsed_ids = [item.asset_id for item in parsed]
+                if not parsed or len(parsed_ids) != len(set(parsed_ids)) or not set(parsed_ids) <= expected_ids:
+                    raise ValueError("asset agent returned duplicate or unknown asset IDs")
+                # Preserve every valid model decision. Missing candidates use
+                # their deterministic visual-profile decision instead of
+                # invalidating the complete global ranking response.
+                parsed_by_id = {item.asset_id: item for item in parsed}
+                fallback_by_id = {item.asset_id: item for item in fallback}
+                missing_ids = sorted(expected_ids - set(parsed_ids))
+                decisions = [parsed_by_id.get(item.id, fallback_by_id[item.id]) for item in eligible_candidates]
+                diagnostics["asset_agent"]["mode"] = ("text_partial_success" if missing_ids else "text_success") if attempt == 0 else ("text_retry_partial_success" if missing_ids else "text_retry_success")
+                diagnostics["asset_agent"]["attempts"].append({"attempt": attempt + 1, "status": "partial_success" if missing_ids else "success", "accepted_ids": parsed_ids, "missing_ids": missing_ids})
                 break
             except Exception as exc:
                 diagnostics["asset_agent"]["attempts"].append({"attempt": attempt + 1, "status": "failed", "error": f"{type(exc).__name__}: {exc}"})
@@ -1213,6 +1221,7 @@ def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidat
 
 def image_tags_from_candidate_profiles(images: list[ArticleImage], candidates: list[AssetCandidate], profiles: list[CandidateVisualProfile]) -> list[ImageTag]:
     by_asset_id = {item.asset_id: item for item in profiles}
+    candidate_by_url = {candidate.source_url: candidate for candidate in candidates}
     profile_by_url = {candidate.source_url: by_asset_id[candidate.id] for candidate in candidates if candidate.id in by_asset_id}
     tags: list[ImageTag] = []
     for image in images:
@@ -1220,7 +1229,13 @@ def image_tags_from_candidate_profiles(images: list[ArticleImage], candidates: l
         if profile is None:
             tags.append(_fallback_tag(image))
             continue
-        tags.append(ImageTag(image_id=image.id, candidate_profile_id=profile.asset_id, role=profile.role, topics=profile.topics, entities=profile.entities, salience=profile.relevance, visual_quality=profile.visual_quality, section_index=image.source_index, contains_prominent_headline=profile.contains_prominent_headline, embedded_headline_text=profile.embedded_headline_text, headline_prominence=profile.headline_prominence, headline_title_match_score=profile.title_match_score, headline_bbox=profile.headline_bbox, headline_readability=profile.headline_readability, headline_analysis_status="verified" if profile.analysis_status == "verified" else "unavailable", headline_exclusion_reason=profile.exclusion_reason))
+        information_value = {
+            ImageRole.data: .95, ImageRole.evidence: .85, ImageRole.diagram: .85,
+            ImageRole.result: .85, ImageRole.product: .65, ImageRole.overview: .55,
+            ImageRole.hero: .35, ImageRole.brand: .25,
+        }.get(profile.role, .45)
+        candidate = candidate_by_url.get(image.source_url)
+        tags.append(ImageTag(image_id=image.id, candidate_profile_id=profile.asset_id, role=profile.role, topics=profile.topics, entities=profile.entities, salience=profile.relevance, visual_quality=profile.visual_quality, analysis_status=profile.analysis_status, is_logo=profile.is_logo, is_advertisement=profile.is_advertisement, is_page_ui=profile.is_page_ui, information_value=information_value, source_types=list(candidate.source_types) if candidate else [], section_index=image.source_index, contains_prominent_headline=profile.contains_prominent_headline, embedded_headline_text=profile.embedded_headline_text, headline_prominence=profile.headline_prominence, headline_title_match_score=profile.title_match_score, headline_bbox=profile.headline_bbox, headline_readability=profile.headline_readability, headline_analysis_status="verified" if profile.analysis_status == "verified" else "unavailable", headline_exclusion_reason=profile.exclusion_reason))
     return tags
 
 
@@ -1492,20 +1507,85 @@ def _is_verified_title_card(image: ArticleImage, tag: ImageTag | None) -> bool:
     )
 
 
-def order_images(images: list[ArticleImage], tags: list[ImageTag], title: str = "", target_count: int | None = None) -> tuple[list[ArticleImage], list[TransitionContext]]:
+def _opening_image_score(title: str, image: ArticleImage, tag: ImageTag) -> dict:
+    title_lower = title.lower()
+    matched_entities = [entity for entity in tag.entities if len(entity.strip()) >= 2 and entity.lower() in title_lower]
+    conflicting_entities = [entity for entity in tag.entities if len(entity.strip()) >= 2 and entity.lower() not in title_lower]
+    entity_match = min(1.0, len(matched_entities) / max(1, min(2, len(tag.entities))))
+    title_match = _title_match_score(title, image, tag)
+    subject_match = max(title_match, entity_match)
+    verified_title_card = _is_verified_title_card(image, tag)
+    generic_ai_art = bool(re.search(r"(?:@ai_|ai[_-]?(?:img|image)|generated)", image.source_url, re.I)) and not verified_title_card
+    subject_conflict = bool(tag.is_logo and conflicting_entities and not matched_entities)
+    ineligible_reasons = []
+    if tag.role == ImageRole.irrelevant or tag.is_advertisement or tag.is_page_ui:
+        ineligible_reasons.append("non_editorial_asset")
+    if subject_conflict:
+        ineligible_reasons.append("core_entity_conflict")
+    if generic_ai_art and tag.information_value < .5:
+        ineligible_reasons.append("generic_decorative_image")
+    confidence = 1.0 if tag.analysis_status == "verified" else .55 if tag.analysis_status == "fallback" else .35
+    effective_salience = tag.salience * confidence
+    source_bonus = .12 if "article-content" in tag.source_types else 0.0
+    source_penalty = .22 if "og:image" in tag.source_types else 0.0
+    role_bonus = {
+        ImageRole.data: 1.0, ImageRole.evidence: .9, ImageRole.result: .9,
+        ImageRole.diagram: .85, ImageRole.product: .65, ImageRole.overview: .55,
+        ImageRole.hero: .35, ImageRole.brand: .2,
+    }.get(tag.role, .4)
+    score = (
+        subject_match * .30
+        + tag.information_value * .25
+        + effective_salience * .20
+        + tag.visual_quality * .15
+        + role_bonus * .10
+        + source_bonus
+        - source_penalty
+    )
+    if generic_ai_art:
+        score -= .25
+    if verified_title_card:
+        score += 1.0
+    return {
+        "eligible": not ineligible_reasons,
+        "ineligible_reasons": ineligible_reasons,
+        "score": round(score, 6),
+        "verified_title_card": verified_title_card,
+        "subject_match": round(subject_match, 6),
+        "matched_entities": matched_entities,
+        "conflicting_entities": conflicting_entities,
+        "information_value": tag.information_value,
+        "effective_salience": round(effective_salience, 6),
+        "visual_quality": tag.visual_quality,
+        "role_bonus": role_bonus,
+        "analysis_status": tag.analysis_status,
+        "generic_ai_art": generic_ai_art,
+        "source_bonus": source_bonus,
+        "source_penalty": source_penalty,
+    }
+
+
+def order_images(images: list[ArticleImage], tags: list[ImageTag], title: str = "", target_count: int | None = None, *, diagnostics: dict | None = None) -> tuple[list[ArticleImage], list[TransitionContext]]:
     by_id = {tag.image_id: tag for tag in tags}
     if not images:
         return [], []
     ranked = sorted(images, key=lambda image: (-by_id[image.id].salience, image.source_index))
-    first = max(images, key=lambda image: (
-        1 if _is_verified_title_card(image, by_id.get(image.id)) else 0,
-        by_id[image.id].headline_title_match_score if _is_verified_title_card(image, by_id.get(image.id)) else _title_match_score(title, image, by_id.get(image.id)),
-        by_id[image.id].headline_prominence if _is_verified_title_card(image, by_id.get(image.id)) else 0,
-        by_id[image.id].headline_readability if _is_verified_title_card(image, by_id.get(image.id)) else 0,
-        1 if by_id[image.id].role in {ImageRole.hero, ImageRole.overview} else 0,
-        by_id[image.id].salience,
-        -image.source_index,
-    ))
+    opening_scores = {image.id: _opening_image_score(title, image, by_id[image.id]) for image in images}
+    eligible_openers = [image for image in images if opening_scores[image.id]["eligible"]]
+    opener_pool = eligible_openers or images
+    if not title.strip() and all(not by_id[item.id].source_types for item in images):
+        # Compatibility for non-URL callers that never supplied article
+        # context. URL projects always pass the localized title and use the
+        # qualified opening score above.
+        first = max(opener_pool, key=lambda image: (1 if by_id[image.id].role in {ImageRole.hero, ImageRole.overview} else 0, by_id[image.id].salience, -image.source_index))
+    else:
+        first = max(opener_pool, key=lambda image: (opening_scores[image.id]["score"], -image.source_index, image.id))
+    if diagnostics is not None:
+        diagnostics["opening_image_ranking"] = {
+            "selected_image_id": first.id,
+            "selection_reason": "highest_qualified_opening_score" if eligible_openers else "no_qualified_opener_fallback",
+            "scores": [{"image_id": image.id, **opening_scores[image.id]} for image in sorted(images, key=lambda item: (-opening_scores[item.id]["score"], item.source_index))],
+        }
     if target_count:
         remaining = [image for image in ranked if image.id != first.id][:max(0, target_count - 1)]
         ranked = [first, *remaining]

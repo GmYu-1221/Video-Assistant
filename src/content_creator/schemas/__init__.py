@@ -1,4 +1,4 @@
-from .project import AudioConfig, BackgroundVideoConfig, EntranceConfig, ImageAsset, TimelineItem, VideoCopy, VideoOutput, VideoProject
+from .project import AudioConfig, BackgroundImageConfig, BackgroundVideoConfig, EntranceConfig, ImageAsset, TimelineItem, VideoCopy, VideoOutput, VideoProject
 from .color import RGBColor
 from .scene_plan import EntrancePlan, MotionPlan, ScenePlan
 from .storyboard import Storyboard
@@ -20,5 +20,6 @@ from .caption_template import CaptionTemplateManifest, CaptionTemplatePlan, Capt
 
 __all__ = ["AudioConfig", "EntranceConfig", "ImageAsset", "RGBColor", "TimelineItem", "VideoCopy", "VideoOutput", "VideoProject", "TransitionConfig", "TransitionType", "TransitionPolicy", "TransitionPlan", "TransitionPlanItem", "PRESETS", "EntrancePlan", "MotionPlan", "ScenePlan", "Storyboard", "ImageAnalysis", "RemotionAdvice", "DirectorPlan", "DirectorTimelineItem", "CreativeIntent", "DirectorPlanChanges", "DirectorPlanPatch", "DirectorPlanPatchOperation", "AnimationEffect", "AnimationEffectType", "AnimationPlan", "TransitionEffectPlan", "TransitionEffectPlanItem", "TransitionEffectType", "RemotionCreativePlan", "RemotionCreativePlanItem", "VisualEvent", "AnimatableProperty", "AnimationTrack", "CompositionSpec", "EasingType", "Keyframe", "LayoutPreset", "LayoutSpec", "LayerSource", "LayerType", "Region", "SceneSpec", "TextStyle", "TransitionPreset", "TransitionSpec", "VisualLayer", "VisualSpec", "VisualSpecDecision", "VisualSpecTransitionDecision", "ArticleBrief", "ArticleExtractionResult", "ArticleImage", "ArticleTextCandidate", "AssetCandidate", "AssetDecision", "AssetKind", "CandidatePreview", "CandidateVisualProfile", "ImageRole", "ImageTag", "LocalizedArticleCopy", "MusicTrack", "TransitionContext", "TransitionRelation", "BackgroundTreatment", "CaptionStyleIntent", "ContentVariant", "CopyDensityIntent", "ImageSemanticProfile", "LayoutIssue", "LayoutPlan", "LetterSpacing", "MediaBlock", "NarrativeContent", "OverlayPolicy", "PersistentTitleSpec", "Rect", "RenderedLayoutValidationResult", "SceneLayoutSpec", "SceneNarrative", "StyleIntent", "TextBlock", "TextOutline", "TextShadow", "TypographyRole", "VisualCriticResult"]
 __all__.append("BackgroundVideoConfig")
+__all__.append("BackgroundImageConfig")
 __all__.extend(["ViralCopyPlan", "ViralCopyUnit", "ViralTitleCandidate"])
 __all__.extend(["CaptionTemplateManifest", "CaptionTemplatePlan", "CaptionTemplateSelection", "CaptionTemplateSlot", "CaptionTemplateSlotBinding"])

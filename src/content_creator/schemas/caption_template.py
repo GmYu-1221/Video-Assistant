@@ -25,7 +25,7 @@ class CaptionTemplateManifest(BaseModel):
     description: str = Field(default="", max_length=500)
     canvas_width: Literal[1080] = 1080
     canvas_height: Literal[1920] = 1920
-    media_bbox: Rect = Field(default_factory=lambda: Rect(x=0, y=655, width=1080, height=610))
+    media_bbox: Rect = Field(default_factory=lambda: Rect(x=0, y=430, width=1080, height=610))
     media_fit: Literal["contain"] = "contain"
     slots: list[CaptionTemplateSlot] = Field(min_length=1, max_length=16)
     protected_regions: list[Rect] = Field(default_factory=list, max_length=8)

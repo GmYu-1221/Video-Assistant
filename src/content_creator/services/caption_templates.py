@@ -10,15 +10,15 @@ from content_creator.schemas import Rect, TypographyRole
 _REFERENCE = CaptionTemplateManifest(
     template_id="reference_caption_v1",
     version="1.0",
-    description="三行全局标题、居中主图和全片固定底部总结。",
-    media_bbox=Rect(x=0, y=655, width=1080, height=610),
+    description="顶部深色三行标题、中部居中主图、底部深色完整总结。",
+    media_bbox=Rect(x=0, y=430, width=1080, height=610),
     slots=[
-        CaptionTemplateSlot(slot_id="title_primary", scope="global", bbox=Rect(x=60, y=92, width=960, height=96), typography_roles=[TypographyRole.display, TypographyRole.headline], max_lines=1, alignments=["center"], allowed_style_tokens=["yellow", "dark_outline", "strong_shadow"], z_index=31),
-        CaptionTemplateSlot(slot_id="title_secondary", scope="global", bbox=Rect(x=60, y=210, width=960, height=108), typography_roles=[TypographyRole.display, TypographyRole.headline], max_lines=2, alignments=["center"], allowed_style_tokens=["yellow", "dark_outline", "strong_shadow"], z_index=31),
-        CaptionTemplateSlot(slot_id="title_tertiary", scope="global", bbox=Rect(x=60, y=352, width=960, height=84), typography_roles=[TypographyRole.headline, TypographyRole.body], max_lines=1, alignments=["center"], allowed_style_tokens=["white", "dark_outline", "strong_shadow"], z_index=31),
-        CaptionTemplateSlot(slot_id="summary", scope="global", bbox=Rect(x=80, y=1325, width=920, height=500), typography_roles=[TypographyRole.body, TypographyRole.caption], max_lines=8, alignments=["center"], allowed_style_tokens=["white", "soft_shadow"], z_index=31),
+        CaptionTemplateSlot(slot_id="title_primary", scope="global", bbox=Rect(x=60, y=48, width=960, height=112), typography_roles=[TypographyRole.display, TypographyRole.headline], max_lines=1, alignments=["center"], allowed_style_tokens=["yellow", "dark_outline", "strong_shadow"], z_index=31),
+        CaptionTemplateSlot(slot_id="title_secondary", scope="global", bbox=Rect(x=60, y=166, width=960, height=112), typography_roles=[TypographyRole.display, TypographyRole.headline], max_lines=1, alignments=["center"], allowed_style_tokens=["yellow", "dark_outline", "strong_shadow"], z_index=31),
+        CaptionTemplateSlot(slot_id="title_tertiary", scope="global", bbox=Rect(x=60, y=292, width=960, height=102), typography_roles=[TypographyRole.headline, TypographyRole.body], max_lines=1, alignments=["center"], allowed_style_tokens=["white", "dark_outline", "strong_shadow"], z_index=31),
+        CaptionTemplateSlot(slot_id="summary", scope="global", bbox=Rect(x=70, y=1090, width=940, height=770), typography_roles=[TypographyRole.body, TypographyRole.caption], max_lines=8, alignments=["center"], allowed_style_tokens=["white", "soft_shadow"], z_index=31),
     ],
-    protected_regions=[Rect(x=0, y=655, width=1080, height=610)],
+    protected_regions=[Rect(x=0, y=430, width=1080, height=610)],
     visual_qa=["global_slots_stable", "media_centered_contain", "summary_is_one_paragraph"],
 )
 
@@ -62,8 +62,8 @@ def validate_caption_template_plan(plan: CaptionTemplatePlan) -> None:
         if binding.content_hash != sha256(binding.content.encode("utf-8")).hexdigest():
             raise ValueError(f"caption template content hash mismatch: {binding.slot_id}")
     summary = next(binding.content for binding in plan.global_bindings if binding.slot_id == "summary")
-    if len(summary) > 140 or "\n" in summary:
-        raise ValueError("reference caption summary must be one paragraph no longer than 140 characters")
+    if len(summary) > 220 or "\n" in summary:
+        raise ValueError("reference caption summary must be one paragraph no longer than 220 characters")
 
 
 def select_caption_template(*, model_template_id: str | None = None, reason: str = "") -> CaptionTemplateSelection:
@@ -98,13 +98,13 @@ def _global_bindings(plan: ViralCopyPlan) -> list[CaptionTemplateSlotBinding]:
         value = re.sub(r"\s+", " ", unit.full).strip()
         if not value or value in summary_parts:
             continue
-        if length >= 80 and length + len(value) > 140:
+        if length >= 120 and length + len(value) > 220:
             break
         summary_parts.append(value)
         length += len(value)
-        if length >= 100:
+        if length >= 180:
             break
-    summary = (plan.global_summary or "".join(summary_parts))[:139].rstrip("，,；;：:")
+    summary = (plan.global_summary or "".join(summary_parts))[:219].rstrip("，,；;：:")
     if not summary.endswith(("。", "！", "？", ".", "!", "?")):
         summary += "。"
     return [_binding("title_primary", primary), _binding("title_secondary", secondary), _binding("title_tertiary", tertiary), _binding("summary", summary)]
