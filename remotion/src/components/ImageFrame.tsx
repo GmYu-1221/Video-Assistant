@@ -1,7 +1,7 @@
 import React from 'react';
 import {Easing, interpolate, useCurrentFrame, useVideoConfig} from 'remotion';
 
-type EntranceConfig = {type?: string; durationInFrames?: number};
+type EntranceConfig = {type?: 'none' | 'fade_scale' | 'slide_up'; durationInFrames?: number};
 type ImageFrameProps = {src: string; imageWidth: number; imageHeight: number; motion?: string; entrance?: EntranceConfig; backgroundColor?: string};
 
 export const ImageFrame: React.FC<ImageFrameProps> = ({src, imageWidth, imageHeight, motion = 'static', entrance, backgroundColor = '#000000'}) => {
@@ -16,7 +16,7 @@ export const ImageFrame: React.FC<ImageFrameProps> = ({src, imageWidth, imageHei
   const safeScale = fitScale / requestedMotionScale;
   const renderWidth = Math.max(1, Math.round(imageWidth * safeScale));
   const renderHeight = Math.max(1, Math.round(imageHeight * safeScale));
-  const entranceType = entrance?.type ?? 'fade';
+  const entranceType = entrance?.type ?? 'none';
   const entranceDuration = Math.max(1, entrance?.durationInFrames ?? 15);
   const entranceProgress = interpolate(frame, [0, entranceDuration], [0, 1], {
     extrapolateLeft: 'clamp',
@@ -46,7 +46,7 @@ export const ImageFrame: React.FC<ImageFrameProps> = ({src, imageWidth, imageHei
     if (motion === 'pan_down') y = verticalMargin * progress;
   }
 
-  const transform = motion === 'static' && entranceType === 'fade' ? 'none' : `translate(${x}%, ${y}%) scale(${scale})`;
+  const transform = motion === 'static' && entranceType === 'none' ? 'none' : `translate(${x}%, ${y}%) scale(${scale})`;
   return <div style={{position: 'absolute', inset: 0, backgroundColor}}>
     <img src={src} style={{position: 'absolute', left: (videoWidth - renderWidth) / 2, top: (videoHeight - renderHeight) / 2, width: renderWidth, height: renderHeight, transform, opacity, transformOrigin: 'center center'}} />
   </div>;

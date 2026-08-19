@@ -1,10 +1,12 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 from .transition import TransitionConfig
 from .creative_intent import CreativeIntent
 from .layout import SceneNarrative, SceneLayoutSpec
 
 class EntrancePlan(BaseModel):
-    type: str = "fade"
+    type: Literal["none", "fade_scale", "slide_up"] = "none"
     durationInFrames: int = Field(default=15, ge=1)
 
 class MotionPlan(BaseModel):

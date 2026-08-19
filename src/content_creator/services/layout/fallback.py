@@ -21,10 +21,13 @@ def _free_regions(profile: ImageSemanticProfile | None) -> list[Rect]:
     return [Rect(x=60, y=60, width=960, height=360), Rect(x=60, y=1500, width=960, height=360)]
 
 
-def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None, *, global_style: str = "editorial", font_palette: list[str] | None = None, copy_density_intent: CopyDensityIntent = CopyDensityIntent.preserve, fast_pace: bool = False, use_full_summary: bool = False) -> SceneLayoutSpec:
+def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None, *, global_style: str = "editorial", font_palette: list[str] | None = None, copy_density_intent: CopyDensityIntent = CopyDensityIntent.preserve, fast_pace: bool = False, use_full_summary: bool = False, context: dict | None = None) -> SceneLayoutSpec:
     dense = bool(profile and (profile.contains_text or profile.is_screenshot or profile.is_data_chart))
     # URL video contract: media geometry is fixed. Layout freedom belongs to
     # typography only, and `contain` guarantees that the full image is visible.
+    # The media stage is the only URL-wide geometry contract. Text placement
+    # comes from free regions so a caption template can define its own slots;
+    # this solver must not smuggle in a legacy title/body rectangle.
     media_bbox = Rect(x=0, y=655, width=1080, height=610)
     first = narrative.contents[0]
     text_role = TypographyRole.caption if dense else TypographyRole.body
@@ -39,10 +42,11 @@ def solve_scene(narrative: SceneNarrative, profile: ImageSemanticProfile | None,
         except ValueError:
             preferred_font = DEFAULT_FONT_ID
     first_variant = ContentVariant.micro if copy_density_intent == CopyDensityIntent.reduce else ContentVariant.full if use_full_summary else ContentVariant.short if fast_pace else ContentVariant.full
-    primary_bbox = Rect(x=80, y=1335, width=920, height=465)
+    regions = [region for region in _free_regions(profile) if not (region.y < media_bbox.y + media_bbox.height and region.y + region.height > media_bbox.y)]
+    primary_bbox = max(regions or _free_regions(profile), key=lambda region: region.width * region.height)
     primary_role = text_role
     primary_lines = 6 if dense else 5
-    primary_alignment = "left"
+    primary_alignment = "center" if (context or {}).get("caption_template_id") else "left"
     primary_color = "#FFFFFF"
     primary_outline = TextOutline.none
     primary_shadow = TextShadow.soft
@@ -71,4 +75,4 @@ def solve_plan(items: list[tuple[SceneNarrative, ImageSemanticProfile | None]], 
     intent = CopyDensityIntent((context or {}).get("copy_density_intent", CopyDensityIntent.preserve.value))
     fast_pace = (context or {}).get("pace") == "fast"
     use_full_summary = (context or {}).get("copy_generation_mode") == "deterministic_fallback"
-    return LayoutPlan(global_style=global_style, scenes=[solve_scene(narrative, profile, global_style=global_style, font_palette=palette, copy_density_intent=intent, fast_pace=fast_pace, use_full_summary=use_full_summary) for narrative, profile in items])
+    return LayoutPlan(global_style=global_style, scenes=[solve_scene(narrative, profile, global_style=global_style, font_palette=palette, copy_density_intent=intent, fast_pace=fast_pace, use_full_summary=use_full_summary, context=context) for narrative, profile in items])

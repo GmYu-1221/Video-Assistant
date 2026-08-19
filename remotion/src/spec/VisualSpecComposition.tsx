@@ -7,6 +7,7 @@ import {SceneLayoutRenderer} from '../layout/SceneLayoutRenderer';
 import {PersistentTitleRenderer} from '../layout/PersistentTitleRenderer';
 import {BackgroundVideoLayer} from '../components/BackgroundVideoLayer';
 import {getQwen38TransitionState} from '../transitions/templates/qwen3-8-state';
+import {CaptionTemplateLayer} from '../caption-templates/CaptionTemplateLayer';
 
 const Layer: React.FC<{layer: VisualSpecLayer; region: {x: number; y: number; width: number; height: number; overflow?: 'visible'|'hidden'}; frame: number; props: RemotionPropsWithVisualSpec; transitionTracks?: VisualSpecTrack[]}> = ({layer, region, frame, props, transitionTracks}) => {
   const style = layer.style ?? {};
@@ -55,10 +56,14 @@ export const VisualSpecComposition: React.FC<RemotionPropsWithVisualSpec> = (pro
     } : {};
     return <AbsoluteFill style={{background: props.background_video ? 'transparent' : '#000'}}>
       <BackgroundVideoLayer config={props.background_video} mediaBaseUrl={props.media_base_url} tintColor={(timelineItem.layout as any).background?.color ?? '#101214'}/>
-      <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={timelineItem.resolved_state.visibility !== 'hidden'} showMedia={!transitionActive} transparentBackground={Boolean(props.background_video)}/>
+      <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={timelineItem.resolved_state.visibility !== 'hidden'} showMedia={!transitionActive} showText={!props.caption_template_plan} transparentBackground={Boolean(props.background_video)}/>
       {transitionActive && previous?.layout && previous.narrative && <SceneLayoutRenderer layout={previous.layout} narrative={previous.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} transparentBackground/>}
       {transitionActive && <SceneLayoutRenderer layout={timelineItem.layout} narrative={timelineItem.narrative} images={props.images} mediaBaseUrl={props.media_base_url} copyVisible={false} showText={false} mediaStyle={incomingMediaStyle} transparentBackground/>}
-      <PersistentTitleRenderer title={props.persistent_title}/>
+      {props.caption_template_plan ? <CaptionTemplateLayer
+        plan={props.caption_template_plan}
+        headlineFontId={props.caption_template_plan.style_tokens?.headline_font_id ?? props.persistent_title?.font_id ?? 'zcool-qingke-huangyou'}
+        bodyFontId={props.caption_template_plan.style_tokens?.body_font_id ?? timelineItem.layout.text_blocks?.[0]?.font_id ?? 'noto-sans-sc'}
+      /> : <PersistentTitleRenderer title={props.persistent_title}/>}
       <AudioTrack src={`${props.media_base_url ?? ''}/${props.audio.path}`} />
     </AbsoluteFill>;
   }

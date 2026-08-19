@@ -8,10 +8,11 @@ from .remotion_creative_plan import VisualEvent
 from .visual_spec import VisualSpec
 from .layout import ImageSemanticProfile, PersistentTitleSpec, SceneLayoutSpec, SceneNarrative
 from .continuity import ResolvedTimelineItem
+from .caption_template import CaptionTemplatePlan
 
 
 class EntranceConfig(BaseModel):
-    type: str = "fade"
+    type: Literal["none", "fade_scale", "slide_up"] = "none"
     durationInFrames: int = Field(default=15, ge=1)
 
 
@@ -96,4 +97,5 @@ class VideoProject(BaseModel):
     output: VideoOutput
     video_copy: VideoCopy = Field(default_factory=VideoCopy)
     persistent_title: PersistentTitleSpec | None = None
+    caption_template_plan: CaptionTemplatePlan | None = None
     visual_spec: VisualSpec | None = None

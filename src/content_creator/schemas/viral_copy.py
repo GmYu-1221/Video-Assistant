@@ -49,6 +49,8 @@ class ViralCopyPlan(BaseModel):
     title_candidates: list[ViralTitleCandidate] = Field(min_length=5, max_length=5)
     selected_title_id: str = Field(min_length=1, max_length=80)
     final_title: str = Field(default="", max_length=120)
+    caption_title_lines: list[str] = Field(default_factory=list, max_length=3)
+    global_summary: str = Field(default="", max_length=140)
     content_units: list[ViralCopyUnit] = Field(min_length=1, max_length=24)
 
     @model_validator(mode="after")
@@ -59,6 +61,8 @@ class ViralCopyPlan(BaseModel):
             raise ValueError("viral title candidates must be unique")
         if self.selected_title_id not in set(title_ids):
             raise ValueError("selected_title_id must reference a title candidate")
+        if self.caption_title_lines and len(self.caption_title_lines) != 3:
+            raise ValueError("caption_title_lines must contain exactly three lines")
         unit_ids = [item.semantic_unit_id for item in self.content_units]
         content_ids = [item.content_id for item in self.content_units]
         if len(unit_ids) != len(set(unit_ids)) or len(content_ids) != len(set(content_ids)):

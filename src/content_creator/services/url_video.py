@@ -12,7 +12,7 @@ from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 
-from content_creator.schemas import AudioConfig, BackgroundVideoConfig, BoundaryAction, CopyAction, ImageSemanticProfile, ImageTag, LayoutAction, LayoutPlan, TimelineItem, VideoCopy, VideoOutput, VideoProject
+from content_creator.schemas import AudioConfig, BackgroundVideoConfig, BoundaryAction, CaptionTemplatePlan, CaptionTemplateSlotBinding, CopyAction, ImageSemanticProfile, ImageTag, LayoutAction, LayoutPlan, TimelineItem, VideoCopy, VideoOutput, VideoProject
 from content_creator.services.article import _brief_from_extraction, _is_verified_title_card, _title_match_score, augment_soup_with_selected_html, basic_asset_filter, capture_article_screenshots, chromium_available, classify_content_sufficiency, discover_asset_candidates, download_selected_assets, extract_article_html, fetch_article_with_extraction, log_asset_diagnostics, order_images, select_assets_with_agent, tag_images
 from content_creator.services.assets import scan_and_process
 from content_creator.services.music import analyze_audio, load_catalog, select_track
@@ -27,6 +27,7 @@ from content_creator.services.timeline_state import default_url_actions, resolve
 from content_creator.services.layout.preferences import TypographyPreferenceStore, article_context
 from content_creator.services.article_localization import build_localized_video_copy, localize_article_copy, validate_localized_display_text
 from content_creator.agents.viral_writer import create_viral_copy_plan, ordered_title_texts
+from content_creator.services.caption_templates import build_caption_template_plan, select_caption_template, get_caption_template, validate_caption_template_plan
 
 REFERENCE_WIDTH = 1080
 REFERENCE_HEIGHT = 1920
@@ -296,6 +297,14 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     copy = build_localized_video_copy(brief, localized_copy, preferred=copy)
     progress("Viral Writer 正在策划标题和正文")
     viral_copy_plan, viral_copy_diagnostics = create_viral_copy_plan(brief, tags, asset_target_count)
+    # The first registry version has one enabled template. Keep selection as a
+    # real persisted decision so additional templates can be added without
+    # changing the URL pipeline contract.
+    template_selection = select_caption_template(reason="reference_caption_v1 is the only enabled URL template")
+    template_plan = build_caption_template_plan(template_selection, copy_plan=viral_copy_plan)
+    validate_caption_template_plan(template_plan)
+    template_manifest = get_caption_template(template_plan.template_id)
+    diagnostics["caption_template"] = {"template_id": template_plan.template_id, "version": template_plan.template_version, "selection_mode": template_selection.selection_mode, "reason": template_selection.reason}
     viral_title_options = ordered_title_texts(viral_copy_plan)
     brief = brief.model_copy(update={"title": viral_copy_plan.final_title})
     localized_copy = localized_copy.model_copy(update={"title": viral_copy_plan.final_title})
@@ -424,6 +433,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     layout_context["segment_duration_range_seconds"] = [URL_SEGMENT_MIN_SECONDS, URL_SEGMENT_MAX_SECONDS]
     if sufficiency == "compact" or len(assets) == 1:
         layout_context["copy_density_intent"] = "reduce"
+    layout_context = dict(layout_context or {}, caption_template_id=template_plan.template_id, caption_template_manifest=template_manifest.model_dump(mode="json"))
     bundle = resolve_timeline(actions, profiles, title=brief.title, body=brief.text, summary=brief.summary, layout_context=layout_context, layout_preferences=preference_summary, copy_plan=viral_copy_plan)
     timing_diagnostics = _retime_resolved_bundle(bundle, profiles, bpm=analysis.bpm, fps=REFERENCE_FPS)
     actions = bundle.actions
@@ -454,7 +464,14 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     )
     selected_source_title = next((attempt["source_title"] for attempt in reversed(title_attempts) if not attempt["issues"]), viral_copy_plan.final_title)
     selected_candidate = next((item for item in viral_copy_plan.title_candidates if item.text == selected_source_title), viral_copy_plan.selected_title)
-    viral_copy_plan = viral_copy_plan.model_copy(update={"selected_title_id": selected_candidate.candidate_id, "final_title": persistent_title.content})
+    viral_copy_plan = viral_copy_plan.model_copy(update={
+        "selected_title_id": selected_candidate.candidate_id,
+        "final_title": persistent_title.content,
+        # A Chromium fallback candidate may differ from the model title pack;
+        # do not carry stale title lines into the frozen template bindings.
+        "caption_title_lines": viral_copy_plan.caption_title_lines if selected_source_title == persistent_title.content else [],
+    })
+    template_plan = build_caption_template_plan(template_selection, copy_plan=viral_copy_plan)
     brief = brief.model_copy(update={"title": persistent_title.content})
     localized_copy = localized_copy.model_copy(update={"title": persistent_title.content})
     copy = copy.model_copy(update={"headline": persistent_title.content[:80]})
@@ -466,8 +483,11 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
     missing_state = [state.segment_id for state in bundle.resolved if not state.resolved_layout_id or not state.resolved_copy_id]
     if missing_state:
         raise ValueError(f"URL 布局状态不完整，无法安全渲染：{', '.join(missing_state)}")
-    (project_dir / "scene_narrative_plan.json").write_text(json.dumps({"persistent_title": persistent_title.model_dump(mode="json"), "narratives": [item.model_dump(mode="json") for item in bundle.narratives.values()]}, ensure_ascii=False, indent=2), encoding="utf-8")
-    layout_plan = LayoutPlan(global_style="editorial", persistent_title=persistent_title, scenes=list(bundle.layouts.values()))
+    template_plan = template_plan.model_copy(update={"style_tokens": {"headline_font_id": persistent_title.font_id, "body_font_id": bundle.layout_diagnostics.get("font_palette", ["noto-sans-sc"])[0]}})
+    validate_caption_template_plan(template_plan)
+    (project_dir / "scene_narrative_plan.json").write_text(json.dumps({"persistent_title": persistent_title.model_dump(mode="json"), "caption_template_plan": template_plan.model_dump(mode="json"), "narratives": [item.model_dump(mode="json") for item in bundle.narratives.values()]}, ensure_ascii=False, indent=2), encoding="utf-8")
+    (project_dir / "caption_template_plan.json").write_text(template_plan.model_dump_json(indent=2), encoding="utf-8")
+    layout_plan = LayoutPlan(global_style="editorial", persistent_title=persistent_title, caption_template_plan=template_plan.model_dump(mode="json"), scenes=list(bundle.layouts.values()))
     (project_dir / "layout_plan.json").write_text(layout_plan.model_dump_json(indent=2), encoding="utf-8")
     qa = {"layout_director": bundle.layout_diagnostics, "preference_memory": preference_summary, "persistent_title": {"spec": persistent_title.model_dump(mode="json"), "hard_issues": [], "rendered": persistent_title_rendered.model_dump(mode="json")}, "invalidation_matrix": {"all_hold": "none", "media_replace": ["geometry", "crop", "subject", "contrast"], "copy_replace_or_hide": ["typography", "wrapping", "overflow", "contrast", "visibility"], "layout_adapt": ["changed_blocks", "collision"], "layout_replace": ["full_chromium_audit", "visual_critic"]}, "segments": []}
     updated_timeline = []
@@ -532,7 +552,7 @@ def create_url_project(url: str, output_root: str | Path, on_progress=None, *, i
         "render_path": "url_layout_renderer",
     }
     persist_diagnostics()
-    project = VideoProject(project_id=project_id, fps=REFERENCE_FPS, width=REFERENCE_WIDTH, height=REFERENCE_HEIGHT, images=assets, audio=AudioConfig(path=f"audio/{copied_audio.name}", source_path=f"audio/{copied_audio.name}", duration=actual_duration, sample_rate=analysis.sample_rate, bpm=analysis.bpm), background_video=background_video, timeline=updated_timeline, output=output, video_copy=copy, persistent_title=persistent_title)
+    project = VideoProject(project_id=project_id, fps=REFERENCE_FPS, width=REFERENCE_WIDTH, height=REFERENCE_HEIGHT, images=assets, audio=AudioConfig(path=f"audio/{copied_audio.name}", source_path=f"audio/{copied_audio.name}", duration=actual_duration, sample_rate=analysis.sample_rate, bpm=analysis.bpm), background_video=background_video, timeline=updated_timeline, output=output, video_copy=copy, persistent_title=persistent_title, caption_template_plan=template_plan)
     progress("编排动态布局视频")
     project = compile_render_plan(project, _storyboard_from_timeline(project), creative_plan=None)
     # Rendered previews are durable QA evidence and are generated with the

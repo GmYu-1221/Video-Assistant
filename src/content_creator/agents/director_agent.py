@@ -99,7 +99,7 @@ def plan_to_storyboard(plan: DirectorPlan, style: VideoStyle) -> Storyboard:
                 scene_id=f"{index + 1:03d}",
                 asset_id=item.asset_id,
                 duration_frames=item.duration_frames,
-                entrance=EntrancePlan(type="none" if item.creative_intent else "fade"),
+                entrance=EntrancePlan(type="none"),
                 motion=MotionPlan(type=item.motion),
                 transition=item.transition,
                 emotion=item.reason,

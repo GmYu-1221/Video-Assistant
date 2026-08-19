@@ -17,6 +17,8 @@ def render_project(
     on_progress: ProgressCallback | None = None,
     quiet: bool = False,
 ) -> Path:
+    if (Path(project.output.project_dir) / "article.json").is_file() and project.caption_template_plan is None:
+        raise ValueError("旧 URL 转场/字幕协议已移除，请重新生成项目")
     if on_progress:
         on_progress("渲染器|正在准备预览..." if preview else "渲染器|正式渲染开始...")
     server = MediaServer(project.output.project_dir)

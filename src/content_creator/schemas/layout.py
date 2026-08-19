@@ -206,8 +206,8 @@ class PersistentTitleSpec(BaseModel):
     outline: TextOutline = TextOutline.dark_strong
     shadow: TextShadow = TextShadow.strong
     letter_spacing: LetterSpacing = LetterSpacing.normal
-    caption_style_intent: Literal[CaptionStyleIntent.reference_emphasis] = CaptionStyleIntent.reference_emphasis
-    max_lines: Literal[3] = 3
+    caption_style_intent: CaptionStyleIntent = CaptionStyleIntent.reference_emphasis
+    max_lines: int = Field(default=3, ge=1, le=8)
     entrance_duration_frames: int = Field(default=12, ge=1, le=30)
     z_index: int = Field(default=30, ge=21, le=40)
 
@@ -215,8 +215,6 @@ class PersistentTitleSpec(BaseModel):
     def validate_frozen_title(self) -> "PersistentTitleSpec":
         from content_creator.font_registry import validate_font_for_role
 
-        if self.bbox != Rect(x=60, y=80, width=960, height=280):
-            raise ValueError("persistent title must use the fixed top region")
         if self.content_hash != sha256(self.content.encode("utf-8")).hexdigest():
             raise ValueError("persistent title content hash mismatch")
         validate_font_for_role(self.font_id, TypographyRole.headline.value)
@@ -247,6 +245,7 @@ class LayoutPlan(BaseModel):
     canvas_height: Literal[1920] = CANVAS_HEIGHT
     global_style: str = "editorial"
     persistent_title: PersistentTitleSpec | None = None
+    caption_template_plan: dict | None = None
     scenes: list[SceneLayoutSpec] = Field(min_length=1)
 
     @model_validator(mode="after")

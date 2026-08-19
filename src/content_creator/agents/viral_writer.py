@@ -259,7 +259,7 @@ def create_viral_copy_plan(brief: ArticleBrief, image_tags: list[ImageTag], targ
         return fallback, diagnostics | {"mode": "deterministic_fallback"}
     paragraphs = article_sentences(brief.text)
     prompt = json.dumps({
-        "task": "使用 Viral Writer 的 11 个洞见维度，为 URL 竖屏短视频生成简体中文标题候选和逐幕总结。只返回符合 schema 的 JSON。每一幕只生成一个 content unit，它必须是一段逻辑完整、自然、可朗读的中文总结，不得输出章节标题、目录项、步骤残片、冒号结尾或半句话。只保留核心观点、关键证据和结论，覆盖文章首尾及有代表性的中段。允许自然重组原文，但禁止虚构数字、人物、产品能力、案例或外部事实。普通英文说明必须翻译成中文，技术名、代码、命令和 URL 可保留。full/short/micro 必须属于同一语义并以完整句子结束；short 建议 28-55 个中文字符，micro 建议 18-32 个中文字符。包含数字、URL 或可验证事实的单元必须列出支持它的 source_paragraph_indices，每个单元最多 8 个索引。",
+        "task": "使用 Viral Writer 的 11 个洞见维度，为 URL 竖屏短视频生成简体中文标题候选、固定字幕模板文案和逐幕总结。只返回符合 schema 的 JSON。caption_title_lines 必须恰好三行，分别是主标题、副标题、核心结论；global_summary 必须是一段 80-140 字、逻辑完整、自然可朗读的全文总结。每一幕只生成一个 content unit。不得输出目录残片、冒号结尾或半句话。只保留核心观点、关键证据和结论，允许自然重组原文但禁止虚构事实。普通英文说明必须翻译成中文，技术名、代码、命令和 URL 可保留。full/short/micro 必须属于同一语义并以完整句子结束。包含可验证事实的单元必须列出支持它的 source_paragraph_indices。",
         "platform": "抖音短视频", "target_audience": "根据主题推断", "target_segment_count": target_count,
         "article": {"title": brief.title, "summary": brief.summary, "topics": brief.topics, "mood": brief.mood, "paragraphs": [{"source_index": index, "text": text} for index, text in enumerate(paragraphs)]},
         "image_semantics": [{"image_id": tag.image_id, "role": tag.role.value, "topics": tag.topics, "entities": tag.entities, "headline_text": tag.embedded_headline_text, "headline_title_match_score": tag.headline_title_match_score} for tag in image_tags],

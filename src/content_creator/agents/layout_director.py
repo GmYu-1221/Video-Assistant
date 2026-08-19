@@ -45,7 +45,7 @@ def create_layout_plan(items: list[tuple[SceneNarrative, ImageSemanticProfile | 
     if provider.model_name == "mock":
         return fallback, diagnostics
     prompt = json.dumps({
-        "task": "Design Chinese subtitle typography for a mobile video. Every scene has exactly one Agent-authored summary paragraph. Render it as one coherent text block entirely below the centered media stage, normally within x=80,y=1335,width=920,height=465. Do not split it into a headline above and an explanation below, and do not create a second support block. Prefer the complete short variant for the fast 15-28 second reel. The fixed yellow article title occupies x=60,y=80,width=960,height=280 and must never be covered, repeated, moved, or rewritten. Keep every media block exactly x=0,y=655,width=1080,height=610,fit=contain so the primary media is vertically centered while the background video fills the canvas. Return only JSON LayoutPlan, use registered font IDs and at most two fonts. No English explanatory copy, CSS, font paths, new copy, media changes or transition changes.",
+        "task": "Design typography for the selected caption template. The template manifest defines slot geometry, structure, immutable global slots and protected regions. Keep media centered with contain. You may choose only registered fonts and allowed style tokens for existing slots; do not add, remove or move slots, rewrite content, provide CSS or change media/transitions. Return only JSON LayoutPlan.",
         "canvas": [1080, 1920], "global_style": global_style,
         "font_registry": [font for font in public_font_metadata() if font["id"] in palette], "locked_font_palette": palette, "preference_memory": preferences or {},
         "article_context": context or {}, "revision_feedback": feedback_reason,
@@ -66,10 +66,6 @@ def create_layout_plan(items: list[tuple[SceneNarrative, ImageSemanticProfile | 
         hard_issues = []
         for scene in candidate.scenes:
             narrative, profile = item_by_scene[scene.scene_id]
-            if len(scene.text_blocks) != 1:
-                raise ValueError("layout response must render exactly one summary paragraph per scene")
-            if scene.text_blocks[0].bbox.y < 1265:
-                raise ValueError("summary paragraph must remain below the centered media stage")
             hard_issues.extend(validate_scene_layout(scene, narrative, profile))
         if hard_issues:
             raise ValueError("layout response failed deterministic validation: " + ",".join(sorted({issue.code for issue in hard_issues})))
@@ -82,7 +78,7 @@ def create_layout_plan(items: list[tuple[SceneNarrative, ImageSemanticProfile | 
     except Exception as first_exc:
         diagnostics["first_error"] = f"{type(first_exc).__name__}: {first_exc}"
         retry_prompt = json.dumps({
-            "task": "Return a corrected LayoutPlan JSON object using this valid baseline. Keep all keys and immutable content references, including every text block when copy_density_intent is increase. Preserve the opening reference hierarchy and never create image-headline display copy. You may only change text_blocks geometry, alignment, typography_role, font_id, style_intent, weight, color, outline, shadow, emphasis, emphasis_color, letter_spacing, caption_style_intent, max_lines and variant_id/content_hash pairs already present in the narrative. Keep media_blocks unchanged. Use at most two registered font IDs.",
+            "task": "Return a corrected LayoutPlan JSON object using this valid baseline and the selected caption template manifest. Preserve immutable content references and template slot structure. You may only change allowed text style fields and variant/content-hash pairs from the same semantic unit. Keep media blocks unchanged and use at most two registered font IDs.",
             "valid_baseline": fallback.model_dump(mode="json"),
             "font_registry": [font for font in public_font_metadata() if font["id"] in palette], "locked_font_palette": palette, "preference_memory": preferences or {},
             "article_context": context or {}, "revision_feedback": feedback_reason,

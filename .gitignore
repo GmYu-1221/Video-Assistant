@@ -10,6 +10,7 @@ remotion/node_modules/
 remotion/.remotion-bundle*/
 output/projects/*
 output/jobs/*
+output/templates/*
 !output/projects/.gitkeep
 input/bgm.*
 input/music/*

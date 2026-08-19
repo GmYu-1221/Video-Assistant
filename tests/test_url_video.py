@@ -53,9 +53,15 @@ def test_url_projects_force_reference_canvas(tmp_path, monkeypatch):
     monkeypatch.setattr(url_video, "compile_render_plan", lambda project, *_args, **_kwargs: project)
     project, _ = url_video.create_url_project("https://example.com/article", tmp_path / "output")
     assert (project.width, project.height, project.fps) == (1080, 1920, 30)
-    assert project.video_copy.headline == "示例文章"
+    assert project.caption_template_plan is not None
+    assert project.caption_template_plan.template_id == "reference_caption_v1"
+    assert {binding.slot_id for binding in project.caption_template_plan.global_bindings} == {
+        "title_primary", "title_secondary", "title_tertiary", "summary",
+    }
+    assert project.video_copy.headline
     assert stages == ["discovery", "filter", "agent", "download"]
     assert (Path(project.output.project_dir) / "asset_manifest.json").is_file()
+    assert (Path(project.output.project_dir) / "caption_template_plan.json").is_file()
 
 
 def test_browser_import_protected_asset_skips_second_agent_call(tmp_path, monkeypatch):

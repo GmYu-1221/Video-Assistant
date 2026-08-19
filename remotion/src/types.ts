@@ -1,7 +1,7 @@
 export interface RGBColor { r: number; g: number; b: number; }
 export type MotionType = "static" | "zoom_in" | "zoom_out" | "pan_left" | "pan_right" | "pan_up" | "pan_down" | "ken_burns";
-export type EntranceType = "fade" | "fade_scale" | "slide_up" | "none";
-export interface EntranceConfig { type: EntranceType | string; durationInFrames: number; }
+export type EntranceType = "fade_scale" | "slide_up" | "none";
+export interface EntranceConfig { type: EntranceType; durationInFrames: number; }
 export type AnimationEffectType = "none" | "card_flip_reveal" | "camera_push" | "glitch_reveal" | "light_leak" | "stretch_reveal" | "elastic_blur_reveal" | "drop_reveal_elastic" | "particle_flip_reveal" | "creative_reveal";
 export interface AnimationEffect { asset_id: string; type: AnimationEffectType; component: string; implementation: "custom" | "fallback" | "new"; duration_frames: number; start_frame?: number; params: Record<string, unknown>; fallback: AnimationEffectType; }
 export type TransitionEffectType = "template_transition";
@@ -17,7 +17,9 @@ export interface TimelineItem { asset_id: string; start_frame: number; end_frame
 export interface VideoOutput { project_dir: string; render_data: string; final_video: string; }
 export type VideoCopy = {headline: string; subtitle: string; body: string;}
 export type PersistentTitleSpec = {content:string;content_hash:string;bbox:{x:number;y:number;width:number;height:number};alignment:'left'|'center'|'right';typography_role:'headline';font_id:string;style_intent:string;weight:'regular'|'medium'|'bold';color:string;outline:'none'|'dark_thin'|'dark_strong';shadow:'none'|'soft'|'strong';letter_spacing:'normal'|'relaxed';caption_style_intent:'reference_emphasis';max_lines:3;entrance_duration_frames:number;z_index:number};
-export interface VideoProject { project_id: string; fps: number; width: number; height: number; images: ImageAsset[]; audio: AudioConfig; background_video?: BackgroundVideoConfig | null; timeline: TimelineItem[]; output: VideoOutput; video_copy: VideoCopy; persistent_title?: PersistentTitleSpec | null; media_base_url?: string; }
+export interface CaptionTemplateSlotBinding {slot_id:string;content_id:string;semantic_unit_id:string;variant_id:string;content:string;content_hash:string;}
+export interface CaptionTemplatePlan {template_id:string;template_version:string;selection:{template_id:string;selection_mode:'agent'|'deterministic_fallback';reason:string};global_bindings:CaptionTemplateSlotBinding[];scene_bindings:CaptionTemplateSlotBinding[];style_tokens:Record<string,string>;}
+export interface VideoProject { project_id: string; fps: number; width: number; height: number; images: ImageAsset[]; audio: AudioConfig; background_video?: BackgroundVideoConfig | null; timeline: TimelineItem[]; output: VideoOutput; video_copy: VideoCopy; persistent_title?: PersistentTitleSpec | null; caption_template_plan?:CaptionTemplatePlan|null; media_base_url?: string; }
 export type RemotionProps = VideoProject & Record<string, unknown>;
 export type VisualSpecKeyframe = {frame: number; value: number; easing?: string};
 export type VisualSpecTrack = {target?: string | null; property: string; keyframes: VisualSpecKeyframe[]};
