@@ -32,7 +32,7 @@ from content_creator.schemas import (
     TransitionRelation, VideoCopy,
 )
 from content_creator.services.llm.router import get_agent_provider
-from content_creator.services.structured_agent import StructuredAgentRunner, issue
+from content_creator.services.structured_agent import StructuredAgentRunner, StructuredAgentValidationError, issue
 
 MAX_HTML_BYTES = 5_000_000
 MAX_IMAGE_BYTES = 12_000_000
@@ -49,6 +49,16 @@ logger = logging.getLogger(__name__)
 
 def _agent_artifact_root(value: str | Path | None) -> Path:
     return Path(value) if value is not None else Path(tempfile.gettempdir()) / "video-assistant-agent-runs" / str(os.getpid())
+
+
+def _agent_headline_data(value) -> dict:
+    """Map the unambiguous Agent bbox object to the stable domain tuple."""
+    data = value.model_dump(mode="json", exclude={"headline_bbox"})
+    bbox = value.headline_bbox
+    data["headline_bbox"] = None if bbox is None else (bbox.x, bbox.y, bbox.width, bbox.height)
+    return data
+
+
 _SRCSET_PART = re.compile(r"^\s*(\S+)(?:\s+(\d+(?:\.\d+)?)([wx]))?")
 _DIRECT_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov"}
 _IMAGE_EXTENSIONS = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
@@ -1064,7 +1074,7 @@ def analyze_candidate_thumbnails(brief: ArticleBrief, candidates: list[AssetCand
 
     def inspect(asset_ids: list[str], batch_index: int) -> set[str]:
         supplied = [by_id[asset_id] for asset_id in asset_ids]
-        prompt = {"task": "按输入顺序分析每张候选缩略图。识别图片主题与文章相关性，并排除二维码、扫码推广、广告、合作伙伴卡片、页面 UI、logo 和 App 下载素材。正文中的数据表、趋势图、统计图、产品对比表、架构图和证据截图都是有效素材，即使字号较小也不得标记为无可辨识内容。不要在本批次内选择最终图片。图片内主题大标题必须是清晰完整的大字，logo、水印、按钮、代码和图表标签不算。", "article": {"title": brief.title, "summary": brief.summary, "topics": brief.topics}, "images_in_supplied_order": [{"asset_id": item.id, "alt": item.alt, "caption": item.caption, "context": item.nearby_text[:500], "source_types": item.source_types} for item in supplied], "allowed_roles": [role.value for role in ImageRole], "requirements": ["candidate_profiles 必须逐项完整覆盖所有输入 asset_id", "不得输出 analysis_status"]}
+        prompt = {"task": "按输入顺序分析每张候选缩略图。识别图片主题与文章相关性，并排除二维码、扫码推广、广告、合作伙伴卡片、页面 UI、logo 和 App 下载素材。正文中的数据表、趋势图、统计图、产品对比表、架构图和证据截图都是有效素材，即使字号较小也不得标记为无可辨识内容。不要在本批次内选择最终图片。图片内主题大标题必须是清晰完整的大字，logo、水印、按钮、代码和图表标签不算。", "article": {"title": brief.title, "summary": brief.summary, "topics": brief.topics}, "images_in_supplied_order": [{"asset_id": item.id, "alt": item.alt, "caption": item.caption, "context": item.nearby_text[:500], "source_types": item.source_types} for item in supplied], "allowed_roles": [role.value for role in ImageRole], "requirements": ["candidate_profiles 必须逐项完整覆盖所有输入 asset_id", "不得输出 analysis_status", "headline_bbox 必须是 0 到 1 的 {x,y,width,height} 对象；width/height 是尺寸，不是右下角坐标", "禁止 bbox 数组、像素坐标、0 到 1000 坐标和 x1/y1/x2/y2；无醒目标题时必须为 null"]}
         expected = set(asset_ids)
         def validate_profiles(value: CandidateVisualAnalysisDecision):
             result = []
@@ -1086,7 +1096,7 @@ def analyze_candidate_thumbnails(brief: ArticleBrief, candidates: list[AssetCand
         )
         accepted: set[str] = set()
         for item in decision.candidate_profiles:
-            profile = CandidateVisualProfile.model_validate(item.model_dump() | {"analysis_status": "verified"})
+            profile = CandidateVisualProfile.model_validate(_agent_headline_data(item) | {"analysis_status": "verified"})
             blocked = profile.is_qr_code or profile.is_advertisement or profile.is_page_ui or profile.is_logo or profile.is_app_download
             if blocked:
                 profile = profile.model_copy(update={"eligible": False, "role": ImageRole.irrelevant, "exclusion_reason": profile.exclusion_reason or "visual_non_editorial_asset"})
@@ -1103,7 +1113,7 @@ def analyze_candidate_thumbnails(brief: ArticleBrief, candidates: list[AssetCand
             batch_ids = ready_ids[start:start + CANDIDATE_VISION_BATCH_SIZE]
             try:
                 inspect(batch_ids, batch_index)
-            except Exception as exc:
+            except StructuredAgentValidationError as exc:
                 batches.append({"batch": batch_index, "asset_ids": batch_ids, "accepted_ids": [], "missing_ids": batch_ids, "error": f"{type(exc).__name__}: {exc}"})
     for candidate in candidates:
         resolved.setdefault(candidate.id, _fallback_candidate_profile(candidate, thumbnails.get(candidate.id)))
@@ -1432,7 +1442,7 @@ def analyze_prominent_headlines(brief: ArticleBrief, images: list[ArticleImage],
 
     def inspect(batch: list[ArticleImage], batch_index: int) -> None:
         prompt = {
-            "task": "按所列顺序检查实际图片像素，只判断图片中是否存在可作为视频开场的醒目主题大标题。正文截图允许入选，但普通正文段落、导航 UI、错误提示、logo、水印、按钮、代码和图表标签不算主题大标题。必须逐项返回且只能返回输入 image_id。embedded_headline_text 必须是图片中可见原文，bbox 为归一化 [x,y,width,height]。",
+            "task": "按所列顺序检查实际图片像素，只判断图片中是否存在可作为视频开场的醒目主题大标题。正文截图允许入选，但普通正文段落、导航 UI、错误提示、logo、水印、按钮、代码和图表标签不算主题大标题。必须逐项返回且只能返回输入 image_id。embedded_headline_text 必须是图片中可见原文。headline_bbox 必须是 0 到 1 的 {x,y,width,height} 对象，width/height 是尺寸；禁止数组、像素、0 到 1000 和端点坐标；无醒目标题时必须为 null。",
             "article_title": brief.title,
             "images_in_supplied_order": [{"image_id": image.id, "source_hint": "article_screenshot" if image.source_url.startswith("screenshot://") else "downloaded_image", "alt": image.alt, "caption": image.caption} for image in batch],
         }
@@ -1456,7 +1466,7 @@ def analyze_prominent_headlines(brief: ArticleBrief, images: list[ArticleImage],
         )
         for result in decision.image_headlines:
             image_id = result.image_id
-            item = result.model_dump(mode="json")
+            item = _agent_headline_data(result)
             prominent = result.contains_prominent_headline
             if not prominent:
                 item = item | {
@@ -1474,7 +1484,7 @@ def analyze_prominent_headlines(brief: ArticleBrief, images: list[ArticleImage],
         batch = images[start:start + 4]
         try:
             inspect(batch, batch_index)
-        except Exception as batch_exc:
+        except StructuredAgentValidationError as batch_exc:
             for image in batch:
                 base = by_id[image.id]
                 resolved[image.id] = base.model_copy(update={
@@ -1497,7 +1507,7 @@ def tag_images(brief: ArticleBrief, images: list[ArticleImage], *, artifact_dir:
     if provider.model_name == "mock":
         return brief.model_copy(update={"summary": fallback_copy.body, "topics": fallback_tags[0].topics}), fallback_copy, fallback_tags
     payload = {"title": brief.title, "site": brief.site_name, "text": brief.text[:9000], "images": [{"id": image.id, "alt": image.alt, "caption": image.caption, "context": image.context[:800], "size": [image.width, image.height]} for image in images]}
-    prompt = {"task": "阅读文章并分析每张实际图片。必须区分图片内部醒目的主题标题与 logo、水印、按钮、导航、代码、图表标签或零散 UI 文字。只有图片像素中确实存在清晰、完整、与文章标题相关的大字时，contains_prominent_headline 才能为 true。headline_bbox 使用归一化 [x,y,width,height]。", "article": payload}
+    prompt = {"task": "阅读文章并分析每张实际图片。必须区分图片内部醒目的主题标题与 logo、水印、按钮、导航、代码、图表标签或零散 UI 文字。只有图片像素中确实存在清晰、完整、与文章标题相关的大字时，contains_prominent_headline 才能为 true。headline_bbox 必须是 0 到 1 的 {x,y,width,height} 对象，width/height 是尺寸；禁止数组、像素、0 到 1000 和端点坐标；无醒目标题时必须为 null。", "article": payload}
     try:
         multimodal = getattr(provider, "complete_multimodal", None)
         expected = {image.id for image in images}
@@ -1521,12 +1531,12 @@ def tag_images(brief: ArticleBrief, images: list[ArticleImage], *, artifact_dir:
         )
         image_by_id = {image.id: image for image in images}
         tags = _with_headline_status([
-            ImageTag.model_validate(item.model_dump() | {"section_index": image_by_id[item.image_id].source_index})
+            ImageTag.model_validate(_agent_headline_data(item) | {"section_index": image_by_id[item.image_id].source_index})
             for item in result.image_tags
         ], "verified" if callable(multimodal) else "unavailable")
         updated = brief.model_copy(update={"summary": result.summary, "topics": result.topics, "mood": result.mood})
         return updated, VideoCopy.model_validate(result.video_copy.model_dump()), analyze_prominent_headlines(brief, images, tags, artifact_dir=artifact_dir)
-    except Exception:
+    except StructuredAgentValidationError:
         failed_tags = [_fallback_tag(image, headline_status="failed") for image in images]
         return brief.model_copy(update={"summary": fallback_copy.body, "topics": failed_tags[0].topics}), fallback_copy, analyze_prominent_headlines(brief, images, failed_tags, artifact_dir=artifact_dir)
 

@@ -5,19 +5,23 @@ from .article import (
     MusicTrack, TransitionContext, TransitionRelation,
 )
 from .pipeline import (
-    AnimationArtifact, CopyFitDecision, CopyScene, DirectorPlan, DirectorScene,
+    AnimationArtifact, CopyFitDecision, CopyFitPageTarget, CopyPage, CopyPageText, CopyScene,
+    DirectorPlan, DirectorScene,
+    DirectorTextLayout,
     EditorialBeat, EditorialPlan, Material, ProjectContext, SceneTiming,
-    SourceReference, SourceResult, SourceResults, TimingPlan, ViralCopyPlan,
+    PresentationPageTiming, PresentationPlan, PresentationScene, SceneSplitTarget,
+    SourceReference, SourceResult, SourceResults, TextFieldBudget, TimingPlan, ViralCopyPlan,
 )
 from .copy import VideoCopy
 from .agent_contract import (
     AgentSourceReference, ArticleSelectionDecision, ArticleTranslationBatchDecision,
     ArticleTranslationRow, ArticleImageTaggingDecision, AssetDecisionItem, AssetSelectionDecision,
     CandidateVisualAnalysisDecision, CandidateVisualProfileDecision,
-    CopyFitReviewDecision, CopyFitTargetDecision, DirectorDecision, ImageHeadlineBatchDecision,
-    ImageHeadlineDecision, ImageTagDecision, VideoCopyDecision,
-    DirectorSceneDecision, EditorialBeatDecision, EditorialDecision,
-    StrictAgentModel, ViralCopyDecision, ViralCopySceneDecision,
+    CopyFitPageTargetDecision, CopyFitReviewDecision, DirectorDecision, ImageHeadlineBatchDecision,
+    ImageHeadlineDecision, ImageTagDecision, NormalizedBBoxDecision, VideoCopyDecision,
+    DirectorSceneDecision, DirectorTextLayoutDecision, EditorialBeatDecision, EditorialDecision,
+    SceneSplitTargetDecision, StrictAgentModel, ViralCopyDecision, ViralCopyPageDecision,
+    ViralCopyPageTextDecision, ViralCopySceneDecision,
 )
 
 __all__ = [name for name in globals() if not name.startswith("_")]

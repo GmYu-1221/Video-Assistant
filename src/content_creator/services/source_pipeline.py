@@ -38,6 +38,20 @@ def asset_target_count(character_count: int) -> int:
     return max(1, min(6, math.ceil(character_count / 1200)))
 
 
+def _asset_preview_failure_details(analysis: dict, ready_ids: set[str], profile_by_id: dict) -> list[str]:
+    details = [
+        f"batch {batch['batch']}: {batch['error']}"
+        for batch in analysis.get("batches", []) if batch.get("error")
+    ]
+    unverified_ids = sorted(
+        asset_id for asset_id in ready_ids
+        if asset_id not in profile_by_id or profile_by_id[asset_id].analysis_status != "verified"
+    )
+    if unverified_ids:
+        details.append(f"unverified asset_ids: {', '.join(unverified_ids)}")
+    return details
+
+
 def _article_selection_succeeded(diagnostics: dict) -> bool:
     """Check the Article Agent's final state, not failed attempts it recovered from."""
     return (
@@ -114,8 +128,10 @@ def process_source(
     ready_ids = {item["asset_id"] for item in previews if item.get("status") == "ready"}
     profile_by_id = {profile.asset_id: profile for profile in profiles}
     analysis = diagnostics.get("candidate_visual_analysis", {})
-    if any(batch.get("error") for batch in analysis.get("batches", [])) or any(profile_by_id[item].analysis_status != "verified" for item in ready_ids):
-        raise RuntimeError(f"{source_id} Asset Agent did not return valid analysis for every supplied preview")
+    failure_details = _asset_preview_failure_details(analysis, ready_ids, profile_by_id)
+    if failure_details:
+        _write_json(source_dir / "diagnostics.json", diagnostics)
+        raise RuntimeError(f"{source_id} Asset Agent preview analysis failed: {'; '.join(failure_details)}")
     decisions = select_assets_with_agent(brief, visual_candidates, diagnostics, target_count, visual_profiles=profiles, artifact_dir=source_dir)
     selection = diagnostics.get("asset_agent", {})
     if visual_candidates and selection.get("eligible_count", 0) and selection.get("mode") not in {"text_success", "text_retry_success"}:

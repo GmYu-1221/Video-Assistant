@@ -3,7 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from content_creator.services.html_validator import AnimationHTMLValidationError, extract_complete_html, validate_animation_html
+from content_creator.services.html_validator import (
+    AnimationHTMLValidationError, extract_complete_html, validate_animation_html,
+    validate_animation_html_repair_scope,
+)
 
 
 def valid_html() -> str:
@@ -60,6 +63,37 @@ def test_non_contract_timeline_seek_is_rejected_with_detail(tmp_path, replacemen
 def test_missing_contract_parts_fail(tmp_path, needle, replacement):
     with pytest.raises(AnimationHTMLValidationError):
         validate_animation_html(valid_html().replace(needle, replacement), project(tmp_path), width=64, height=64, fps=30, duration_frames=4)
+
+
+def test_master_timeline_repair_scope_accepts_only_declaration_and_reference_rename():
+    repaired = valid_html()
+    original = repaired.replace(
+        "const masterTimeline = gsap.timeline({paused: true});",
+        "const tl = gsap.timeline({paused: true}); window.masterTimeline = tl;",
+    ).replace("masterTimeline.to", "tl.to")
+    validate_animation_html_repair_scope(
+        original, repaired,
+        "A paused GSAP masterTimeline is required: aliases are not accepted",
+    )
+
+
+@pytest.mark.parametrize("changed", [
+    lambda html: html.replace("<div id=\"box\"></div>", "<section id=\"box\"></section>"),
+    lambda html: html.replace("<div id=\"box\"></div>", "<div id=\"box\">改文案</div>"),
+    lambda html: html.replace("<div id=\"box\"></div>", "<div id=\"box\" style=\"color:red\"></div>"),
+    lambda html: html.replace("runtime/gsap.min.js", "runtime/other.js"),
+])
+def test_master_timeline_repair_scope_rejects_dom_text_style_and_asset_changes(changed):
+    repaired = valid_html()
+    original = repaired.replace(
+        "const masterTimeline = gsap.timeline({paused: true});",
+        "const tl = gsap.timeline({paused: true}); window.masterTimeline = tl;",
+    ).replace("masterTimeline.to", "tl.to")
+    with pytest.raises(AnimationHTMLValidationError, match="DOM structure, CSS, text"):
+        validate_animation_html_repair_scope(
+            original, changed(repaired),
+            "A paused GSAP masterTimeline is required: aliases are not accepted",
+        )
 
 
 @pytest.mark.parametrize("payload", [

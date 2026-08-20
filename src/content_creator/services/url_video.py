@@ -18,6 +18,7 @@ _NODE_STAGES = {
     "editorial_agent": "内容编排",
     "director_agent": "导演设计",
     "copy_fitting_agent": "文案适配",
+    "presentation_compiler": "分页编译",
     "director_review": "导演复核",
     "animation_agent": "动画生成",
 }
@@ -35,7 +36,7 @@ def create_project_context(project_id: str, urls: list[str], output_root: str | 
 
 
 def generate_animation(context: ProjectContext, *, on_progress=None) -> tuple[AnimationArtifact, dict]:
-    state: dict = {"project": context, "revision_count": 0, "errors": []}
+    state: dict = {"project": context, "revision_count": 0, "scene_split_count": 0, "errors": []}
     graph = build_graph()
     for update in graph.stream(state, stream_mode="updates"):
         for node, values in update.items():

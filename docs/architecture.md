@@ -11,7 +11,9 @@ Web 输入 URL
 → 导演 Agent（决定总秒数、场景和相对时长权重）
 → Timing Compiler（生成确定帧区间）
 → 文案适配 Agent
-→ 导演复核（最多要求压缩两次）
+→ Presentation Compiler（生成 scene 内分页帧区间）
+→ 导演复核（最多要求 Copy 修订两次）
+↳ 容量不足或多个独立叙事节点时最多回到 Director split 一次
 → 动画 Agent
 → AnimationArtifact
 → HTML 校验器
@@ -36,6 +38,7 @@ Article、Editorial、Director、Copy Fitting 和 Director Review 的结构化�
 - 引用 ID 必须来自本次输入并由 Python 校验；beat ID 和 scene ID 由 Python按顺序生成。
 - 首次 Schema 或业务引用校验失败时只允许一次 repair。repair 只能修改 `error_paths` 以及 validator 明确给出的 `related_paths`，其余合法值、对象结构和数组顺序必须保持不变。
 - 网关只有明确声明不支持 `response_format/json_schema` 时才降级到 JSON object mode；鉴权、模型不存在、限流、超时和服务端错误直接失败。
+- 视觉 Agent 的 `headline_bbox` 使用严格 `{x,y,width,height}` 对象，四项均为 `0..1` 归一化坐标；禁止数组、像素、`0..1000` 和端点坐标。Python 只将其转换为下游 tuple，不猜测坐标格式。
 - 每次调用保存原始 attempt 和 validation JSON。Animation Agent 不使用本 Contract，继续执行独立 HTML Contract。
 
 ## 2. Agent 工作流
@@ -73,19 +76,23 @@ Article 范围内的正文候选选择、逐批中文化、素材视觉分析和
 
 导演根据内容编排的信息量、核心 beat 数量、实际可用素材数量和整体节奏，决定 15～90 秒的整数 `duration_seconds`、scene 划分及每幕正数 `duration_weight`。模型不输出 width、height、FPS、scene ID、`duration_frames` 或帧边界；Python 注入项目参数、使用 `scene-001` 顺序编号，并唯一使用 `duration_seconds * project.fps` 计算总帧数。
 
-Timing Compiler 使用稳定的最大余数法分配帧：每幕先保证一帧，再按权重分配剩余帧，余数相同时按 scene 顺序处理。生成的半开区间从第 0 帧开始、连续无空洞，并准确结束于 `duration_frames`。默认按中文每秒 7 字计算各幕 `text_budget`。
+Timing Compiler 使用稳定的最大余数法分配帧：每幕先保证一帧，再按权重分配剩余帧，余数相同时按 scene 顺序处理。生成的半开区间从第 0 帧开始、连续无空洞，并准确结束于 `duration_frames`。
+
+导演只为实际显示的 `hook`、`title`、`body`、`emphasis`、`closing` 选择 typography、visibility 和 hierarchy 预设，不计算字号、行数、出现帧数或文字容量。Python 根据 scene 持续时间、预设字号、最大行数、最短显示时间和信息层级编译逐字段 `field_budgets`，并确定性检查显示宽度单位与行数。中文及全角字符计 1 单位，ASCII 字符计 0.5 单位；Copy page 只列实际显示的非空 text item，缺少的字段不产生阅读负荷。
+
+`base_reading_units_per_second` 默认值为 10，只是屏幕阅读负荷的启发式基准，不代表配音速度、朗读速度或绝对人类阅读速度。field/hierarchy coefficient 越高，表示该层文字越需要精炼，因此允许的 `max_total_units` 越少。
 
 导演只输出实现无关的视觉方案，不能输出 DOM、CSS 代码、动画 API 或框架组件。scene ID 必须唯一，素材 ID 必须存在，权重必须为正。
 
 ### 文案适配 Agent
 
-文案适配 Agent 只生成 `viral_copy_plan`，不能输出或修改时长、FPS、scene、权重或帧区间。输入中的 `timing_plan`、每幕秒数与 `text_budget` 均已锁定；文案 scene ID 和顺序必须与导演方案完全一致。
+文案适配 Agent 只生成 `viral_copy_plan`，不能输出或修改时长、FPS、scene、权重或帧区间。每个 scene 包含 1～12 个 display page；长文案默认拆页而不是压缩。每页选择该 scene 已批准的 `material_id`（允许复用），并只列实际显示的非空 text item。没有 Director text layout 的字段禁止出现，有 layout 的字段必须至少在该 scene 的一页出现。
 
-该节点加载项目内的 Viral Writer 技能，用于标题、钩子、信息密度和事实可追溯性。
+Python 的 Presentation Compiler 为每页保证所有活动字段的最短可见帧数，并稳定分配剩余帧，生成连续、精确覆盖原 scene 的 `presentation_plan.json`。模型不输出 page ID 或页级帧号。
 
 ### 导演复核
 
-导演复核只能接受文案或给出压缩目标，不能修改总时长、scene、权重或帧区间。最多允许两次文案修订，第三次仍不通过则任务失败，`timing_plan` 在整个回环中保持不变。
+导演复核只判断同屏信息层级、画面阅读负荷和叙事节点独立性，不能依据配音或朗读时长。长文案优先要求 Copy 重新分页，合法分页仍无法解决时才要求压缩。页面最低帧总和超过 scene 容量，或内容存在多个独立叙事节点时，可升级为一次 Director scene split；split 保持原总时长，只重分 scene 和权重并重新编译 timing。普通 Copy 修订最多两次且不改变 TimingPlan。
 
 ### 动画 Agent
 
@@ -139,6 +146,8 @@ HTML 校验器会拒绝：
 - CSS animation、CSS transition、定时器和 requestAnimationFrame
 - 真实时钟、随机数和自动播放主时间线
 
+Animation HTML 首次 Contract 校验失败时允许一次专用 repair。repair 可修改与当前错误直接相关的代码声明和引用，但修复前后会校验 DOM、CSS、素材、可见文案、布局以及 GSAP 参数和时间点未改变；第二次仍失败或越过该范围时立即终止。Provider 调用错误不触发 repair。每次响应保存为 `animation_response_attempt-N.txt`，最终状态写入 `animation_validation.json`。
+
 允许访问的相对资源根目录只有 `materials/`、`runtime/` 和 `background/`。
 
 ## 4. Chromium 与 FFmpeg
@@ -171,14 +180,17 @@ output/projects/<job-id>/
 ├── source_results.json
 ├── editorial_plan.json
 ├── viral_copy_plan.json
+├── presentation_plan.json
+├── presentation_validation.json
 ├── copy_fitting_response.txt
 ├── copy_fitting_validation.json
 ├── copy_fit_decision.json
 ├── agent_runs/
 │   ├── editorial/
 │   ├── director/
-│   ├── copy_fitting/
-│   └── director_review/
+│   ├── copy_fitting_revision-000/
+│   ├── director_review_revision-000/
+│   └── director_split-001/（仅发生 scene split 时）
 │       ├── attempt-1.txt
 │       ├── attempt-2.txt（仅发生 repair 时）
 │       └── validation.json

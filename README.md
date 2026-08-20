@@ -5,7 +5,7 @@
 ## 生产流程
 
 ```text
-URLs → Source → Editorial → Copy Fitting ↔ Director → Animation
+URLs → Source → Editorial → Director → Timing Compiler → Copy Fitting → Presentation Compiler ↔ Director Review → Animation
      → AnimationArtifact → HTML Validator → Chromium → FFmpeg + BGM → final.mp4
 ```
 

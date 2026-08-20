@@ -53,30 +53,92 @@ class EditorialPlan(BaseModel):
     beats: list[EditorialBeat] = Field(min_length=1, max_length=12)
 
 
+TextFieldName = Literal["hook", "title", "body", "emphasis", "closing"]
+
+
+class CopyPageText(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: TextFieldName
+    # The generous schema ceiling lets semantic validation request pagination.
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class CopyPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_id: str
+    material_id: str
+    texts: list[CopyPageText] = Field(max_length=5)
+    source_references: list[SourceReference] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def unique_text_fields(self):
+        fields = [item.field for item in self.texts]
+        if len(fields) != len(set(fields)):
+            raise ValueError("Copy page text fields must be unique")
+        return self
+
+
 class CopyScene(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scene_id: str
-    title: str = Field(max_length=40)
-    body: str = Field(max_length=180)
-    emphasis: str = Field(default="", max_length=40)
-    source_references: list[SourceReference] = Field(min_length=1)
+    pages: list[CopyPage] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def unique_page_ids(self):
+        ids = [page.page_id for page in self.pages]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Copy page IDs must be unique within a scene")
+        return self
 
 
 class ViralCopyPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     final_title: str = Field(min_length=2, max_length=60)
-    hook: str = Field(min_length=2, max_length=80)
     scenes: list[CopyScene] = Field(min_length=1, max_length=12)
-    closing: str = Field(default="", max_length=80)
+
+    @model_validator(mode="after")
+    def unique_scene_ids(self):
+        ids = [scene.scene_id for scene in self.scenes]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Copy scene IDs must be unique")
+        return self
+TypographyProfile = Literal["display", "headline", "body", "label"]
+VisibilityProfile = Literal["brief", "standard", "persistent"]
+HierarchyLevel = Literal["primary", "secondary", "supporting"]
+
+
+class DirectorTextLayout(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: TextFieldName
+    typography_profile: TypographyProfile
+    visibility_profile: VisibilityProfile
+    hierarchy_level: HierarchyLevel
+
+
+class TextFieldBudget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: TextFieldName
+    typography_profile: TypographyProfile
+    visibility_profile: VisibilityProfile
+    hierarchy_level: HierarchyLevel
+    font_size_px: int = Field(gt=0)
+    max_lines: int = Field(gt=0)
+    max_units_per_line: float = Field(gt=0)
+    min_visible_frames: int = Field(gt=0)
+    max_total_units: float = Field(gt=0, multiple_of=0.5)
 
 
 class SceneTiming(BaseModel):
     scene_id: str
     start_frame: int = Field(ge=0)
     end_frame: int = Field(gt=0)
-    text_budget: int = Field(gt=0)
+    field_budgets: list[TextFieldBudget] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def valid_range(self):
@@ -88,7 +150,7 @@ class SceneTiming(BaseModel):
 class TimingPlan(BaseModel):
     fps: int = Field(default=30, gt=0, le=60)
     duration_frames: int = Field(gt=0)
-    speaking_chars_per_second: float = Field(default=7.0, gt=0)
+    base_reading_units_per_second: float = Field(default=10.0, gt=0)
     scenes: list[SceneTiming] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -109,6 +171,61 @@ class TimingPlan(BaseModel):
         return self
 
 
+class PresentationPageTiming(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_id: str
+    material_id: str
+    start_frame: int = Field(ge=0)
+    end_frame: int = Field(gt=0)
+    field_budgets: list[TextFieldBudget] = Field(max_length=5)
+
+    @model_validator(mode="after")
+    def valid_range(self):
+        if self.end_frame <= self.start_frame:
+            raise ValueError("page end_frame must be greater than start_frame")
+        return self
+
+
+class PresentationScene(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scene_id: str
+    start_frame: int = Field(ge=0)
+    end_frame: int = Field(gt=0)
+    pages: list[PresentationPageTiming] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def continuous_pages(self):
+        if self.pages[0].start_frame != self.start_frame:
+            raise ValueError(f"scene {self.scene_id} first page must start at {self.start_frame}")
+        for left, right in zip(self.pages, self.pages[1:]):
+            if left.end_frame != right.start_frame:
+                raise ValueError(f"page timing break between {left.page_id} and {right.page_id}")
+        if self.pages[-1].end_frame != self.end_frame:
+            raise ValueError(f"scene {self.scene_id} last page must end at {self.end_frame}")
+        return self
+
+
+class PresentationPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fps: int = Field(gt=0, le=60)
+    duration_frames: int = Field(gt=0)
+    scenes: list[PresentationScene] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def continuous_scenes(self):
+        if self.scenes[0].start_frame != 0:
+            raise ValueError("PresentationPlan must start at frame 0")
+        for left, right in zip(self.scenes, self.scenes[1:]):
+            if left.end_frame != right.start_frame:
+                raise ValueError(f"presentation timing break between {left.scene_id} and {right.scene_id}")
+        if self.scenes[-1].end_frame != self.duration_frames:
+            raise ValueError("PresentationPlan must end at duration_frames")
+        return self
+
+
 class DirectorScene(BaseModel):
     scene_id: str
     material_ids: list[str] = Field(min_length=1)
@@ -118,12 +235,43 @@ class DirectorScene(BaseModel):
     transition_intent: str
     information_hierarchy: str
     visual_density: Literal["low", "medium", "high"] = "medium"
+    # Required in the Agent contract, but may be [] for a genuinely text-free scene.
+    text_layouts: list[DirectorTextLayout] = Field(max_length=5)
+
+
+class CopyFitPageTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scene_id: str
+    page_index: int = Field(ge=0, le=11)
+    field: TextFieldName
+    action: Literal["paginate", "compress"]
+    max_display_units: float | None = Field(default=None, gt=0, multiple_of=0.5)
+
+    @model_validator(mode="after")
+    def valid_action(self):
+        if self.action == "compress" and self.max_display_units is None:
+            raise ValueError("compress target requires max_display_units")
+        if self.action == "paginate" and self.max_display_units is not None:
+            raise ValueError("paginate target must use null max_display_units")
+        return self
+
+
+class SceneSplitTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scene_id: str
+    reason: str = Field(min_length=1)
+    narrative_nodes: list[str] = Field(min_length=2, max_length=6)
 
 
 class CopyFitDecision(BaseModel):
-    status: Literal["accepted", "revise"]
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["accepted", "revise_copy", "split_scene"]
     feedback: str = ""
-    scene_targets: dict[str, int] = Field(default_factory=dict)
+    page_targets: list[CopyFitPageTarget] = Field(default_factory=list)
+    split_targets: list[SceneSplitTarget] = Field(default_factory=list)
 
 
 class DirectorPlan(BaseModel):
@@ -164,6 +312,7 @@ class ProjectContext(BaseModel):
     height: int = 1920
     fps: int = 30
     max_copy_revision: int = 2
+    max_scene_split: int = 1
 
 
 class AnimationArtifact(BaseModel):

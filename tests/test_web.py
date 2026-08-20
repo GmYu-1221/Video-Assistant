@@ -12,7 +12,7 @@ def test_web_routes_and_removed_feedback_api(tmp_path):
 
 def test_web_ui_has_three_urls_and_new_stages():
     assert _PAGE.count('class="url"') == 3
-    stages = ("文章处理", "内容编排", "导演设计", "文案适配", "导演复核", "动画生成", "视频渲染", "完成")
+    stages = ("文章处理", "内容编排", "导演设计", "文案适配", "分页编译", "导演复核", "动画生成", "视频渲染", "完成")
     for stage in stages:
         assert stage in _PAGE
     assert [(_PAGE.index(stage), stage) for stage in stages] == sorted((_PAGE.index(stage), stage) for stage in stages)

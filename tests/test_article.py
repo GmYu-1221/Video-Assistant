@@ -96,7 +96,7 @@ def test_prominent_headline_analysis_batches_actual_images(monkeypatch):
             payload = json.loads(prompt)
             ids = [item["image_id"] for item in payload["images_in_supplied_order"]]
             calls.append((ids, paths))
-            return json.dumps({"image_headlines": [{"image_id": image_id, "contains_prominent_headline": image_id == images[0].id, "embedded_headline_text": "DeepSeek-V3" if image_id == images[0].id else "", "headline_prominence": .9 if image_id == images[0].id else 0, "headline_title_match_score": .95 if image_id == images[0].id else 0, "headline_bbox": [.1, .1, .8, .3] if image_id == images[0].id else [0, 0, 0, 0], "headline_readability": .9 if image_id == images[0].id else 0, "headline_exclusion_reason": "" if image_id == images[0].id else "no prominent headline"} for image_id in ids]})
+            return json.dumps({"image_headlines": [{"image_id": image_id, "contains_prominent_headline": image_id == images[0].id, "embedded_headline_text": "DeepSeek-V3" if image_id == images[0].id else "", "headline_prominence": .9 if image_id == images[0].id else 0, "headline_title_match_score": .95 if image_id == images[0].id else 0, "headline_bbox": {"x": .1, "y": .1, "width": .8, "height": .3} if image_id == images[0].id else None, "headline_readability": .9 if image_id == images[0].id else 0, "headline_exclusion_reason": "" if image_id == images[0].id else "no prominent headline"} for image_id in ids]})
 
     monkeypatch.setattr(article_service, "get_agent_provider", lambda _name: Provider())
     brief = ArticleBrief(url="https://example.com", canonical_url="https://example.com", title="DeepSeek-V3 项目介绍", text="正文")
@@ -558,6 +558,76 @@ def test_candidate_thumbnail_analysis_batches_six_and_returns_all_profiles(tmp_p
         run_dir = tmp_path / "agent_runs" / f"asset_visual_batch-{batch_index:03d}"
         assert (run_dir / "attempt-1.txt").is_file()
         assert json.loads((run_dir / "validation.json").read_text())["status"] == "passed"
+
+
+def test_candidate_visual_bbox_repairs_real_endpoint_response_without_changing_other_fields(tmp_path, monkeypatch):
+    candidates = []
+    records = []
+    for asset_id in ("asset-003", "asset-004"):
+        path = tmp_path / f"{asset_id}.jpg"
+        Image.new("RGB", (512, 320), "#335577").save(path)
+        candidates.append(AssetCandidate(id=asset_id, kind=AssetKind.image, source_url=f"https://example.com/{asset_id}.jpg", page_url="https://example.com"))
+        records.append({"asset_id": asset_id, "status": "ready", "local_path": str(path)})
+
+    def profile(asset_id, bbox):
+        return {
+            "asset_id": asset_id, "role": "overview", "topics": ["教育"], "entities": ["学校"],
+            "relevance": .8, "visual_quality": .9, "title_match_score": .7,
+            "is_qr_code": False, "is_advertisement": False, "is_page_ui": False,
+            "is_logo": False, "is_app_download": False, "contains_prominent_headline": True,
+            "embedded_headline_text": "学校标题", "headline_prominence": .9, "headline_bbox": bbox,
+            "headline_readability": .95, "eligible": True, "exclusion_reason": "",
+        }
+
+    first = {"candidate_profiles": [
+        profile("asset-003", [12, 594, 876, 794]),
+        profile("asset-004", [72, 512, 924, 724]),
+    ]}
+    repaired = {"candidate_profiles": [
+        profile("asset-003", {"x": .012, "y": .594, "width": .864, "height": .2}),
+        profile("asset-004", {"x": .072, "y": .512, "width": .852, "height": .212}),
+    ]}
+
+    class Provider:
+        model_name = "vision-model"
+        responses = iter((first, repaired))
+
+        def complete_multimodal(self, _prompt, _paths):
+            return json.dumps(next(self.responses), ensure_ascii=False)
+
+    monkeypatch.setattr(article_service, "get_agent_provider", lambda _: Provider())
+    diagnostics = {}
+    brief = ArticleBrief(url="https://example.com", canonical_url="https://example.com", title="学校新闻", text="正文")
+    profiles = analyze_candidate_thumbnails(brief, candidates, records, diagnostics, artifact_dir=tmp_path)
+
+    assert profiles[0].headline_bbox == (.012, .594, .864, .2)
+    assert profiles[1].headline_bbox == (.072, .512, .852, .212)
+    assert all(item.analysis_status == "verified" for item in profiles)
+    validation = json.loads((tmp_path / "agent_runs" / "asset_visual_batch-001" / "validation.json").read_text())
+    assert validation["status"] == "passed_after_repair"
+    assert {item["path"] for item in validation["attempts"][0]["issues"]} == {
+        "candidate_profiles.0.headline_bbox", "candidate_profiles.1.headline_bbox",
+    }
+
+
+def test_candidate_visual_provider_error_is_not_hidden_by_asset_fallback(tmp_path, monkeypatch):
+    path = tmp_path / "asset.jpg"
+    Image.new("RGB", (64, 48), "white").save(path)
+    candidate = AssetCandidate(id="asset-001", kind=AssetKind.image, source_url="https://example.com/asset.jpg", page_url="https://example.com")
+
+    class Provider:
+        model_name = "vision-model"
+
+        def complete_multimodal(self, _prompt, _paths):
+            raise TimeoutError("gateway timeout")
+
+    monkeypatch.setattr(article_service, "get_agent_provider", lambda _: Provider())
+    brief = ArticleBrief(url="https://example.com", canonical_url="https://example.com", title="标题", text="正文")
+    with pytest.raises(TimeoutError, match="gateway timeout"):
+        analyze_candidate_thumbnails(
+            brief, [candidate], [{"asset_id": candidate.id, "status": "ready", "local_path": str(path)}],
+            {}, artifact_dir=tmp_path,
+        )
 
 
 def test_candidate_thumbnail_pool_is_limited_and_preserves_aspect_ratio(tmp_path, monkeypatch):

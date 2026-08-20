@@ -79,16 +79,16 @@ class StructuredAgentRunner(Generic[T]):
             raise
         _atomic_text(run_dir / "attempt-2.txt", repaired_raw)
         repaired, repair_issues, repaired_parsed = self._validate(repaired_raw, schema, semantic_validator)
-        if not repair_issues and repaired_parsed is not None:
+        if repaired_parsed is not None:
             changes = _locked_changes(locked, repaired_parsed)
             if parsed is not None:
                 changes.extend(_structural_changes(parsed, repaired_parsed, mutable_paths))
                 changes = list(dict.fromkeys(changes))
             if changes:
-                repair_issues = [ValidationIssue(
+                repair_issues.extend(ValidationIssue(
                     path=path, code="repair_changed_legal_field",
                     message="schema repair changed a field outside error_paths/related_paths",
-                ) for path in changes[:20]]
+                ) for path in changes[:20])
         attempts.append({"attempt": 2, "status": "passed" if not repair_issues else "failed", "issues": [item.as_dict() for item in repair_issues]})
         if repair_issues:
             self._write_validation(run_dir, "failed", attempts)

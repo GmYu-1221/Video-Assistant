@@ -62,6 +62,7 @@ http://127.0.0.1:8000
 内容编排
 导演设计
 文案适配
+分页编译
 导演复核
 动画生成
 视频渲染
@@ -166,10 +167,13 @@ output/projects/<job-id>/
 - `source_results.json`：文章正文和本地素材
 - `editorial_plan.json`：融合后的内容结构
 - `viral_copy_plan.json`：短视频文案
-- `timing_plan.json`：逐幕帧区间和文字预算
+- `timing_plan.json`：逐幕帧区间和屏幕可见文字的逐字段预算
+- `presentation_plan.json`：scene 内各 display page 的素材、连续帧区间和实际字段预算
 - `director_plan.json`：实现无关的导演方案
 - `agent_runs/<agent>/attempt-*.txt`：结构化 Agent 每次原始响应
 - `agent_runs/<agent>/validation.json`：Schema、ID、repair 和字段锁定校验结果
+- `animation_response_attempt-1.txt` / `animation_response_attempt-2.txt`：Animation HTML 原始响应与最多一次 Contract repair 响应
+- `animation_validation.json`：Animation 每次 HTML 校验结果及最终 `passed`、`passed_after_repair`、`failed` 或 `invocation_failed` 状态
 - `sources/<source-id>/agent_runs/`：Article 四类结构化调用的逐批诊断
 - `animation_prompt.json`：发送给动画模型的完整输入
 - `animation.html`：模型生成的完整动画页面

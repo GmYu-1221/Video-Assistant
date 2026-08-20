@@ -5,11 +5,17 @@ import re
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 
 class AnimationHTMLValidationError(ValueError):
     pass
+
+
+_JS_TOKEN = re.compile(
+    r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|//[^\n]*|/\*.*?\*/|[A-Za-z_$][\w$]*|(?:\d+\.\d*|\.\d+|\d+)|===|!==|=>|==|!=|<=|>=|\+\+|--|&&|\|\||\?\?|\?\.|\S)''',
+    re.S,
+)
 
 
 _BANNED_PATTERNS = {
@@ -45,6 +51,108 @@ def extract_complete_html(raw: str) -> str:
     if cleaned[:start.start()].strip() or cleaned[end + len("</html>"):].strip():
         raise AnimationHTMLValidationError("Unexpected content outside the HTML document")
     return html
+
+
+def validate_animation_html_repair_scope(original_html: str, repaired_html: str, contract_error: str) -> None:
+    """Reject HTML repair changes outside code directly related to the error."""
+    if _document_signature(original_html) != _document_signature(repaired_html):
+        raise AnimationHTMLValidationError(
+            "HTML Contract repair changed DOM structure, CSS, text, layout attributes, or material references"
+        )
+    if contract_error.startswith("A paused GSAP masterTimeline is required"):
+        if _master_timeline_code_signature(original_html) != _master_timeline_code_signature(repaired_html):
+            raise AnimationHTMLValidationError(
+                "HTML Contract repair changed code outside masterTimeline declaration, alias removal, or directly related references"
+            )
+    elif _gsap_animation_signature(original_html) != _gsap_animation_signature(repaired_html):
+        raise AnimationHTMLValidationError(
+            "HTML Contract repair changed GSAP animation parameters or timeline positions"
+        )
+
+
+def _document_signature(html: str):
+    soup = BeautifulSoup(html, "html.parser")
+
+    def node_signature(node):
+        if isinstance(node, NavigableString):
+            text = " ".join(str(node).split())
+            return ("text", text) if text else None
+        if not isinstance(node, Tag):
+            return None
+        attrs = tuple(sorted(
+            (key, tuple(value) if isinstance(value, list) else str(value))
+            for key, value in node.attrs.items()
+        ))
+        if node.name == "script" and not node.get("src"):
+            return ("script", attrs, "inline-script")
+        if node.name == "style":
+            css = re.sub(r"\s+", " ", node.get_text()).strip()
+            return ("style", attrs, css)
+        children = tuple(
+            signature for child in node.children
+            if (signature := node_signature(child)) is not None
+        )
+        return (node.name, attrs, children)
+
+    return tuple(
+        signature for child in soup.contents
+        if (signature := node_signature(child)) is not None
+    )
+
+
+def _inline_script_tokens(html: str) -> list[list[str]]:
+    soup = BeautifulSoup(html, "html.parser")
+    return [_JS_TOKEN.findall(tag.string or tag.get_text()) for tag in soup.find_all("script") if not tag.get("src")]
+
+
+def _master_timeline_code_signature(html: str) -> tuple[tuple[str, ...], ...]:
+    signatures = []
+    for tokens in _inline_script_tokens(html):
+        alias = "masterTimeline"
+        for index in range(len(tokens) - 6):
+            if (
+                tokens[index] in {"const", "let", "var"}
+                and re.fullmatch(r"[A-Za-z_$][\w$]*", tokens[index + 1])
+                and tokens[index + 2:index + 7] == ["=", "gsap", ".", "timeline", "("]
+            ):
+                alias = tokens[index + 1]
+                break
+        normalized = ["masterTimeline" if token == alias else token for token in tokens]
+        index = 0
+        without_bridge = []
+        while index < len(normalized):
+            bridge = ["window", ".", "masterTimeline", "=", "masterTimeline"]
+            if normalized[index:index + len(bridge)] == bridge:
+                index += len(bridge)
+                if index < len(normalized) and normalized[index] == ";":
+                    index += 1
+            else:
+                without_bridge.append(normalized[index])
+                index += 1
+        signatures.append(tuple(without_bridge))
+    return tuple(signatures)
+
+
+def _gsap_animation_signature(html: str) -> tuple[tuple[str, ...], ...]:
+    calls = []
+    for tokens in _inline_script_tokens(html):
+        index = 0
+        while index + 2 < len(tokens):
+            if tokens[index] == "." and tokens[index + 1] in {"to", "from", "fromTo", "set"} and tokens[index + 2] == "(":
+                depth = 0
+                end = index + 2
+                while end < len(tokens):
+                    if tokens[end] == "(":
+                        depth += 1
+                    elif tokens[end] == ")":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    end += 1
+                calls.append(tuple(tokens[index:end + 1]))
+                index = end
+            index += 1
+    return tuple(calls)
 
 
 def _javascript_function_body(html: str, signature: re.Pattern[str]) -> str | None:
@@ -168,7 +276,9 @@ def validate_animation_html(html: str, project_dir: str | Path, *, width: int, h
     if not any(tag.get("src") == "runtime/gsap.min.js" for tag in scripts):
         raise AnimationHTMLValidationError("GSAP must be loaded from runtime/gsap.min.js")
     if not re.search(r"(?:const|let|var)\s+masterTimeline\s*=\s*gsap\.timeline\s*\(\s*\{[^}]*paused\s*:\s*true", html, re.I | re.S):
-        raise AnimationHTMLValidationError("A paused GSAP masterTimeline is required")
+        raise AnimationHTMLValidationError(
+            "A paused GSAP masterTimeline is required: declare const masterTimeline = gsap.timeline({paused: true}); aliases such as window.masterTimeline = tl are not accepted"
+        )
     if len(re.findall(r"\bgsap\.timeline\s*\(", html)) != 1:
         raise AnimationHTMLValidationError("Exactly one GSAP timeline is allowed")
     if re.search(r"\bmasterTimeline\.(?:play|resume|restart)\s*\(", html):

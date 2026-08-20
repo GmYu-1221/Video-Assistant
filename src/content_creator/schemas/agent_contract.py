@@ -3,13 +3,37 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from .article import ImageRole
 
 
 class StrictAgentModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+
+class NormalizedBBoxDecision(StrictAgentModel):
+    """Unambiguous Agent-facing rectangle; domain models keep using tuples."""
+
+    x: float = Field(ge=0, le=1, description="Normalized left edge in the 0..1 image coordinate space.")
+    y: float = Field(ge=0, le=1, description="Normalized top edge in the 0..1 image coordinate space.")
+    width: float = Field(gt=0, le=1, description="Normalized rectangle width, not the right-edge coordinate.")
+    height: float = Field(gt=0, le=1, description="Normalized rectangle height, not the bottom-edge coordinate.")
+
+    @model_validator(mode="after")
+    def inside_image(self):
+        if self.x + self.width > 1 or self.y + self.height > 1:
+            raise ValueError("normalized bbox must remain inside the image")
+        return self
+
+
+def _headline_bbox_matches_flag(value: NormalizedBBoxDecision | None, info: ValidationInfo):
+    prominent = info.data.get("contains_prominent_headline")
+    if prominent is True and value is None:
+        raise ValueError("headline_bbox is required when contains_prominent_headline is true")
+    if prominent is False and value is not None:
+        raise ValueError("headline_bbox must be null when contains_prominent_headline is false")
+    return value
 
 
 class AgentSourceReference(StrictAgentModel):
@@ -50,21 +74,14 @@ class CandidateVisualProfileDecision(StrictAgentModel):
     contains_prominent_headline: bool
     embedded_headline_text: str = Field(max_length=500)
     headline_prominence: float = Field(ge=0, le=1)
-    headline_bbox: tuple[float, float, float, float] | None
+    headline_bbox: NormalizedBBoxDecision | None = Field(
+        description="Normalized {x,y,width,height}; never pixels, 0..1000 coordinates, an array, or x1/y1/x2/y2 endpoints."
+    )
     headline_readability: float = Field(ge=0, le=1)
     eligible: bool
     exclusion_reason: str = Field(max_length=400)
 
-    @field_validator("headline_bbox")
-    @classmethod
-    def normalized_bbox(cls, value):
-        if value is not None and (
-            any(item < 0 or item > 1 for item in value)
-            or value[2] <= 0 or value[3] <= 0
-            or value[0] + value[2] > 1 or value[1] + value[3] > 1
-        ):
-            raise ValueError("headline_bbox must be normalized x,y,width,height inside the image")
-        return value
+    _validate_headline_bbox = field_validator("headline_bbox")(_headline_bbox_matches_flag)
 
 
 class CandidateVisualAnalysisDecision(StrictAgentModel):
@@ -77,9 +94,13 @@ class ImageHeadlineDecision(StrictAgentModel):
     embedded_headline_text: str = Field(max_length=500)
     headline_prominence: float = Field(ge=0, le=1)
     headline_title_match_score: float = Field(ge=0, le=1)
-    headline_bbox: tuple[float, float, float, float] | None
+    headline_bbox: NormalizedBBoxDecision | None = Field(
+        description="Normalized {x,y,width,height}; never pixels, 0..1000 coordinates, an array, or x1/y1/x2/y2 endpoints."
+    )
     headline_readability: float = Field(ge=0, le=1)
     headline_exclusion_reason: str = Field(max_length=300)
+
+    _validate_headline_bbox = field_validator("headline_bbox")(_headline_bbox_matches_flag)
 
 
 class ImageHeadlineBatchDecision(StrictAgentModel):
@@ -103,9 +124,13 @@ class ImageTagDecision(StrictAgentModel):
     embedded_headline_text: str = Field(max_length=500)
     headline_prominence: float = Field(ge=0, le=1)
     headline_title_match_score: float = Field(ge=0, le=1)
-    headline_bbox: tuple[float, float, float, float] | None
+    headline_bbox: NormalizedBBoxDecision | None = Field(
+        description="Normalized {x,y,width,height}; never pixels, 0..1000 coordinates, an array, or x1/y1/x2/y2 endpoints."
+    )
     headline_readability: float = Field(ge=0, le=1)
     headline_exclusion_reason: str = Field(max_length=300)
+
+    _validate_headline_bbox = field_validator("headline_bbox")(_headline_bbox_matches_flag)
 
 
 class ArticleImageTaggingDecision(StrictAgentModel):
@@ -157,6 +182,15 @@ class DirectorSceneDecision(StrictAgentModel):
     transition_intent: str = Field(min_length=1, max_length=1000)
     information_hierarchy: str = Field(min_length=1, max_length=1000)
     visual_density: Literal["low", "medium", "high"]
+    # The key is required by StrictAgentModel; [] explicitly means no visible text.
+    text_layouts: list["DirectorTextLayoutDecision"] = Field(min_length=0, max_length=5)
+
+
+class DirectorTextLayoutDecision(StrictAgentModel):
+    field: Literal["hook", "title", "body", "emphasis", "closing"]
+    typography_profile: Literal["display", "headline", "body", "label"]
+    visibility_profile: Literal["brief", "standard", "persistent"]
+    hierarchy_level: Literal["primary", "secondary", "supporting"]
 
 
 class DirectorDecision(StrictAgentModel):
@@ -170,27 +204,43 @@ class DirectorDecision(StrictAgentModel):
     scenes: list[DirectorSceneDecision] = Field(min_length=1, max_length=12)
 
 
+class ViralCopyPageTextDecision(StrictAgentModel):
+    field: Literal["hook", "title", "body", "emphasis", "closing"]
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class ViralCopyPageDecision(StrictAgentModel):
+    material_id: str = Field(min_length=1, max_length=80)
+    texts: list[ViralCopyPageTextDecision] = Field(min_length=0, max_length=5)
+    source_references: list[AgentSourceReference] = Field(min_length=1, max_length=12)
+
+
 class ViralCopySceneDecision(StrictAgentModel):
     scene_id: str = Field(min_length=1, max_length=80)
-    title: str = Field(max_length=40)
-    body: str = Field(max_length=180)
-    emphasis: str = Field(max_length=40)
-    source_references: list[AgentSourceReference] = Field(min_length=1, max_length=12)
+    pages: list[ViralCopyPageDecision] = Field(min_length=1, max_length=12)
 
 
 class ViralCopyDecision(StrictAgentModel):
     final_title: str = Field(min_length=2, max_length=60)
-    hook: str = Field(min_length=2, max_length=80)
     scenes: list[ViralCopySceneDecision] = Field(min_length=1, max_length=12)
-    closing: str = Field(max_length=80)
 
 
-class CopyFitTargetDecision(StrictAgentModel):
+class CopyFitPageTargetDecision(StrictAgentModel):
     scene_id: str = Field(min_length=1, max_length=80)
-    max_chars: int = Field(gt=0)
+    page_index: int = Field(ge=0, le=11)
+    field: Literal["hook", "title", "body", "emphasis", "closing"]
+    action: Literal["paginate", "compress"]
+    max_display_units: float | None
+
+
+class SceneSplitTargetDecision(StrictAgentModel):
+    scene_id: str = Field(min_length=1, max_length=80)
+    reason: str = Field(min_length=1, max_length=1000)
+    narrative_nodes: list[str] = Field(min_length=2, max_length=6)
 
 
 class CopyFitReviewDecision(StrictAgentModel):
-    status: Literal["accepted", "revise"]
+    status: Literal["accepted", "revise_copy", "split_scene"]
     feedback: str = Field(max_length=2000)
-    targets: list[CopyFitTargetDecision] = Field(min_length=0, max_length=12)
+    page_targets: list[CopyFitPageTargetDecision] = Field(min_length=0, max_length=12)
+    split_targets: list[SceneSplitTargetDecision] = Field(min_length=0, max_length=12)
