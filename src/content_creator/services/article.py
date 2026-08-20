@@ -7,11 +7,13 @@ import ipaddress
 import json
 import logging
 import mimetypes
+import os
 import re
 import socket
 import subprocess
 import sys
 import time
+import tempfile
 from difflib import SequenceMatcher
 from io import BytesIO
 from pathlib import Path
@@ -22,8 +24,15 @@ import trafilatura
 from bs4 import BeautifulSoup
 from PIL import Image, ImageOps
 
-from content_creator.schemas import ArticleBrief, ArticleExtractionResult, ArticleImage, ArticleTextCandidate, AssetCandidate, AssetDecision, AssetKind, CandidatePreview, CandidateVisualProfile, ImageRole, ImageTag, TransitionContext, TransitionRelation, VideoCopy
+from content_creator.schemas import (
+    ArticleBrief, ArticleExtractionResult, ArticleImage, ArticleImageTaggingDecision, ArticleSelectionDecision,
+    ArticleTextCandidate, AssetCandidate, AssetDecision, AssetKind,
+    AssetSelectionDecision, CandidatePreview, CandidateVisualAnalysisDecision,
+    CandidateVisualProfile, ImageHeadlineBatchDecision, ImageRole, ImageTag, TransitionContext,
+    TransitionRelation, VideoCopy,
+)
 from content_creator.services.llm.router import get_agent_provider
+from content_creator.services.structured_agent import StructuredAgentRunner, issue
 
 MAX_HTML_BYTES = 5_000_000
 MAX_IMAGE_BYTES = 12_000_000
@@ -36,6 +45,10 @@ CANDIDATE_THUMBNAIL_LIMIT = 24
 CANDIDATE_THUMBNAIL_EDGE = 512
 CANDIDATE_VISION_BATCH_SIZE = 6
 logger = logging.getLogger(__name__)
+
+
+def _agent_artifact_root(value: str | Path | None) -> Path:
+    return Path(value) if value is not None else Path(tempfile.gettempdir()) / "video-assistant-agent-runs" / str(os.getpid())
 _SRCSET_PART = re.compile(r"^\s*(\S+)(?:\s+(\d+(?:\.\d+)?)([wx]))?")
 _DIRECT_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov"}
 _IMAGE_EXTENSIONS = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
@@ -124,7 +137,7 @@ def fetch_article(url: str) -> tuple[ArticleBrief, BeautifulSoup]:
     return _brief_from_extraction(extraction), soup
 
 
-def fetch_article_with_extraction(url: str) -> tuple[ArticleExtractionResult, BeautifulSoup]:
+def fetch_article_with_extraction(url: str, *, agent_artifact_dir: str | Path | None = None) -> tuple[ArticleExtractionResult, BeautifulSoup]:
     _assert_public_url(url)
     headers = {"User-Agent": "Mozilla/5.0 (compatible; VideoAssistant/1.0)", "Accept": "text/html,application/xhtml+xml"}
     with httpx.Client(headers=headers, timeout=httpx.Timeout(15, connect=8), trust_env=True) as client:
@@ -134,7 +147,7 @@ def fetch_article_with_extraction(url: str) -> tuple[ArticleExtractionResult, Be
             if exc.response.status_code in {401, 403}:
                 raise BrowserImportRequired(url, exc.response.status_code) from exc
             raise
-    return extract_article_html(url, response.text, canonical_url=str(response.url), effective_base_url=str(response.url), content_type=response.headers.get("content-type", ""), allow_rendered_fallback=True)
+    return extract_article_html(url, response.text, canonical_url=str(response.url), effective_base_url=str(response.url), content_type=response.headers.get("content-type", ""), allow_rendered_fallback=True, agent_artifact_dir=agent_artifact_dir)
 
 
 def parse_article_html(url: str, html: str, *, canonical_url: str | None = None, content_type: str = "text/html", allow_rendered_fallback: bool = False) -> tuple[ArticleBrief, BeautifulSoup]:
@@ -143,7 +156,7 @@ def parse_article_html(url: str, html: str, *, canonical_url: str | None = None,
     return _brief_from_extraction(extraction), soup
 
 
-def extract_article_html(url: str, html: str, *, canonical_url: str | None = None, effective_base_url: str | None = None, content_type: str = "text/html", allow_rendered_fallback: bool = False) -> tuple[ArticleExtractionResult, BeautifulSoup]:
+def extract_article_html(url: str, html: str, *, canonical_url: str | None = None, effective_base_url: str | None = None, content_type: str = "text/html", allow_rendered_fallback: bool = False, agent_artifact_dir: str | Path | None = None) -> tuple[ArticleExtractionResult, BeautifulSoup]:
     """Extract article text through local candidates and an ID-only LLM decision."""
     _assert_public_url(url)
     if len(html.encode("utf-8")) > MAX_HTML_BYTES:
@@ -155,13 +168,13 @@ def extract_article_html(url: str, html: str, *, canonical_url: str | None = Non
     base = effective_base_url or url
     title = _meta(soup, "og:title", "twitter:title") or (soup.title.get_text(strip=True) if soup.title else "未命名文章")
     candidates = _deduplicate_text_candidates(_discover_text_candidates(html, soup, title))
-    selected, diagnostics = _select_article_candidates(candidates, title)
+    selected, diagnostics = _select_article_candidates(candidates, title, artifact_dir=agent_artifact_dir)
     if not _quality_ok(selected.body) and allow_rendered_fallback:
         rendered = _rendered_html(url)
         rendered_soup = BeautifulSoup(rendered, "html.parser")
         rendered_candidates = _deduplicate_text_candidates(_discover_text_candidates(rendered, rendered_soup, title, source_override="rendered_dom", start_index=len(candidates)))
         candidates = _deduplicate_text_candidates(candidates + rendered_candidates)
-        selected, diagnostics = _select_article_candidates(candidates, title)
+        selected, diagnostics = _select_article_candidates(candidates, title, artifact_dir=agent_artifact_dir, contract_name="article_selection_rendered")
         soup = rendered_soup if selected.extraction_method == "rendered_dom" else soup
     if not _quality_ok(selected.body):
         raise ValueError(f"未能从网页提取足够的正文内容（候选 {len(candidates)} 个，最终 {len(selected.body)} 字）")
@@ -498,7 +511,7 @@ def _merge_text_candidates(candidates: list[ArticleTextCandidate], selected_ids:
     return ArticleExtractionResult(requested_url="", canonical_url="", effective_base_url="", extraction_method=method, extraction_confidence=confidence, selected_candidate_ids=used_ids, title=used_candidates[0].title_context if used_candidates else "未命名文章", body=body, selected_html="<article>" + "".join(selected_html) + "</article>")
 
 
-def _select_article_candidates(candidates: list[ArticleTextCandidate], title: str) -> tuple[ArticleExtractionResult, dict]:
+def _select_article_candidates(candidates: list[ArticleTextCandidate], title: str, *, artifact_dir: str | Path | None = None, contract_name: str = "article_selection") -> tuple[ArticleExtractionResult, dict]:
     diagnostics = {"candidate_total": len(candidates), "agent_sent": len(candidates), "agent_mode": "deterministic_fallback", "selected_candidate_ids": [], "fallback": True}
     if not candidates:
         return ArticleExtractionResult(requested_url="", canonical_url="", effective_base_url="", extraction_method="none", title=title, body=""), diagnostics
@@ -512,20 +525,29 @@ def _select_article_candidates(candidates: list[ArticleTextCandidate], title: st
     provider = get_agent_provider("article")
     if provider.model_name != "mock":
         previews = [_preview(item).model_dump(mode="json") for item in candidates]
-        prompt = json.dumps({"task": "从已发现的正文候选中选择完整文章正文。只能返回候选 ID，不要生成正文或 URL。metadata 只能作为摘要辅助，不能替代完整正文。", "title": title, "candidates": previews, "output": {"selected_candidate_ids": ["candidate-id"], "confidence": "0..1", "reason": "short"}}, ensure_ascii=False)
-        for attempt in range(2):
-            try:
-                raw = provider.complete_json(prompt) if attempt == 0 else provider.complete(prompt + "\n上次响应无效，只返回完整 JSON。")
-                raw = re.sub(r"^```(?:json)?\\s*|\\s*```$", "", raw.strip(), flags=re.I).strip()
-                decision = json.loads(raw)
-                ids = decision.get("selected_candidate_ids")
-                if not isinstance(ids, list) or not ids or not all(item in by_id for item in ids):
-                    raise ValueError("正文 Agent 返回了未知或空候选 ID")
-                selected_ids = ids
-                diagnostics.update({"agent_mode": "success" if attempt == 0 else "retry_success", "fallback": False, "selected_candidate_ids": ids, "confidence": decision.get("confidence", 0), "reason": str(decision.get("reason", ""))[:400]})
-                break
-            except Exception as exc:
-                diagnostics.setdefault("agent_errors", []).append(f"{type(exc).__name__}: {exc}")
+        prompt = {"task": "从已发现的正文候选中选择完整文章正文。只能返回候选 ID，不要生成正文或 URL。metadata 只能作为摘要辅助，不能替代完整正文。", "title": title, "candidates": previews}
+        def validate_selection(value: ArticleSelectionDecision):
+            issues = []
+            seen = set()
+            for index, candidate_id in enumerate(value.selected_candidate_ids):
+                if candidate_id not in by_id:
+                    issues.append(issue(("selected_candidate_ids", index), "unknown_candidate_id", f"candidate ID {candidate_id!r} is not present in input"))
+                elif candidate_id in seen:
+                    issues.append(issue(("selected_candidate_ids", index), "duplicate_candidate_id", f"candidate ID {candidate_id!r} is duplicated"))
+                seen.add(candidate_id)
+            return issues
+        try:
+            decision = StructuredAgentRunner().run(
+                provider=provider, contract_name=contract_name, prompt=prompt,
+                schema=ArticleSelectionDecision, artifact_dir=_agent_artifact_root(artifact_dir),
+                semantic_validator=validate_selection,
+            )
+            selected_ids = decision.selected_candidate_ids
+            validation_path = _agent_artifact_root(artifact_dir) / "agent_runs" / contract_name / "validation.json"
+            repaired = validation_path.is_file() and json.loads(validation_path.read_text(encoding="utf-8"))["status"] == "passed_after_repair"
+            diagnostics.update({"agent_mode": "retry_success" if repaired else "success", "fallback": False, "selected_candidate_ids": selected_ids, "confidence": decision.confidence, "reason": decision.reason})
+        except Exception as exc:
+            diagnostics.setdefault("agent_errors", []).append(f"{type(exc).__name__}: {exc}")
     result = _merge_text_candidates(candidates, selected_ids)
     result = result.model_copy(update={"title": title})
     diagnostics["selected_candidate_ids"] = result.selected_candidate_ids
@@ -705,8 +727,7 @@ def chromium_available() -> bool:
 
 
 def _route_screenshot_assets(page) -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    font_path = repo_root / "remotion" / "public" / "fonts" / "noto-sans-sc" / "NotoSansSC[wght].ttf"
+    font_path = Path(__file__).resolve().parents[1] / "runtime" / "fonts" / "noto-sans-sc" / "NotoSansSC[wght].ttf"
 
     def route(route) -> None:
         if route.request.url == _SCREENSHOT_FONT_URL and font_path.is_file():
@@ -792,7 +813,7 @@ def _normalize_screenshot(path: Path, crop: tuple[float, float, float, float] | 
 
 def _perceptual_hash(path: Path) -> int:
     with Image.open(path).convert("L").resize((8, 8), Image.Resampling.LANCZOS) as image:
-        values = list(image.getdata())
+        values = list(image.get_flattened_data()) if hasattr(image, "get_flattened_data") else list(image.getdata())
     average = sum(values) / len(values)
     return sum((1 << index) for index, value in enumerate(values) if value >= average)
 
@@ -1032,7 +1053,7 @@ def _fallback_candidate_profile(candidate: AssetCandidate, thumbnail: dict | Non
     return CandidateVisualProfile(asset_id=candidate.id, analysis_status="fallback", role=role if eligible else ImageRole.irrelevant, topics=candidate.alt.split()[:4], relevance=max(.05, min(.95, .25 + _candidate_preference(candidate) / 180)), visual_quality=.6, is_qr_code=qr, is_advertisement=partner, is_page_ui=page_ui, is_logo=page_ui, is_app_download=app_download, eligible=eligible, exclusion_reason="qr_code" if qr else "partner_or_advertisement" if partner else "page_ui_or_logo" if page_ui else "app_download" if app_download else "")
 
 
-def analyze_candidate_thumbnails(brief: ArticleBrief, candidates: list[AssetCandidate], thumbnail_records: list[dict], diagnostics: dict) -> list[CandidateVisualProfile]:
+def analyze_candidate_thumbnails(brief: ArticleBrief, candidates: list[AssetCandidate], thumbnail_records: list[dict], diagnostics: dict, *, artifact_dir: str | Path | None = None) -> list[CandidateVisualProfile]:
     provider = get_agent_provider("asset")
     by_id = {item.id: item for item in candidates}
     thumbnails = {item["asset_id"]: item for item in thumbnail_records}
@@ -1041,48 +1062,49 @@ def analyze_candidate_thumbnails(brief: ArticleBrief, candidates: list[AssetCand
     batches: list[dict] = []
     multimodal = getattr(provider, "complete_multimodal", None)
 
-    def inspect(asset_ids: list[str], attempt: int) -> set[str]:
+    def inspect(asset_ids: list[str], batch_index: int) -> set[str]:
         supplied = [by_id[asset_id] for asset_id in asset_ids]
-        prompt = json.dumps({"task": "按输入顺序分析每张候选缩略图，只返回 JSON。识别图片主题与文章相关性，并排除二维码、扫码推广、广告、合作伙伴卡片、页面 UI、logo 和 App 下载素材。正文中的数据表、趋势图、统计图、产品对比表、架构图和证据截图都是有效素材，即使字号较小也不得标记为无可辨识内容。不要在本批次内选择最终图片。role 只能返回一个 allowed_roles 枚举值。图片内主题大标题必须是清晰完整的大字，logo、水印、按钮、代码和图表标签不算。", "article": {"title": brief.title, "summary": brief.summary, "topics": brief.topics}, "images_in_supplied_order": [{"asset_id": item.id, "alt": item.alt, "caption": item.caption, "context": item.nearby_text[:500], "source_types": item.source_types} for item in supplied], "allowed_roles": [role.value for role in ImageRole], "output": {"candidate_profiles": [{"asset_id": "input asset id", "analysis_status": "verified", "role": "hero", "topics": ["string"], "entities": ["string"], "relevance": .8, "visual_quality": .8, "title_match_score": .7, "is_qr_code": False, "is_advertisement": False, "is_page_ui": False, "is_logo": False, "is_app_download": False, "contains_prominent_headline": False, "embedded_headline_text": "", "headline_prominence": 0, "headline_bbox": None, "headline_readability": 0, "eligible": True, "exclusion_reason": ""}]}}, ensure_ascii=False)
-        raw = multimodal(prompt, [thumbnails[item.id]["local_path"] for item in supplied]).strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.I).strip()
-        payload = json.loads(raw).get("candidate_profiles", [])
+        prompt = {"task": "按输入顺序分析每张候选缩略图。识别图片主题与文章相关性，并排除二维码、扫码推广、广告、合作伙伴卡片、页面 UI、logo 和 App 下载素材。正文中的数据表、趋势图、统计图、产品对比表、架构图和证据截图都是有效素材，即使字号较小也不得标记为无可辨识内容。不要在本批次内选择最终图片。图片内主题大标题必须是清晰完整的大字，logo、水印、按钮、代码和图表标签不算。", "article": {"title": brief.title, "summary": brief.summary, "topics": brief.topics}, "images_in_supplied_order": [{"asset_id": item.id, "alt": item.alt, "caption": item.caption, "context": item.nearby_text[:500], "source_types": item.source_types} for item in supplied], "allowed_roles": [role.value for role in ImageRole], "requirements": ["candidate_profiles 必须逐项完整覆盖所有输入 asset_id", "不得输出 analysis_status"]}
+        expected = set(asset_ids)
+        def validate_profiles(value: CandidateVisualAnalysisDecision):
+            result = []
+            seen = set()
+            for index, profile in enumerate(value.candidate_profiles):
+                if profile.asset_id not in expected:
+                    result.append(issue(("candidate_profiles", index, "asset_id"), "unknown_asset_id", f"asset_id {profile.asset_id!r} is not present in this batch"))
+                elif profile.asset_id in seen:
+                    result.append(issue(("candidate_profiles", index, "asset_id"), "duplicate_asset_id", f"asset_id {profile.asset_id!r} is duplicated"))
+                seen.add(profile.asset_id)
+            for missing in sorted(expected - seen):
+                result.append(issue(("candidate_profiles", f"missing-asset-id-{missing}"), "missing_asset_id", f"asset_id {missing!r} is missing"))
+            return result
+        decision = StructuredAgentRunner().run(
+            provider=provider, contract_name=f"asset_visual_batch-{batch_index:03d}", prompt=prompt,
+            schema=CandidateVisualAnalysisDecision, artifact_dir=_agent_artifact_root(artifact_dir),
+            semantic_validator=validate_profiles,
+            image_paths=[thumbnails[item.id]["local_path"] for item in supplied],
+        )
         accepted: set[str] = set()
-        for item in payload:
-            try:
-                profile = CandidateVisualProfile.model_validate(item)
-                if profile.asset_id not in asset_ids or profile.asset_id in accepted:
-                    continue
-                blocked = profile.is_qr_code or profile.is_advertisement or profile.is_page_ui or profile.is_logo or profile.is_app_download
-                if blocked:
-                    profile = profile.model_copy(update={"eligible": False, "role": ImageRole.irrelevant, "exclusion_reason": profile.exclusion_reason or "visual_non_editorial_asset"})
-                elif not profile.eligible and "article-content" in by_id[profile.asset_id].source_types and not re.search(r"(?:与文章无关|不相关|unrelated|irrelevant)", profile.exclusion_reason, re.I):
-                    profile = profile.model_copy(update={"eligible": True, "role": ImageRole.evidence if profile.role == ImageRole.irrelevant else profile.role, "relevance": max(.3, profile.relevance), "exclusion_reason": f"vision_uncertain_preserved_for_global_ranking: {profile.exclusion_reason}"[:400]})
-                resolved[profile.asset_id] = profile.model_copy(update={"analysis_status": "verified"})
-                accepted.add(profile.asset_id)
-            except (ValueError, TypeError):
-                continue
-        batches.append({"attempt": attempt, "asset_ids": asset_ids, "accepted_ids": sorted(accepted), "missing_ids": sorted(set(asset_ids) - accepted)})
+        for item in decision.candidate_profiles:
+            profile = CandidateVisualProfile.model_validate(item.model_dump() | {"analysis_status": "verified"})
+            blocked = profile.is_qr_code or profile.is_advertisement or profile.is_page_ui or profile.is_logo or profile.is_app_download
+            if blocked:
+                profile = profile.model_copy(update={"eligible": False, "role": ImageRole.irrelevant, "exclusion_reason": profile.exclusion_reason or "visual_non_editorial_asset"})
+            elif not profile.eligible and "article-content" in by_id[profile.asset_id].source_types and not re.search(r"(?:与文章无关|不相关|unrelated|irrelevant)", profile.exclusion_reason, re.I):
+                profile = profile.model_copy(update={"eligible": True, "role": ImageRole.evidence if profile.role == ImageRole.irrelevant else profile.role, "relevance": max(.3, profile.relevance), "exclusion_reason": f"vision_uncertain_preserved_for_global_ranking: {profile.exclusion_reason}"[:400]})
+            resolved[profile.asset_id] = profile
+            accepted.add(profile.asset_id)
+        validation = json.loads((_agent_artifact_root(artifact_dir) / "agent_runs" / f"asset_visual_batch-{batch_index:03d}" / "validation.json").read_text(encoding="utf-8"))
+        batches.append({"batch": batch_index, "attempts": len(validation["attempts"]), "asset_ids": asset_ids, "accepted_ids": sorted(accepted), "missing_ids": []})
         return accepted
 
     if provider.model_name != "mock" and callable(multimodal):
-        for start in range(0, len(ready_ids), CANDIDATE_VISION_BATCH_SIZE):
+        for batch_index, start in enumerate(range(0, len(ready_ids), CANDIDATE_VISION_BATCH_SIZE), 1):
             batch_ids = ready_ids[start:start + CANDIDATE_VISION_BATCH_SIZE]
-            accepted: set[str] = set()
             try:
-                accepted = inspect(batch_ids, 1)
+                inspect(batch_ids, batch_index)
             except Exception as exc:
-                batches.append({"attempt": 1, "asset_ids": batch_ids, "accepted_ids": [], "missing_ids": batch_ids, "error": f"{type(exc).__name__}: {exc}"})
-            missing = [asset_id for asset_id in batch_ids if asset_id not in accepted]
-            suspicious = [asset_id for asset_id in accepted if "article-content" in by_id[asset_id].source_types and not resolved[asset_id].eligible and not any((resolved[asset_id].is_qr_code, resolved[asset_id].is_advertisement, resolved[asset_id].is_page_ui, resolved[asset_id].is_logo, resolved[asset_id].is_app_download))]
-            retry_ids = list(dict.fromkeys([*missing, *suspicious]))
-            if retry_ids:
-                for asset_id in retry_ids:
-                    try:
-                        inspect([asset_id], 2)
-                    except Exception as exc:
-                        batches.append({"attempt": 2, "asset_ids": [asset_id], "accepted_ids": [], "missing_ids": [asset_id], "error": f"{type(exc).__name__}: {exc}"})
+                batches.append({"batch": batch_index, "asset_ids": batch_ids, "accepted_ids": [], "missing_ids": batch_ids, "error": f"{type(exc).__name__}: {exc}"})
     for candidate in candidates:
         resolved.setdefault(candidate.id, _fallback_candidate_profile(candidate, thumbnails.get(candidate.id)))
     profiles = [resolved[item.id] for item in candidates]
@@ -1135,7 +1157,7 @@ def _local_asset_decisions(candidates: list[AssetCandidate], target_count: int =
     return [AssetDecision(asset_id=item.id, selected=item.id in chosen, role=ImageRole.hero if item.id == first_id else ImageRole.evidence, topics=item.alt.split()[:4], relevance=max(.05, min(.95, .25 + _candidate_preference(item) / 180)) if item.kind == AssetKind.image else .05, visual_quality=.6, reason="deterministic candidate-pool fallback") for item in candidates]
 
 
-def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidate], diagnostics: dict, target_count: int = 3, *, visual_profiles: list[CandidateVisualProfile] | None = None) -> list[AssetDecision]:
+def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidate], diagnostics: dict, target_count: int = 3, *, visual_profiles: list[CandidateVisualProfile] | None = None, artifact_dir: str | Path | None = None) -> list[AssetDecision]:
     profile_by_id = {item.asset_id: item for item in visual_profiles or []}
     eligible_candidates = []
     for candidate in candidates:
@@ -1157,36 +1179,47 @@ def select_assets_with_agent(brief: ArticleBrief, candidates: list[AssetCandidat
     if provider.model_name == "mock":
         decisions = fallback
     else:
-        prompt = json.dumps({"task": "根据已经合并完成的候选视觉档案做一次全局排序，选择约 target_count 个互补素材。优先正文图表、数据图、流程/架构图、与标题匹配的大标题图、产品界面和关键证据。只能引用输入 asset_id，必须返回全部输入项。role 只能返回一个 allowed_roles 枚举值，禁止 hero|overview 组合值。", "target_count": target_count, "article": {"title": brief.title, "text": brief.text[:9000]}, "assets": [{"candidate": item.model_dump(mode="json"), "visual_profile": profile_by_id[item.id].model_dump(mode="json") if item.id in profile_by_id else None} for item in eligible_candidates], "allowed_roles": [role.value for role in ImageRole], "output": {"asset_decisions": [{"asset_id": "input asset id", "selected": True, "role": "hero", "topics": ["string"], "entities": ["string"], "relevance": "0..1", "visual_quality": "0..1", "title_match_score": "0..1", "reason": "short reason"}]}}, ensure_ascii=False)
+        prompt = {"task": "根据已经合并完成的候选视觉档案做一次全局排序，选择约 target_count 个互补素材。优先正文图表、数据图、流程/架构图、与标题匹配的大标题图、产品界面和关键证据。只能引用输入 asset_id，必须返回全部输入项。", "target_count": target_count, "article": {"title": brief.title, "text": brief.text[:9000]}, "assets": [{"candidate": item.model_dump(mode="json"), "visual_profile": profile_by_id[item.id].model_dump(mode="json") if item.id in profile_by_id else None} for item in eligible_candidates], "allowed_roles": [role.value for role in ImageRole]}
         decisions = fallback
-        for attempt in range(2):
-            try:
-                instruction = prompt if attempt == 0 else prompt + "\n上一次响应无效。必须只返回一个完整 JSON object，不要 Markdown、说明文字或省略任何 asset_id。"
-                raw = provider.complete_json(instruction) if attempt == 0 else provider.complete(instruction)
-                raw = raw.strip()
-                if raw.startswith("```"):
-                    raw = re.sub(r"^```(?:json)?\\s*|\\s*```$", "", raw, flags=re.I).strip()
-                if not raw:
-                    raise ValueError("empty_model_response")
-                parsed = [AssetDecision.model_validate(item) for item in json.loads(raw)["asset_decisions"]]
-                expected_ids = {item.id for item in eligible_candidates}
-                parsed_ids = [item.asset_id for item in parsed]
-                if not parsed or len(parsed_ids) != len(set(parsed_ids)) or not set(parsed_ids) <= expected_ids:
-                    raise ValueError("asset agent returned duplicate or unknown asset IDs")
-                # Preserve every valid model decision. Missing candidates use
-                # their deterministic visual-profile decision instead of
-                # invalidating the complete global ranking response.
-                parsed_by_id = {item.asset_id: item for item in parsed}
-                fallback_by_id = {item.asset_id: item for item in fallback}
-                missing_ids = sorted(expected_ids - set(parsed_ids))
-                decisions = [parsed_by_id.get(item.id, fallback_by_id[item.id]) for item in eligible_candidates]
-                diagnostics["asset_agent"]["mode"] = ("text_partial_success" if missing_ids else "text_success") if attempt == 0 else ("text_retry_partial_success" if missing_ids else "text_retry_success")
-                diagnostics["asset_agent"]["attempts"].append({"attempt": attempt + 1, "status": "partial_success" if missing_ids else "success", "accepted_ids": parsed_ids, "missing_ids": missing_ids})
-                break
-            except Exception as exc:
-                diagnostics["asset_agent"]["attempts"].append({"attempt": attempt + 1, "status": "failed", "error": f"{type(exc).__name__}: {exc}"})
+        expected_ids = {item.id for item in eligible_candidates}
+        def validate_decisions(value: AssetSelectionDecision):
+            result = []
+            seen = set()
+            for index, item in enumerate(value.asset_decisions):
+                if item.asset_id not in expected_ids:
+                    result.append(issue(("asset_decisions", index, "asset_id"), "unknown_asset_id", f"asset_id {item.asset_id!r} is not present in input"))
+                elif item.asset_id in seen:
+                    result.append(issue(("asset_decisions", index, "asset_id"), "duplicate_asset_id", f"asset_id {item.asset_id!r} is duplicated"))
+                seen.add(item.asset_id)
+            for missing in sorted(expected_ids - seen):
+                result.append(issue(("asset_decisions", f"missing-asset-id-{missing}"), "missing_asset_id", f"asset_id {missing!r} is missing"))
+            selected_count = sum(item.selected for item in value.asset_decisions)
+            required_count = min(target_count, len(eligible_candidates))
+            if selected_count != required_count:
+                result.append(issue(
+                    ("selected_count",), "selected_count_mismatch",
+                    f"exactly {required_count} assets must be selected, got {selected_count}",
+                    related_paths=tuple(("asset_decisions", index, "selected") for index in range(len(value.asset_decisions))),
+                ))
+            return result
+        try:
+            response = StructuredAgentRunner().run(
+                provider=provider, contract_name="asset_selection", prompt=prompt,
+                schema=AssetSelectionDecision, artifact_dir=_agent_artifact_root(artifact_dir),
+                semantic_validator=validate_decisions,
+            )
+            by_decision_id = {item.asset_id: item for item in response.asset_decisions}
+            decisions = [AssetDecision.model_validate(by_decision_id[item.id].model_dump()) for item in eligible_candidates]
+            validation = json.loads((_agent_artifact_root(artifact_dir) / "agent_runs" / "asset_selection" / "validation.json").read_text(encoding="utf-8"))
+            diagnostics["asset_agent"]["mode"] = "text_retry_success" if validation["status"] == "passed_after_repair" else "text_success"
+            diagnostics["asset_agent"]["attempts"] = validation["attempts"]
+        except Exception as exc:
+            validation_path = _agent_artifact_root(artifact_dir) / "agent_runs" / "asset_selection" / "validation.json"
+            if validation_path.is_file():
+                diagnostics["asset_agent"]["attempts"] = json.loads(validation_path.read_text(encoding="utf-8")).get("attempts", [])
+            diagnostics["asset_agent"]["error"] = f"{type(exc).__name__}: {exc}"
         if decisions is fallback:
-            diagnostics["asset_agent"]["error"] = diagnostics["asset_agent"]["attempts"][-1]["error"]
+            diagnostics["asset_agent"].setdefault("error", "structured asset selection did not produce a valid decision")
     if sum(item.selected for item in decisions) < min(target_count, len(eligible_candidates)):
         ranked = sorted(decisions, key=lambda item: (-item.title_match_score, -item.relevance, -item.visual_quality, item.asset_id))
         selected_ids = {item.asset_id for item in ranked if item.selected}
@@ -1386,7 +1419,7 @@ def _with_headline_status(tags: list[ImageTag], status: str) -> list[ImageTag]:
     }) for tag in tags]
 
 
-def analyze_prominent_headlines(brief: ArticleBrief, images: list[ArticleImage], tags: list[ImageTag]) -> list[ImageTag]:
+def analyze_prominent_headlines(brief: ArticleBrief, images: list[ArticleImage], tags: list[ImageTag], *, artifact_dir: str | Path | None = None) -> list[ImageTag]:
     """Inspect actual pixels in bounded batches without shrinking the image pool."""
     provider = get_agent_provider("asset")
     multimodal = getattr(provider, "complete_multimodal", None)
@@ -1397,23 +1430,34 @@ def analyze_prominent_headlines(brief: ArticleBrief, images: list[ArticleImage],
     by_id = {tag.image_id: tag for tag in tags}
     resolved: dict[str, ImageTag] = {}
 
-    def inspect(batch: list[ArticleImage]) -> None:
-        prompt = json.dumps({
+    def inspect(batch: list[ArticleImage], batch_index: int) -> None:
+        prompt = {
             "task": "按所列顺序检查实际图片像素，只判断图片中是否存在可作为视频开场的醒目主题大标题。正文截图允许入选，但普通正文段落、导航 UI、错误提示、logo、水印、按钮、代码和图表标签不算主题大标题。必须逐项返回且只能返回输入 image_id。embedded_headline_text 必须是图片中可见原文，bbox 为归一化 [x,y,width,height]。",
             "article_title": brief.title,
             "images_in_supplied_order": [{"image_id": image.id, "source_hint": "article_screenshot" if image.source_url.startswith("screenshot://") else "downloaded_image", "alt": image.alt, "caption": image.caption} for image in batch],
-            "output": {"image_headlines": [{"image_id": "input id", "contains_prominent_headline": True, "embedded_headline_text": "exact visible text", "headline_prominence": .9, "headline_title_match_score": .9, "headline_bbox": [.1, .1, .8, .3], "headline_readability": .9, "headline_exclusion_reason": "empty when eligible, otherwise specific reason"}]},
-        }, ensure_ascii=False)
-        raw = multimodal(prompt, [image.local_path for image in batch]).strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.I).strip()
-        items = json.loads(raw)["image_headlines"]
+        }
         expected = {image.id for image in batch}
-        if {str(item.get("image_id", "")) for item in items} != expected:
-            raise ValueError("headline analysis returned incomplete or unknown image IDs")
-        for item in items:
-            image_id = str(item["image_id"])
-            prominent = item.get("contains_prominent_headline") is True or str(item.get("contains_prominent_headline", "")).lower() == "true"
+        def validate_headlines(value: ImageHeadlineBatchDecision):
+            result = []
+            seen = set()
+            for index, item in enumerate(value.image_headlines):
+                if item.image_id not in expected:
+                    result.append(issue(("image_headlines", index, "image_id"), "unknown_image_id", f"image_id {item.image_id!r} is not present in this batch"))
+                elif item.image_id in seen:
+                    result.append(issue(("image_headlines", index, "image_id"), "duplicate_image_id", f"image_id {item.image_id!r} is duplicated"))
+                seen.add(item.image_id)
+            for missing in sorted(expected - seen):
+                result.append(issue(("image_headlines", f"missing-image-id-{missing}"), "missing_image_id", f"image_id {missing!r} is missing"))
+            return result
+        decision = StructuredAgentRunner().run(
+            provider=provider, contract_name=f"asset_headline_batch-{batch_index:03d}", prompt=prompt,
+            schema=ImageHeadlineBatchDecision, artifact_dir=_agent_artifact_root(artifact_dir),
+            semantic_validator=validate_headlines, image_paths=[image.local_path for image in batch],
+        )
+        for result in decision.image_headlines:
+            image_id = result.image_id
+            item = result.model_dump(mode="json")
+            prominent = result.contains_prominent_headline
             if not prominent:
                 item = item | {
                     "contains_prominent_headline": False,
@@ -1426,58 +1470,65 @@ def analyze_prominent_headlines(brief: ArticleBrief, images: list[ArticleImage],
             data = by_id[image_id].model_dump(mode="json") | item | {"headline_analysis_status": "verified"}
             resolved[image_id] = ImageTag.model_validate(data)
 
-    for start in range(0, len(images), 4):
+    for batch_index, start in enumerate(range(0, len(images), 4), 1):
         batch = images[start:start + 4]
         try:
-            inspect(batch)
+            inspect(batch, batch_index)
         except Exception as batch_exc:
             for image in batch:
-                try:
-                    inspect([image])
-                except Exception as item_exc:
-                    base = by_id[image.id]
-                    resolved[image.id] = base.model_copy(update={
-                        "contains_prominent_headline": None,
-                        "embedded_headline_text": "",
-                        "headline_prominence": 0.0,
-                        "headline_title_match_score": 0.0,
-                        "headline_bbox": None,
-                        "headline_readability": 0.0,
-                        "headline_analysis_status": "failed",
-                        "headline_exclusion_reason": f"{type(batch_exc).__name__}: batch failed; {type(item_exc).__name__}: item retry failed"[:300],
-                    })
+                base = by_id[image.id]
+                resolved[image.id] = base.model_copy(update={
+                    "contains_prominent_headline": None,
+                    "embedded_headline_text": "",
+                    "headline_prominence": 0.0,
+                    "headline_title_match_score": 0.0,
+                    "headline_bbox": None,
+                    "headline_readability": 0.0,
+                    "headline_analysis_status": "failed",
+                    "headline_exclusion_reason": f"{type(batch_exc).__name__}: batch contract failed"[:300],
+                })
     return [resolved.get(image.id, by_id[image.id]) for image in images]
 
 
-def tag_images(brief: ArticleBrief, images: list[ArticleImage]) -> tuple[ArticleBrief, VideoCopy, list[ImageTag]]:
+def tag_images(brief: ArticleBrief, images: list[ArticleImage], *, artifact_dir: str | Path | None = None) -> tuple[ArticleBrief, VideoCopy, list[ImageTag]]:
     provider = get_agent_provider("asset")
     fallback_copy = VideoCopy(headline=brief.title[:80], subtitle=(brief.site_name or "文章要点")[:40], body=brief.text[:180])
     fallback_tags = [_fallback_tag(image) for image in images]
     if provider.model_name == "mock":
         return brief.model_copy(update={"summary": fallback_copy.body, "topics": fallback_tags[0].topics}), fallback_copy, fallback_tags
     payload = {"title": brief.title, "site": brief.site_name, "text": brief.text[:9000], "images": [{"id": image.id, "alt": image.alt, "caption": image.caption, "context": image.context[:800], "size": [image.width, image.height]} for image in images]}
-    prompt = json.dumps({"task": "阅读文章并分析每张实际图片。只返回 JSON。必须区分图片内部醒目的主题标题与 logo、水印、按钮、导航、代码、图表标签或零散 UI 文字。只有图片像素中确实存在清晰、完整、与文章标题相关的大字时，contains_prominent_headline 才能为 true。headline_bbox 使用归一化 [x,y,width,height]。", "article": payload, "output": {"summary": "<=1200 chars", "topics": ["string"], "mood": "string", "video_copy": {"headline": "<=80 chars, <=2 lines", "subtitle": "<=40 chars, <=2 lines", "body": "<=400 chars, <=8 lines"}, "image_tags": [{"image_id": "input id", "role": "hero|overview|evidence|data|diagram|demo|product|quote|result|portrait|brand|other|irrelevant", "topics": ["string"], "entities": ["string"], "salience": "0..1", "visual_quality": "0..1", "section_index": "int", "contains_prominent_headline": "true|false", "embedded_headline_text": "exact visible headline or empty", "headline_prominence": "0..1", "headline_title_match_score": "0..1", "headline_bbox": ["x 0..1", "y 0..1", "width 0..1", "height 0..1"], "headline_readability": "0..1", "headline_exclusion_reason": "why visible text is not a usable title card"}]}}, ensure_ascii=False)
+    prompt = {"task": "阅读文章并分析每张实际图片。必须区分图片内部醒目的主题标题与 logo、水印、按钮、导航、代码、图表标签或零散 UI 文字。只有图片像素中确实存在清晰、完整、与文章标题相关的大字时，contains_prominent_headline 才能为 true。headline_bbox 使用归一化 [x,y,width,height]。", "article": payload}
     try:
         multimodal = getattr(provider, "complete_multimodal", None)
-        if callable(multimodal):
-            try:
-                raw = multimodal(prompt, [image.local_path for image in images])
-                headline_status = "verified"
-            except Exception:
-                raw = provider.complete_json(prompt)
-                headline_status = "failed"
-        else:
-            raw = provider.complete_json(prompt)
-            headline_status = "unavailable"
-        result = json.loads(raw)
-        tags = _with_headline_status([ImageTag.model_validate(item) for item in result["image_tags"]], headline_status)
-        if {tag.image_id for tag in tags} != {image.id for image in images}:
-            raise ValueError("incomplete image tags")
-        updated = brief.model_copy(update={"summary": str(result.get("summary", ""))[:1200], "topics": list(result.get("topics", []))[:12], "mood": str(result.get("mood", "informative"))[:40]})
-        return updated, VideoCopy.model_validate(result["video_copy"]), analyze_prominent_headlines(brief, images, tags)
+        expected = {image.id for image in images}
+        def validate_tags(value: ArticleImageTaggingDecision):
+            result = []
+            seen = set()
+            for index, tag in enumerate(value.image_tags):
+                if tag.image_id not in expected:
+                    result.append(issue(("image_tags", index, "image_id"), "unknown_image_id", f"image_id {tag.image_id!r} is not present in input"))
+                elif tag.image_id in seen:
+                    result.append(issue(("image_tags", index, "image_id"), "duplicate_image_id", f"image_id {tag.image_id!r} is duplicated"))
+                seen.add(tag.image_id)
+            for missing in sorted(expected - seen):
+                result.append(issue(("image_tags", f"missing-image-id-{missing}"), "missing_image_id", f"image_id {missing!r} is missing"))
+            return result
+        result = StructuredAgentRunner().run(
+            provider=provider, contract_name="article_image_tagging", prompt=prompt,
+            schema=ArticleImageTaggingDecision, artifact_dir=_agent_artifact_root(artifact_dir),
+            semantic_validator=validate_tags,
+            image_paths=[image.local_path for image in images] if callable(multimodal) else None,
+        )
+        image_by_id = {image.id: image for image in images}
+        tags = _with_headline_status([
+            ImageTag.model_validate(item.model_dump() | {"section_index": image_by_id[item.image_id].source_index})
+            for item in result.image_tags
+        ], "verified" if callable(multimodal) else "unavailable")
+        updated = brief.model_copy(update={"summary": result.summary, "topics": result.topics, "mood": result.mood})
+        return updated, VideoCopy.model_validate(result.video_copy.model_dump()), analyze_prominent_headlines(brief, images, tags, artifact_dir=artifact_dir)
     except Exception:
         failed_tags = [_fallback_tag(image, headline_status="failed") for image in images]
-        return brief.model_copy(update={"summary": fallback_copy.body, "topics": failed_tags[0].topics}), fallback_copy, analyze_prominent_headlines(brief, images, failed_tags)
+        return brief.model_copy(update={"summary": fallback_copy.body, "topics": failed_tags[0].topics}), fallback_copy, analyze_prominent_headlines(brief, images, failed_tags, artifact_dir=artifact_dir)
 
 
 def _title_match_score(title: str, image: ArticleImage, tag: ImageTag | None = None) -> float:

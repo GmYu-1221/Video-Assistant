@@ -1,73 +1,35 @@
-# content-creator（Video-Assistant）
+# Video Assistant
 
-本地优先的视频生成工具，提供三种使用方式：
+将 1～3 篇公开文章融合为一条中文竖屏短视频。内容决策由 LangGraph 多 Agent 工作流完成，视觉产物是模型生成的完整 HTML/CSS/GSAP 文档；Chromium 按帧截图后直接通过内存管道交给 FFmpeg。
 
-- **命令行**：本地图片目录 + 本地 BGM 的节奏视频生成器。扫描并预处理 JPG/JPEG/PNG/WEBP 图片，用 librosa 分析 WAV/MP3/M4A/FLAC 的 BPM 和 beat，构建图片时间轴，通过 localhost Media Server 和 Remotion 输出 MP4。
-- **交互式 Director Workspace**：终端对话迭代导演方案（图片顺序、停留帧数、创意入场动画、转场、文案），预览或正式渲染。
-- **Web 文章转视频**：输入公开文章 URL，自动提取并中文化正文；先用最多 24 张低细节缩略图识别二维码、广告、页面 UI 与正文素材，再全局排序并下载原图，生成竖屏 1080x1920 短视频。
+## 生产流程
 
-导演方案由 Director Agent（LLM，可回退到本地规则）生成，创意入场动画与转场由 Remotion Creative Agent 从已注册能力中选择；当前场景转场注册表启用 `qwen3_8` 与 `zoom_whip_v2`。
-
-## 环境
-
-- Python 3.11+、uv
-- Node.js 20+、pnpm
-- FFmpeg（librosa 读取压缩音频通常需要）
-- （Web 截图链路）Playwright Chromium：`make browser`
-
-```bash
-uv sync
-cd remotion && pnpm install && cd ..
+```text
+URLs → Source → Editorial → Copy Fitting ↔ Director → Animation
+     → AnimationArtifact → HTML Validator → Chromium → FFmpeg + BGM → final.mp4
 ```
 
-## 配置 LLM（可选）
+Chromium 和 FFmpeg 是 Graph 外的确定性执行层。项目没有固定动画模板，也不会在模型失败后生成降级 HTML。
 
-OpenAI Compatible 接口，写入项目根目录 `.env`（不要提交），详见 [docs/usage.md](./docs/usage.md)。不配置密钥或设置 `LLM_PROVIDER=mock` 时使用本地 Mock Provider 渲染。
-
-## 运行
-
-命令行生成：
+## 启动
 
 ```bash
-uv run python -m content_creator.main \
-  --images ./input/images --audio ./input/bgm.wav
+make install
+make browser
+make web
 ```
 
-默认视频为 1920x1080、30 FPS，可用 `--width`、`--height`、`--fps`、`--style`、`--transition-mode` 修改。`--preview` 会以较低 scale 渲染；`--director`/`--no-director` 控制 Director Agent；`--agent-mode` 启用 LangGraph 工作流。
+打开 `http://127.0.0.1:8000`，输入一至三个 URL。模型配置从仓库 `.env` 读取；至少配置 `OPENAI_API_KEY` 和 `LLM_MODEL`。可分别设置：
 
-交互式 Director Workspace：
-
-```bash
-uv run python -m content_creator.director_chat \
-  --images ./input/images --audio ./input/bgm.wav \
-  --output ./output --style cinematic
+```text
+ARTICLE_MODEL
+ASSET_MODEL
+EDITORIAL_MODEL
+COPY_FITTING_MODEL
+DIRECTOR_MODEL
+ANIMATION_MODEL
 ```
 
-Web 文章转视频：
+各专用模型未设置时使用 `LLM_MODEL`；Provider 为 Mock 或模型调用失败时，任务直接进入 `failed`。
 
-```bash
-make web     # 打开 http://127.0.0.1:8000
-```
-
-Web 页面会实时显示正文提取、候选缩略图、视觉识别、全局素材排序、文案编排和渲染进度。生成后可切换视频版本，并提交字幕排版反馈。
-
-输出位于 `output/projects/<project_id>/`，包括 `materials/images`、`materials/processed`、`audio`、`render_data.json` 和 `render/final.mp4`。
-
-## 测试与排错
-
-```bash
-uv run pytest -q
-cd remotion && pnpm exec tsc --noEmit
-```
-
-如果没有图片、音频扩展名不支持、音频无法读取或 Remotion 依赖未安装，CLI 会直接报告错误。downbeat 检测不可靠时会自动使用 beat/BPM fallback。LLM 不可用时所有 Agent 自动回退到本地规则方案。
-
-## 常用 Make 目标
-
-```bash
-make install   # uv sync + pnpm install
-make test      # 运行 Python 测试
-make render    # 用示例素材渲染
-make web       # 启动文章转视频 Web 服务
-make browser   # 安装 Playwright Chromium
-```
+更多信息见 [架构](docs/architecture.md) 和 [使用说明](docs/usage.md)。

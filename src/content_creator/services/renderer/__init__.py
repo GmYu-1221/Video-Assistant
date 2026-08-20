@@ -1,1 +1,3 @@
-from .remotion import render_project
+from .chromium import ChromiumRenderer
+
+__all__ = ["ChromiumRenderer"]

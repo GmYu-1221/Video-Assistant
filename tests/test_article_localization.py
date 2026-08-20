@@ -75,7 +75,7 @@ def test_batched_translation_retries_only_untranslated_paragraphs(monkeypatch) -
             self.calls += 1
             if self.calls == 1:
                 return '{"title":"中文标题","summary":"中文摘要","paragraphs":[{"source_index":0,"zh_text":"中文段落"},{"source_index":1,"zh_text":"This English sentence remains."}]}'
-            return '{"paragraphs":[{"source_index":1,"zh_text":"这是中文翻译。"}]}'
+            return '{"title":"中文标题","summary":"中文摘要","paragraphs":[{"source_index":0,"zh_text":"中文段落"},{"source_index":1,"zh_text":"这是中文翻译。"}]}'
 
     provider = Provider()
     monkeypatch.setattr(article_localization, "get_agent_provider", lambda _: provider)

@@ -6,6 +6,7 @@ import re
 
 _PLATFORM_PREFIX = re.compile(r"^(?:GitHub|GitLab|Gitee)\s*[-|·]\s*", re.I)
 _PLATFORM_SUFFIX = re.compile(r"\s*(?:[-|·]\s*)?(?:GitHub|GitLab|Gitee)\s*$", re.I)
+_CONTENT_PLATFORM_SUFFIX = re.compile(r"\s*(?:[-|·]\s*)?(?:36氪|虎嗅|知乎|少数派|掘金|博客园|CSDN)\s*$", re.I)
 _REPOSITORY_TITLE = re.compile(
     r"^(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)\s*(?:[:：]\s*(?P<description>.*))?$"
 )
@@ -33,7 +34,7 @@ def article_title_candidates(title: str) -> list[str]:
     English. Keep the repository identity and the first complete Chinese
     phrase instead of carrying the full page metadata into the video.
     """
-    clean = _PLATFORM_SUFFIX.sub("", _PLATFORM_PREFIX.sub("", _clean(title)))
+    clean = _CONTENT_PLATFORM_SUFFIX.sub("", _PLATFORM_SUFFIX.sub("", _PLATFORM_PREFIX.sub("", _clean(title))))
     if not clean:
         return []
 

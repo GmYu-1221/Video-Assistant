@@ -36,9 +36,9 @@ def test_agent_model_overrides_are_read_from_environment(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("LLM_MODEL", "fallback-model")
     monkeypatch.setenv("DIRECTOR_MODEL", "director-model")
-    monkeypatch.setenv("REMOTION_MODEL", "remotion-model")
-    monkeypatch.setenv("CHAT_MODEL", "chat-model")
+    monkeypatch.setenv("ANIMATION_MODEL", "animation-model")
+    monkeypatch.setenv("COPY_FITTING_MODEL", "copy-model")
 
     assert get_agent_provider("director").model_name == "director-model"
-    assert get_agent_provider("remotion").model_name == "remotion-model"
-    assert get_agent_provider("chat").model_name == "chat-model"
+    assert get_agent_provider("animation").model_name == "animation-model"
+    assert get_agent_provider("copy_fitting").model_name == "copy-model"

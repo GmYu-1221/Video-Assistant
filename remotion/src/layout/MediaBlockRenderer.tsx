@@ -1,3 +1,0 @@
-import React from 'react';
-import {Img} from 'remotion';
-export const MediaBlockRenderer: React.FC<{block: any; asset: any; mediaBaseUrl?: string; frameStyle?: React.CSSProperties}> = ({block, asset, mediaBaseUrl, frameStyle}) => <div data-layout-block={block.block_id} style={{position:'absolute', left:block.bbox.x, top:block.bbox.y, width:block.bbox.width, height:block.bbox.height, overflow:'hidden', borderRadius:block.border_radius, zIndex:block.z_index, background:'#000', ...frameStyle}}><Img src={`${mediaBaseUrl ?? ''}/${asset.relative_path}`} style={{width:'100%',height:'100%',objectFit:'contain',objectPosition:'center'}}/></div>;

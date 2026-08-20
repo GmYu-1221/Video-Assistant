@@ -1,727 +1,85 @@
-"""URL-to-reference-reel pipeline used by the local web application."""
+"""Application service for the one production URL-to-video pipeline."""
 from __future__ import annotations
 
 import json
-import math
-import os
-import random
-import shutil
-import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
-from hashlib import sha256
 from pathlib import Path
 
-from content_creator.schemas import AudioConfig, BackgroundImageConfig, BackgroundVideoConfig, BoundaryAction, CaptionTemplatePlan, CaptionTemplateSlotBinding, CopyAction, ImageSemanticProfile, ImageTag, LayoutAction, LayoutPlan, TimelineItem, VideoCopy, VideoOutput, VideoProject
-from content_creator.services.article import _brief_from_extraction, _is_verified_title_card, _title_match_score, analyze_candidate_thumbnails, augment_soup_with_selected_html, basic_asset_filter, capture_article_screenshots, chromium_available, classify_content_sufficiency, discover_asset_candidates, download_selected_assets, extract_article_html, fetch_article_with_extraction, image_tags_from_candidate_profiles, log_asset_diagnostics, order_images, prepare_candidate_thumbnails, select_assets_with_agent
-from content_creator.services.assets import scan_and_process
-from content_creator.services.music import analyze_audio, load_catalog, select_track
-from content_creator.services.timeline import build_timeline
-from content_creator.agents.render_agent import compile_render_plan
-from content_creator.services.layout.validator import detect_layout_monotony, validate_persistent_title, validate_scene_layout
-from content_creator.services.layout.qa import validate_rendered_layout, validate_rendered_persistent_title
-from content_creator.services.layout.persistent_title import build_persistent_title_candidates, persistent_title_preflight_fits
-from content_creator.agents.visual_critic import critique_scene
-from content_creator.services.renderer.remotion import render_layout_still
-from content_creator.services.timeline_state import default_url_actions, resolve_timeline
-from content_creator.services.layout.preferences import TypographyPreferenceStore, article_context
-from content_creator.services.article_localization import build_localized_video_copy, localize_article_copy, validate_localized_display_text
-from content_creator.agents.viral_writer import create_viral_copy_plan, ordered_title_texts
-from content_creator.services.caption_templates import build_caption_template_plan, select_caption_template, get_caption_template, validate_caption_template_plan
-from content_creator.transitions import enabled_transition_templates
-
-REFERENCE_WIDTH = 1080
-REFERENCE_HEIGHT = 1920
-REFERENCE_FPS = 30
-URL_SEGMENT_MIN_SECONDS = 2.5
-URL_SEGMENT_MAX_SECONDS = 3.5
-URL_COPY_CHARS_PER_SECOND = 8.0
-URL_SEGMENT_BUFFER_SECONDS = 0.8
-BACKGROUND_VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
-BACKGROUND_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-SCREENSHOT_REAL_IMAGE_THRESHOLD = 4
+from content_creator.config import PROJECT_ROOT
+from content_creator.schemas import AnimationArtifact, ProjectContext
+from content_creator.services.artifact_validation import validate_final_artifact
+from content_creator.services.music import adapt_audio_to_duration, load_catalog, select_track
+from content_creator.services.renderer import ChromiumRenderer
+from content_creator.services.runtime import prepare_project_runtime
+from content_creator.workflow import build_graph
 
 
-def _asset_target_count(body_char_count: int) -> int:
-    """Scale visual beats with article length; bounds are operator-configurable."""
-    try:
-        per_asset = max(100, int(os.getenv("URL_ASSET_CHARS_PER_IMAGE", "1200")))
-    except ValueError:
-        per_asset = 1200
-    try:
-        minimum = max(1, int(os.getenv("URL_ASSET_TARGET_MIN", "1")))
-    except ValueError:
-        minimum = 1
-    try:
-        maximum = max(minimum, int(os.getenv("URL_ASSET_TARGET_MAX", "8")))
-    except ValueError:
-        maximum = max(minimum, 8)
-    return min(maximum, max(minimum, math.ceil(body_char_count / per_asset)))
+_NODE_STAGES = {
+    "source_agent": "文章处理",
+    "editorial_agent": "内容编排",
+    "director_agent": "导演设计",
+    "copy_fitting_agent": "文案适配",
+    "director_review": "导演复核",
+    "animation_agent": "动画生成",
+}
 
 
-def _screenshot_fallback_policy(downloaded_count: int, target_count: int, candidate_pool_exhausted: bool) -> tuple[bool, str]:
-    if downloaded_count >= target_count:
-        return False, "not_needed"
-    if downloaded_count >= SCREENSHOT_REAL_IMAGE_THRESHOLD:
-        return False, "downloaded_images_at_least_4"
-    if candidate_pool_exhausted:
-        return True, "selected_and_downloaded_images_below_dynamic_target"
-    return False, "download_pool_incomplete_using_available_assets"
+def create_project_context(project_id: str, urls: list[str], output_root: str | Path) -> ProjectContext:
+    project_dir = Path(output_root).resolve() / "projects" / project_id
+    project_dir.mkdir(parents=True, exist_ok=True)
+    for directory in ("materials", "audio", "render", "sources"):
+        (project_dir / directory).mkdir(exist_ok=True)
+    prepare_project_runtime(project_dir)
+    context = ProjectContext(project_id=project_id, project_dir=str(project_dir), urls=urls)
+    _write_json(project_dir / "project.json", context.model_dump(mode="json"))
+    return context
 
 
-def _select_background_video(source_dir: str | Path, project_dir: str | Path, *, rng=None) -> BackgroundVideoConfig:
-    source_root = Path(source_dir).expanduser().resolve()
-    if not source_root.is_dir():
-        raise ValueError(f"背景视频目录不存在：{source_root}")
-    candidates = sorted(path for path in source_root.iterdir() if path.is_file() and path.suffix.lower() in BACKGROUND_VIDEO_EXTENSIONS)
-    mp4_candidates = [path for path in candidates if path.suffix.lower() == ".mp4"]
-    candidates = mp4_candidates or candidates
-    if not candidates:
-        raise ValueError(f"背景视频目录中没有可用视频：{source_root}")
-    selected = (rng or random.SystemRandom()).choice(candidates)
-    probe = subprocess.run([
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=width,height", "-show_entries", "format=duration",
-        "-of", "json", str(selected),
-    ], check=False, capture_output=True, text=True)
-    if probe.returncode:
-        raise ValueError(f"无法读取背景视频：{selected.name}")
-    try:
-        payload = json.loads(probe.stdout)
-        stream = payload["streams"][0]
-        duration = float(payload["format"]["duration"])
-        width, height = int(stream["width"]), int(stream["height"])
-    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise ValueError(f"背景视频缺少有效视频流：{selected.name}") from exc
-    target_dir = Path(project_dir) / "background"
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"background{selected.suffix.lower()}"
-    shutil.copy2(selected, target)
-    return BackgroundVideoConfig(
-        path=f"background/{target.name}", source_filename=selected.name,
-        duration=duration, width=width, height=height,
-    )
+def generate_animation(context: ProjectContext, *, on_progress=None) -> tuple[AnimationArtifact, dict]:
+    state: dict = {"project": context, "revision_count": 0, "errors": []}
+    graph = build_graph()
+    for update in graph.stream(state, stream_mode="updates"):
+        for node, values in update.items():
+            state.update(values or {})
+            if on_progress and node in _NODE_STAGES:
+                on_progress(_NODE_STAGES[node])
+    artifact = state.get("animation_artifact")
+    if not isinstance(artifact, AnimationArtifact):
+        raise RuntimeError("Animation graph ended without an AnimationArtifact")
+    return artifact, state
 
 
-def _select_background_image(source_dir: str | Path, project_dir: str | Path, *, rng=None) -> BackgroundImageConfig:
-    source_root = Path(source_dir).expanduser().resolve()
-    if not source_root.is_dir():
-        raise ValueError(f"背景图片目录不存在：{source_root}")
-    candidates = sorted(path for path in source_root.iterdir() if path.is_file() and path.suffix.lower() in BACKGROUND_IMAGE_EXTENSIONS)
-    if not candidates:
-        raise ValueError(f"背景图片目录中没有可用图片：{source_root}")
-    selected = (rng or random.SystemRandom()).choice(candidates)
-    from PIL import Image
-    try:
-        with Image.open(selected) as image:
-            image.verify()
-        with Image.open(selected) as image:
-            width, height = image.size
-    except (OSError, ValueError) as exc:
-        raise ValueError(f"无法读取背景图片：{selected.name}") from exc
-    target_dir = Path(project_dir) / "background"
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"background{selected.suffix.lower()}"
-    shutil.copy2(selected, target)
-    return BackgroundImageConfig(path=f"background/{target.name}", source_filename=selected.name, width=width, height=height)
-
-
-def _retime_resolved_bundle(bundle, profiles: dict, *, bpm: float, fps: int) -> list[dict]:
-    """Fit URL segments to real rendered copy while preserving Director actions."""
-    beat_seconds = 60.0 / max(bpm, 1.0)
-    cursor = 0
-    timing: list[dict] = []
-    actions = []
-    partial = []
-    resolved = []
-    for action, partial_item, state in zip(bundle.actions, bundle.partial, bundle.resolved):
-        narrative = bundle.segment_narratives[state.segment_id]
-        layout = bundle.segment_layouts[state.segment_id]
-        contents = {item.content_id: item for item in narrative.contents}
-        displayed = [contents[block.content_id].value(block.variant_id) for block in layout.text_blocks if block.content_id in contents]
-        # Blocks are displayed concurrently. Use the longest reading burden,
-        # rather than adding headline and explanation as if they were serial.
-        visible_chars = max((len("".join(value.split())) for value in displayed), default=0)
-        density = getattr(profiles.get(state.resolved_media_id), "information_density", .5) or .5
-        dense_buffer = .25 if density >= .7 else 0.0
-        requested_seconds = visible_chars / URL_COPY_CHARS_PER_SECOND + URL_SEGMENT_BUFFER_SECONDS + dense_buffer
-        # Use the nearest musical beat, then clamp again. This keeps the fast
-        # pace contract strict even when the beat period does not divide it.
-        requested_seconds = max(URL_SEGMENT_MIN_SECONDS, min(URL_SEGMENT_MAX_SECONDS, requested_seconds))
-        beat_aligned = round(requested_seconds / beat_seconds) * beat_seconds
-        seconds = max(URL_SEGMENT_MIN_SECONDS, min(URL_SEGMENT_MAX_SECONDS, beat_aligned))
-        frames = max(1, round(seconds * fps))
-        transition = state.transition.model_copy(update={"duration_frames": min(state.transition.duration_frames, max(1, frames // 3))})
-        end = cursor + frames
-        actions.append(action.model_copy(update={"duration_frames": frames, "transition": transition}))
-        partial.append(partial_item.model_copy(update={"duration_frames": frames, "transition": transition}))
-        resolved.append(state.model_copy(update={"start_frame": cursor, "end_frame": end, "duration_frames": frames, "transition": transition}))
-        timing.append({
-            "segment_id": state.segment_id,
-            "visible_character_count": visible_chars,
-            "information_density": density,
-            "requested_seconds": round(requested_seconds, 3),
-            "actual_seconds": round(frames / fps, 3),
-            "beat_seconds": round(beat_seconds, 3),
-            "reading_speed_chars_per_second": URL_COPY_CHARS_PER_SECOND,
-            "buffer_seconds": URL_SEGMENT_BUFFER_SECONDS,
-        })
-        cursor = end
-    bundle.actions = actions
-    bundle.partial = partial
-    bundle.resolved = resolved
-    return timing
-
-
-def _select_persistent_title(title: str, font_palette: list[str] | None, remotion_public: Path, alternatives: list[str] | None = None):
-    source_titles = []
-    for value in [title, *(alternatives or [])]:
-        if value and value not in source_titles:
-            source_titles.append(value)
-    sourced_candidates = [
-        (source_title, candidate)
-        for source_title in source_titles
-        for candidate in build_persistent_title_candidates(source_title, font_palette)
-    ]
-    preflight = [(source_title, item, persistent_title_preflight_fits(item.content, item.font_id)) for source_title, item in sourced_candidates]
-    candidates_to_audit = [(source_title, item) for source_title, item, passed in preflight if passed] or sourced_candidates
-    attempts = []
-    for source_title, candidate in candidates_to_audit:
-        issues = validate_persistent_title(candidate)
-        rendered = None if issues else validate_rendered_persistent_title(candidate, remotion_public)
-        codes = [issue.code for issue in issues] + ([issue.code for issue in rendered.issues] if rendered else [])
-        attempts.append({
-            "source_title": source_title,
-            "content": candidate.content,
-            "preflight_passed": next(passed for source, item, passed in preflight if source == source_title and item.content_hash == candidate.content_hash),
-            "issues": codes,
-        })
-        if not issues and rendered and rendered.passed:
-            return candidate, rendered, attempts
-    raise ValueError("顶部标题在三行区域内无法容纳")
-
-
-def create_url_project(url: str, output_root: str | Path, on_progress=None, *, imported_html: str | None = None) -> tuple[VideoProject, dict]:
-    def progress(message: str) -> None:
-        if on_progress:
-            on_progress(message)
-
-    progress("抓取文章" if imported_html is None else "解析浏览器导入内容")
-    if imported_html is None:
-        extraction, soup = fetch_article_with_extraction(url)
-    else:
-        extraction, soup = extract_article_html(url, imported_html)
-    brief = _brief_from_extraction(extraction)
-    soup = augment_soup_with_selected_html(soup, extraction.selected_html)
-
-    root = Path(output_root).resolve()
-    project_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    project_dir = root / "projects" / project_id
-    project_dir.mkdir(parents=True, exist_ok=False)
-    sufficiency, sufficiency_metrics = classify_content_sufficiency(extraction.body, representation="text")
-    if sufficiency == "invalid":
-        raise ValueError("网页内容不是可用于视频的有效正文")
-    diagnostics: dict = {"url": url, "browser_imported": imported_html is not None, "content_sufficiency": sufficiency_metrics, "article_extraction": extraction.diagnostics | {"requested_url": extraction.requested_url, "canonical_url": extraction.canonical_url, "effective_base_url": extraction.effective_base_url, "extraction_method": extraction.extraction_method, "extraction_confidence": extraction.extraction_confidence, "selected_candidate_ids": extraction.selected_candidate_ids, "final_body_chars": len(extraction.body)}}
-    cleanup = extraction.diagnostics.get("html_cleanup", {})
-    removed_ui = int(cleanup.get("ui_nodes_removed", 0)) + int(cleanup.get("structural_nodes_removed", 0))
-    if removed_ui:
-        progress(f"正文识别：已过滤 {removed_ui} 个页面 UI 节点，可用正文 {len(extraction.body)} 字")
-    asset_target_count = _asset_target_count(len(brief.text))
-    diagnostics["asset_target_count"] = asset_target_count
-
-    def persist_diagnostics() -> None:
-        (project_dir / "asset_diagnostics.json").write_text(json.dumps(diagnostics, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-        log_asset_diagnostics(diagnostics)
-
-    def persist_manifest(candidates, decisions, visual_profiles=None, downloaded_images=None, final_images=None, final_tags=None) -> None:
-        manifest = {
-            "candidates": [item.model_dump(mode="json") for item in candidates],
-            "thumbnails": diagnostics.get("candidate_thumbnails", {}).get("items", []),
-            "visual_profiles": [item.model_dump(mode="json") for item in visual_profiles or []],
-            "decisions": [item.model_dump(mode="json") for item in decisions],
-            "global_ranked_candidate_ids": diagnostics.get("asset_agent", {}).get("global_ranked_asset_ids", []),
-            "downloads": diagnostics.get("downloader", {}).get("items", []),
-            "original_download_order": [
-                item["asset_id"] for item in diagnostics.get("downloader", {}).get("items", [])
-                if item.get("status") == "downloaded"
-            ],
-            "downloaded_images": [item.model_dump(mode="json") for item in downloaded_images or []],
-            "final_images": [item.model_dump(mode="json") for item in final_images or []],
-            "final_image_tags": [item.model_dump(mode="json") for item in final_tags or []],
-        }
-        (project_dir / "asset_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    source_brief = brief
-    article_source = source_brief.model_dump(mode="json") | {
-        "extraction_method": extraction.extraction_method,
-        "selected_candidate_ids": extraction.selected_candidate_ids,
-        "extraction_diagnostics": extraction.diagnostics,
-    }
-    (project_dir / "article_source.json").write_text(json.dumps(article_source, ensure_ascii=False, indent=2), encoding="utf-8")
-    (project_dir / "article.json").write_text(brief.model_dump_json(indent=2), encoding="utf-8")
-    progress("发现网页素材")
-    candidates, discovery = discover_asset_candidates(soup, brief)
-    diagnostics.update(discovery)
-    progress("过滤网页素材")
-    filtered = basic_asset_filter(candidates, diagnostics)
-    progress("生成候选图片缩略图")
-    visual_candidates, thumbnail_records = prepare_candidate_thumbnails(filtered, project_dir, diagnostics)
-    progress("识别候选图片语义")
-    visual_profiles = analyze_candidate_thumbnails(brief, visual_candidates, thumbnail_records, diagnostics)
-    (project_dir / "candidate_visual_profiles.json").write_text(json.dumps({"profiles": [item.model_dump(mode="json") for item in visual_profiles], "thumbnails": diagnostics.get("candidate_thumbnails", {}), "analysis": diagnostics.get("candidate_visual_analysis", {})}, ensure_ascii=False, indent=2), encoding="utf-8")
-    eligible_ids = {item.asset_id for item in visual_profiles if item.eligible}
-    eligible_candidates = [item for item in visual_candidates if item.id in eligible_ids]
-    progress("全局排序网页素材")
-    decisions = select_assets_with_agent(brief, visual_candidates, diagnostics, asset_target_count, visual_profiles=visual_profiles)
-    progress("下载已选素材")
-    article_images = download_selected_assets(eligible_candidates, decisions, project_dir, diagnostics, browser_imported=imported_html is not None, max_renderable=asset_target_count)
-    persist_manifest(filtered, decisions, visual_profiles)
-    downloader = diagnostics.get("downloader", {})
-    protected_assets = downloader.get("browser_asset_required", 0)
-    summary = {
-        "discovered": diagnostics.get("asset_discovery", {}).get("after_dedup", 0),
-        "rule_filtered_remaining": diagnostics.get("rule_filter", {}).get("remaining", 0),
-        "agent_preferred": diagnostics.get("asset_agent", {}).get("selected", 0),
-        "downloaded": len(article_images),
-        "candidate_pool_total": downloader.get("candidate_pool_total", 0),
-        "candidate_pool_exhausted": downloader.get("candidate_pool_exhausted", False),
-        "target_count": asset_target_count,
-        "shortfall": max(0, asset_target_count - len(article_images)),
-    }
-    diagnostics["asset_summary"] = summary
-    progress(f"素材状态：发现 {summary['discovered']} 个，优先选择 {summary['agent_preferred']} 个，成功下载 {summary['downloaded']} 个")
-    if protected_assets:
-        progress(f"已跳过 {protected_assets} 个浏览器受保护素材")
-    should_capture_screenshot, screenshot_reason = _screenshot_fallback_policy(
-        len(article_images), asset_target_count, bool(downloader.get("candidate_pool_exhausted")),
-    )
-    if should_capture_screenshot:
-        diagnostics["screenshot_fallback"] = {"triggered": True, "reason": screenshot_reason, "project_images_before_fallback": len(article_images), "missing": asset_target_count - len(article_images), "target_count": asset_target_count, "screenshot_limit": 1}
-        persist_diagnostics()
-        progress("准备正文截图引擎" if not chromium_available() else "补充正文截图")
-        try:
-            screenshots = capture_article_screenshots(
-                brief.effective_base_url or brief.url,
-                project_dir,
-                len(article_images),
-                asset_target_count - len(article_images),
-                diagnostics,
-                selected_html=extraction.selected_html,
-                body=extraction.body,
-                title=extraction.title,
-            )
-            article_images.extend(screenshots)
-            progress(f"正文截图：成功补充 {len(screenshots)} 张，当前素材 {len(article_images)} 张")
-        except Exception as exc:
-            diagnostics["screenshot_fallback"]["error"] = str(exc)
-            persist_diagnostics()
-            if not article_images:
-                raise ValueError(f"正文有效，但没有可渲染画面；本地正文截图失败：{exc}") from exc
-            diagnostics["screenshot_fallback"]["reduced_after_error"] = True
-            progress(f"正文截图未补足，使用现有 {len(article_images)} 个素材缩短视频")
-    elif len(article_images) < asset_target_count:
-        diagnostics["screenshot_fallback"] = {"triggered": False, "reason": screenshot_reason, "project_images_before_fallback": len(article_images), "missing": asset_target_count - len(article_images), "screenshot_limit": 1}
-        if screenshot_reason == "downloaded_images_at_least_4":
-            diagnostics["screenshot_fallback"]["skipped_reason"] = screenshot_reason
-        if not article_images:
-            raise ValueError("正文有效，但候选素材池没有产生可渲染画面")
-    else:
-        diagnostics["screenshot_fallback"] = {"triggered": False, "reason": "not_needed", "project_images_before_fallback": len(article_images), "missing": 0}
-    progress("合并候选图片语义")
-    tags = image_tags_from_candidate_profiles(article_images, filtered, visual_profiles)
-    copy = VideoCopy(headline=brief.title[:80], subtitle=(brief.site_name or "文章要点")[:40], body=brief.text[:400])
-    brief = brief.model_copy(update={"summary": brief.summary or brief.text[:1200], "topics": list(dict.fromkeys(topic for tag in tags for topic in tag.topics))[:12]})
-    diagnostics.setdefault("candidate_visual_analysis", {})["final_image_tags_reused"] = True
-    diagnostics["candidate_visual_analysis"]["final_profile_ids"] = [tag.candidate_profile_id or "screenshot_fallback" for tag in tags]
-    persist_manifest(filtered, decisions, visual_profiles, article_images)
-    progress("翻译中文说明文案")
-    brief, localized_copy, localization_diagnostics = localize_article_copy(brief)
-    copy = build_localized_video_copy(brief, localized_copy, preferred=copy)
-    progress("Viral Writer 正在策划标题和正文")
-    viral_copy_plan, viral_copy_diagnostics = create_viral_copy_plan(brief, tags, asset_target_count)
-    # The first registry version has one enabled template. Keep selection as a
-    # real persisted decision so additional templates can be added without
-    # changing the URL pipeline contract.
-    template_selection = select_caption_template(reason="reference_caption_v1 is the only enabled URL template")
-    template_plan = build_caption_template_plan(template_selection, copy_plan=viral_copy_plan)
-    validate_caption_template_plan(template_plan)
-    template_manifest = get_caption_template(template_plan.template_id)
-    diagnostics["caption_template"] = {"template_id": template_plan.template_id, "version": template_plan.template_version, "selection_mode": template_selection.selection_mode, "reason": template_selection.reason}
-    viral_title_options = ordered_title_texts(viral_copy_plan)
-    brief = brief.model_copy(update={"title": viral_copy_plan.final_title})
-    localized_copy = localized_copy.model_copy(update={"title": viral_copy_plan.final_title})
-    copy = copy.model_copy(update={"headline": viral_copy_plan.final_title[:80]})
-    diagnostics["viral_writer"] = viral_copy_diagnostics | {
-        "selected_title_id": viral_copy_plan.selected_title_id,
-        "selected_title": viral_copy_plan.final_title,
-        "title_candidate_count": len(viral_copy_plan.title_candidates),
-        "content_unit_count": len(viral_copy_plan.content_units),
-    }
-    (project_dir / "viral_copy_plan.json").write_text(viral_copy_plan.model_dump_json(indent=2), encoding="utf-8")
-    localized_hashes = [sha256(paragraph.encode("utf-8")).hexdigest() for paragraph in localized_copy.paragraphs]
-    diagnostics["localized_copy"] = localization_diagnostics | {
-        "localized_paragraph_hashes": localized_hashes,
-        "summary_source_paragraph_indices": localized_copy.source_paragraph_indices,
-        "article_body_source_hash": sha256(extraction.body.encode("utf-8")).hexdigest(),
-    }
-    (project_dir / "localized_copy.json").write_text(localized_copy.model_dump_json(indent=2), encoding="utf-8")
-    selected, contexts = order_images(article_images, tags, title=brief.title, target_count=asset_target_count, diagnostics=diagnostics)
-    if not selected:
-        raise ValueError("正文有效，但没有可用于视频的视觉素材")
-    diagnostics["asset_summary"].update({
-        "actual_count": len(selected),
-        "shortened": len(selected) < asset_target_count,
-        "reduction_reason": "available_nonduplicate_assets_below_target" if len(selected) < asset_target_count else None,
+def render_animation(artifact: AnimationArtifact, state: dict, *, on_progress=None) -> Path:
+    project_dir = Path(state["project"].project_dir)
+    editorial = state["editorial_plan"]
+    tracks = load_catalog(PROJECT_ROOT)
+    track = select_track(tracks, editorial.mood, editorial.topics)
+    duration = artifact.duration_frames / artifact.fps
+    bgm_path = adapt_audio_to_duration(track.path, duration, project_dir / "audio" / "bgm_adapted.wav")
+    _write_json(project_dir / "audio" / "selection.json", {
+        "track_id": track.id, "source_path": track.path, "license_note": track.license_note,
+        "duration_seconds": duration,
     })
-    tag_by_id = {tag.image_id: tag for tag in tags}
-    selected_tags = [tag_by_id[image.id] for image in selected]
-    persist_manifest(filtered, decisions, visual_profiles, article_images, selected, selected_tags)
-    opening_tag = tag_by_id.get(selected[0].id)
-    opening_has_verified_headline = _is_verified_title_card(selected[0], opening_tag)
-    opening_ranking = diagnostics.get("opening_image_ranking", {})
-    opening_reason = "verified_prominent_headline_title_match" if opening_has_verified_headline else opening_ranking.get("selection_reason", "highest_qualified_opening_score")
-    opening_score_by_id = {item["image_id"]: item for item in opening_ranking.get("scores", [])}
-    diagnostics["selected_asset_order"] = [{
-        "image_id": image.id,
-        "source_url": image.source_url,
-        "title_match_score": _title_match_score(brief.title, image, tag_by_id.get(image.id)),
-        "role": tag_by_id.get(image.id).role.value if tag_by_id.get(image.id) else "other",
-        "contains_prominent_headline": tag_by_id.get(image.id).contains_prominent_headline if tag_by_id.get(image.id) else None,
-        "embedded_headline_text": tag_by_id.get(image.id).embedded_headline_text if tag_by_id.get(image.id) else "",
-        "headline_prominence": tag_by_id.get(image.id).headline_prominence if tag_by_id.get(image.id) else 0,
-        "headline_title_match_score": tag_by_id.get(image.id).headline_title_match_score if tag_by_id.get(image.id) else 0,
-        "headline_readability": tag_by_id.get(image.id).headline_readability if tag_by_id.get(image.id) else 0,
-        "headline_analysis_status": tag_by_id.get(image.id).headline_analysis_status if tag_by_id.get(image.id) else "unavailable",
-        "opening_selection_reason": opening_reason if image.id == selected[0].id else "",
-        "opening_score": opening_score_by_id.get(image.id),
-    } for image in selected]
-    diagnostics["opening_image"] = {
-        "image_id": selected[0].id,
-        "reason": opening_reason,
-        "embedded_headline_text": opening_tag.embedded_headline_text if opening_tag else "",
-        "headline_analysis_status": opening_tag.headline_analysis_status if opening_tag else "unavailable",
-    }
-    diagnostics["scene_count"] = len(selected)
-    selected_dir = project_dir / "selected_images"
-    selected_dir.mkdir()
-    for index, image in enumerate(selected):
-        shutil.copy2(image.local_path, selected_dir / f"{index:03d}.jpg")
-    (project_dir / "article.json").write_text(brief.model_dump_json(indent=2), encoding="utf-8")
-    title_match_scores = {image.id: _title_match_score(brief.title, image, tag_by_id.get(image.id)) for image in selected}
-    (project_dir / "image_tags.json").write_text(json.dumps({"images": [image.model_dump(mode="json") for image in article_images], "tags": [tag.model_dump(mode="json") for tag in tags], "selected_ids": [image.id for image in selected], "selected_asset_order": [image.id for image in selected], "title_match_scores": title_match_scores, "opening_image_reason": opening_reason, "opening_image_id": selected[0].id, "transitions": [context.model_dump(mode="json") for context in contexts]}, ensure_ascii=False, indent=2), encoding="utf-8")
-    progress("选择背景音乐")
-    repo_root = Path(__file__).resolve().parents[3]
-    music_dir = os.getenv("URL_MUSIC_DIR", str(repo_root / "input" / "music"))
-    music_catalog = load_catalog(repo_root, music_dir)
-    track = select_track(music_catalog, brief.mood, brief.topics)
-    source_audio = repo_root / track.path
-    if not source_audio.is_file():
-        raise ValueError("曲库中没有可用的背景音乐")
-    diagnostics["background_music"] = {
-        "library_dir": str(Path(music_dir).expanduser().resolve()),
-        "candidate_count": len(music_catalog),
-        "selected_track_id": track.id,
-        "selected_source": str(source_audio.resolve()),
-        "selection_mode": "mood_topic_energy",
-    }
-    audio_dir = project_dir / "audio"
-    audio_dir.mkdir()
-    copied_audio = audio_dir / source_audio.name
-    shutil.copy2(source_audio, copied_audio)
-    progress("选择背景图片")
-    background_video = None
-    background_dir = os.getenv("URL_BACKGROUND_IMAGE_DIR", str(repo_root / "input" / "bgv"))
-    background_image = _select_background_image(background_dir, project_dir)
-    diagnostics["background"] = background_image.model_dump(mode="json") | {
-        "type": "library_image",
-        "fit": "cover",
-        "main_image_fit": "contain",
-        "selection_mode": "random_once_per_project",
-        "main_timeline_unchanged": True,
-    }
-    assets = scan_and_process(selected_dir, project_dir, (1920, 1080))
-    selected_by_index = {index: image for index, image in enumerate(selected)}
-    tag_by_id = {tag.image_id: tag for tag in tags}
-    enriched_assets = []
-    for index, asset in enumerate(assets):
-        source = selected_by_index.get(index)
-        tag = tag_by_id.get(source.id) if source else None
-        profile = ImageSemanticProfile(
-            role=tag.role.value if tag else "other",
-            narrative_function="evidence" if tag and tag.role.value in {"evidence", "data", "diagram"} else "context",
-            contains_text=True if tag and tag.contains_prominent_headline else None,
-            is_screenshot=bool(source and source.source_url.startswith("screenshot://")),
-            is_data_chart=tag.role.value in {"data", "diagram"} if tag else None,
-            importance=tag.salience if tag else .5,
-            information_density=.75 if tag and tag.role.value in {"data", "diagram"} else .35,
-            source_caption=source.caption if source else "",
-            generated_description=source.alt if source else "",
-            contains_prominent_headline=tag.contains_prominent_headline if tag else None,
-            embedded_headline_text=tag.embedded_headline_text if tag else "",
-            headline_prominence=tag.headline_prominence if tag else 0,
-            headline_title_match_score=tag.headline_title_match_score if tag else 0,
-            headline_bbox=tag.headline_bbox if tag else None,
-            headline_readability=tag.headline_readability if tag else 0,
-            headline_analysis_status=tag.headline_analysis_status if tag else "unavailable",
-            headline_exclusion_reason=tag.headline_exclusion_reason if tag else "",
-        )
-        enriched_assets.append(asset.model_copy(update={"semantic_profile": profile}))
-    assets = enriched_assets
-    diagnostics["project_compile"] = {"project_images": len(assets), "relative_paths": [asset.relative_path for asset in assets], "source_asset_ids": [image.id for image in selected], "scene_count": len(selected)}
-    persist_diagnostics()
-    analysis = analyze_audio(str(copied_audio))
-    timeline = build_timeline(assets, analysis, REFERENCE_FPS, style="minimal")
-    output = VideoOutput(project_dir=str(project_dir), render_data=str(project_dir / "render_data.json"), final_video=str(project_dir / "render" / "final.mp4"))
-    progress("Director 编排连续性状态")
-    actions = default_url_actions(timeline, assets)
-    requested_actions = list(actions)
-    profiles = {asset.id: asset.semantic_profile for asset in assets}
-    preference_summary = TypographyPreferenceStore(root).summary_for(brief)
-    layout_context = article_context(brief)
-    layout_context["pace"] = "fast"
-    layout_context["copy_generation_mode"] = viral_copy_diagnostics.get("mode", "deterministic_fallback")
-    layout_context["target_segment_count"] = asset_target_count
-    layout_context["segment_duration_range_seconds"] = [URL_SEGMENT_MIN_SECONDS, URL_SEGMENT_MAX_SECONDS]
-    if sufficiency == "compact" or len(assets) == 1:
-        layout_context["copy_density_intent"] = "reduce"
-    layout_context = dict(layout_context or {}, caption_template_id=template_plan.template_id, caption_template_manifest=template_manifest.model_dump(mode="json"))
-    bundle = resolve_timeline(actions, profiles, title=brief.title, body=brief.text, summary=brief.summary, layout_context=layout_context, layout_preferences=preference_summary, copy_plan=viral_copy_plan)
-    timing_diagnostics = _retime_resolved_bundle(bundle, profiles, bpm=analysis.bpm, fps=REFERENCE_FPS)
-    actions = bundle.actions
-    actual_duration = sum(item.duration_frames for item in bundle.resolved) / REFERENCE_FPS
-    diagnostics["video_scope"] = {
-        "content_classification": sufficiency,
-        "semantic_unit_count": len({content.semantic_unit_id for narrative in bundle.narratives.values() for content in narrative.contents}),
-        "uncompressed_target_count": math.ceil(len(brief.text) / 650) if brief.text else 1,
-        "desired_asset_count": asset_target_count,
-        "actual_asset_count": len(assets),
-        "final_segment_count": len(bundle.resolved),
-        "target_duration_seconds": round(actual_duration, 3),
-        "actual_duration_seconds": round(actual_duration, 3),
-        "shortened": len(assets) < asset_target_count or sufficiency == "compact",
-        "compression_reason": "fast_pace_core_points" if len(brief.text) > 0 else "no_body_text",
-        "reading_speed_chars_per_second": URL_COPY_CHARS_PER_SECOND,
-        "segment_duration_range_seconds": [URL_SEGMENT_MIN_SECONDS, URL_SEGMENT_MAX_SECONDS],
-        "omitted_semantic_unit_count": max(0, len(viral_copy_plan.content_units) - len({content.semantic_unit_id for narrative in bundle.narratives.values() for content in narrative.contents})),
-        "reduction_reasons": [reason for reason in ["compact_article" if sufficiency == "compact" else None, "limited_visual_assets" if len(assets) < asset_target_count else None] if reason],
-        "segments": timing_diagnostics,
-    }
-    progress(f"已提炼为 {len(bundle.resolved)} 个镜头、预计 {actual_duration:.1f} 秒")
-    persistent_title, persistent_title_rendered, title_attempts = _select_persistent_title(
-        brief.title,
-        bundle.layout_diagnostics.get("font_palette"),
-        repo_root / "remotion" / "public",
-        alternatives=viral_title_options[1:],
+    output = project_dir / "render" / "final.mp4"
+    renderer = ChromiumRenderer()
+    renderer.render(
+        artifact, project_dir, bgm_path, output,
+        on_progress=(lambda current, total: on_progress(f"视频渲染 {current}/{total}")) if on_progress else None,
     )
-    selected_source_title = next((attempt["source_title"] for attempt in reversed(title_attempts) if not attempt["issues"]), viral_copy_plan.final_title)
-    selected_candidate = next((item for item in viral_copy_plan.title_candidates if item.text == selected_source_title), viral_copy_plan.selected_title)
-    viral_copy_plan = viral_copy_plan.model_copy(update={
-        "selected_title_id": selected_candidate.candidate_id,
-        "final_title": persistent_title.content,
-        # A Chromium fallback candidate may differ from the model title pack;
-        # do not carry stale title lines into the frozen template bindings.
-        "caption_title_lines": viral_copy_plan.caption_title_lines if selected_source_title == persistent_title.content else [],
-    })
-    template_plan = build_caption_template_plan(template_selection, copy_plan=viral_copy_plan)
-    brief = brief.model_copy(update={"title": persistent_title.content})
-    localized_copy = localized_copy.model_copy(update={"title": persistent_title.content})
-    copy = copy.model_copy(update={"headline": persistent_title.content[:80]})
-    diagnostics["viral_writer"].update({"selected_title_id": viral_copy_plan.selected_title_id, "selected_title": persistent_title.content, "persistent_title_attempts": title_attempts})
-    (project_dir / "viral_copy_plan.json").write_text(viral_copy_plan.model_dump_json(indent=2), encoding="utf-8")
-    (project_dir / "localized_copy.json").write_text(localized_copy.model_dump_json(indent=2), encoding="utf-8")
-    (project_dir / "article.json").write_text(brief.model_dump_json(indent=2), encoding="utf-8")
-    bundle.layout_diagnostics["persistent_title_candidates"] = title_attempts
-    missing_state = [state.segment_id for state in bundle.resolved if not state.resolved_layout_id or not state.resolved_copy_id]
-    if missing_state:
-        raise ValueError(f"URL 布局状态不完整，无法安全渲染：{', '.join(missing_state)}")
-    template_plan = template_plan.model_copy(update={"style_tokens": {"headline_font_id": persistent_title.font_id, "body_font_id": bundle.layout_diagnostics.get("font_palette", ["noto-sans-sc"])[0]}})
-    validate_caption_template_plan(template_plan)
-    (project_dir / "scene_narrative_plan.json").write_text(json.dumps({"persistent_title": persistent_title.model_dump(mode="json"), "caption_template_plan": template_plan.model_dump(mode="json"), "narratives": [item.model_dump(mode="json") for item in bundle.narratives.values()]}, ensure_ascii=False, indent=2), encoding="utf-8")
-    (project_dir / "caption_template_plan.json").write_text(template_plan.model_dump_json(indent=2), encoding="utf-8")
-    layout_plan = LayoutPlan(global_style="editorial", persistent_title=persistent_title, caption_template_plan=template_plan.model_dump(mode="json"), scenes=list(bundle.layouts.values()))
-    (project_dir / "layout_plan.json").write_text(layout_plan.model_dump_json(indent=2), encoding="utf-8")
-    qa = {"layout_director": bundle.layout_diagnostics, "preference_memory": preference_summary, "persistent_title": {"spec": persistent_title.model_dump(mode="json"), "hard_issues": [], "rendered": persistent_title_rendered.model_dump(mode="json")}, "invalidation_matrix": {"all_hold": "none", "media_replace": ["geometry", "crop", "subject", "contrast"], "copy_replace_or_hide": ["typography", "wrapping", "overflow", "contrast", "visibility"], "layout_adapt": ["changed_blocks", "collision"], "layout_replace": ["full_chromium_audit", "visual_critic"]}, "segments": []}
-    updated_timeline = []
-    for action, state in zip(actions, bundle.resolved):
-        narrative = bundle.segment_narratives[state.segment_id]
-        layout = bundle.segment_layouts[state.segment_id]
-        profile = profiles[state.resolved_media_id]
-        all_hold = action.media_action.value == "hold" and action.copy_action.value == "hold" and action.layout_action.value == "hold"
-        scopes = []
-        if action.media_action.value == "replace": scopes += ["geometry", "crop", "subject", "contrast"]
-        if action.copy_action in {CopyAction.replace, CopyAction.hide}: scopes += ["typography", "wrapping", "overflow", "contrast", "visibility"]
-        if state.resolved_layout_action == LayoutAction.adapt: scopes += ["changed_blocks", "collision"]
-        if state.resolved_layout_action == LayoutAction.replace: scopes = ["full_chromium_audit", "visual_critic"]
-        issues = [] if all_hold else validate_scene_layout(layout, narrative, profile)
-        rendered = None if all_hold or issues else validate_rendered_layout(layout, narrative, repo_root / "remotion" / "public")
-        qa["segments"].append({"segment_id": state.segment_id, "scene_id": state.scene_id, "qa_scope": sorted(set(scopes)), "reused_previous_qa": all_hold, "hard_issues": [issue.model_dump() for issue in issues], "rendered": rendered.model_dump(mode="json") if rendered else None, "requested_layout_action": state.requested_layout_action.value, "resolved_layout_action": state.resolved_layout_action.value, "override_reason": state.override_reason})
-        updated_timeline.append(TimelineItem(asset_id=state.resolved_media_id, start_frame=state.start_frame, end_frame=state.end_frame, duration_frames=state.duration_frames, transition=state.transition, narrative=narrative, layout=layout, resolved_state=state))
-    independent = []
-    seen_layouts = set()
-    for state in bundle.resolved:
-        layout = bundle.segment_layouts[state.segment_id]
-        if layout.layout_id in seen_layouts:
-            continue
-        seen_layouts.add(layout.layout_id)
-        narrative = bundle.segment_narratives[state.segment_id]
-        independent.append((layout, narrative.scene_purpose, profiles[state.resolved_media_id]))
-    qa["layout_monotony"] = [issue.model_dump(mode="json") for issue in detect_layout_monotony(independent)]
-    director_timeline_payload = {"requested_actions": [item.model_dump(mode="json") for item in requested_actions], "actions": [item.model_dump(mode="json") for item in actions], "partial_state": [item.model_dump(mode="json") for item in bundle.partial], "resolved_state": [item.model_dump(mode="json") for item in bundle.resolved], "safety_overrides": bundle.audit, "transition_resolution": []}
-    (project_dir / "director_timeline.json").write_text(json.dumps(director_timeline_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    (project_dir / "layout_qa.json").write_text(json.dumps(qa, ensure_ascii=False, indent=2), encoding="utf-8")
-    final_texts = []
-    text_block_count = 0
-    scenes_with_multiple_text_blocks = 0
-    repeated_copy_groups: dict[str, list[str]] = {}
-    for item in updated_timeline:
-        if item.narrative is None or item.layout is None or item.resolved_state is None:
-            raise ValueError(f"URL timeline item 缺少 narrative/layout/resolved_state：{item.asset_id}")
-        content_by_id = {content.content_id: content for content in item.narrative.contents}
-        scene_texts = []
-        for block in item.layout.text_blocks:
-            content = content_by_id.get(block.content_id)
-            if content is None:
-                raise ValueError(f"布局引用未知文案：{block.content_id}")
-            value = content.value(block.variant_id)
-            final_texts.append(value)
-            scene_texts.append(value)
-            text_block_count += 1
-            repeated_copy_groups.setdefault(content.source_hash, []).append(item.resolved_state.segment_id)
-        if len(set(scene_texts)) >= 2:
-            scenes_with_multiple_text_blocks += 1
-    display_issues = validate_localized_display_text(final_texts)
-    if display_issues:
-        raise ValueError("中文文案校验失败：" + "; ".join(display_issues[:8]))
-    duplicate_groups = {key: sorted(set(value)) for key, value in repeated_copy_groups.items() if len(set(value)) > 1}
-    diagnostics["localized_display"] = {
-        "localized_text_block_count": text_block_count,
-        "localized_text_character_count": sum(len(value) for value in final_texts),
-        "english_explanatory_block_count": 0,
-        "scene_count": len(updated_timeline),
-        "scenes_with_multiple_text_blocks": scenes_with_multiple_text_blocks,
-        "repeated_copy_groups": duplicate_groups,
-        "video_copy_source": "viral_writer" if diagnostics.get("viral_writer", {}).get("mode") == "model_success" else "localized_copy_fallback",
-        "render_path": "url_layout_renderer",
-    }
-    persist_diagnostics()
-    project = VideoProject(project_id=project_id, fps=REFERENCE_FPS, width=REFERENCE_WIDTH, height=REFERENCE_HEIGHT, images=assets, audio=AudioConfig(path=f"audio/{copied_audio.name}", source_path=f"audio/{copied_audio.name}", duration=actual_duration, sample_rate=analysis.sample_rate, bpm=analysis.bpm), background_video=background_video, background_image=background_image, timeline=updated_timeline, output=output, video_copy=copy, persistent_title=persistent_title, caption_template_plan=template_plan)
-    progress("编排动态布局视频")
-    project = compile_render_plan(project, _storyboard_from_timeline(project), creative_plan=None)
-    transition_resolution = []
-    boundary_audit_by_segment = {entry["segment_id"]: entry for entry in bundle.audit if "requested_boundary_action" in entry}
-    for index, item in enumerate(project.timeline):
-        if index == len(project.timeline) - 1:
-            if item.transition_effect is not None:
-                raise ValueError("末图不得包含 outgoing transition_effect")
-            continue
-        next_item = project.timeline[index + 1]
-        effect = item.transition_effect
-        if effect is None:
-            raise ValueError(f"图片边界 {item.asset_id}->{next_item.asset_id} 缺少注册转场效果")
-        if effect.from_asset_id != item.asset_id or effect.to_asset_id != next_item.asset_id:
-            raise ValueError(f"图片边界转场引用不相邻素材：{effect.from_asset_id}->{effect.to_asset_id}")
-        transition_resolution.append({
-            "from_segment_id": item.resolved_state.segment_id,
-            "to_segment_id": next_item.resolved_state.segment_id,
-            "requested_boundary_action": boundary_audit_by_segment.get(next_item.resolved_state.segment_id, {}).get("requested_boundary_action", next_item.resolved_state.boundary_action.value),
-            "resolved_boundary_action": next_item.resolved_state.boundary_action.value,
-            "requested_transition_template_id": effect.design.get("requested_template_id"),
-            "resolved_transition_template_id": effect.params["template_id"],
-            "transition_fallback_reason": effect.design.get("fallback_reason"),
-            "duration_frames": effect.duration_frames,
-            "parameters": effect.params.get("parameters", {}),
-        })
-    director_timeline_payload["transition_resolution"] = transition_resolution
-    enabled_template_ids = [item.id for item in enabled_transition_templates()]
-    resolved_template_ids = [item["resolved_transition_template_id"] for item in transition_resolution]
-    director_timeline_payload["transition_sequence"] = {
-        "enabled_template_ids": enabled_template_ids,
-        "boundary_count": len(transition_resolution),
-        "required_distinct_templates": min(2, len(transition_resolution), len(enabled_template_ids)),
-        "resolved_distinct_templates": sorted(set(resolved_template_ids)),
-        "resolved_sequence_template_ids": resolved_template_ids,
-    }
-    (project_dir / "director_timeline.json").write_text(json.dumps(director_timeline_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    # Rendered previews are durable QA evidence and are generated with the
-    # exact same composition, bundled fonts, and media URL strategy as final.
-    # Render all Chromium stills first, then critique scenes concurrently. A
-    # serial preview -> network critic loop makes a long article look frozen
-    # at 85% and multiplies model latency by the number of scenes.
-    previews_root = project_dir / "layout" / "previews"
-    preview_jobs: list[tuple[int, TimelineItem, dict]] = []
-    for index, item in enumerate(project.timeline):
-        scene_record = qa["segments"][index]
-        scene_dir = previews_root / item.resolved_state.segment_id
-        preview_paths = []
-        frames = {"settled": min(item.end_frame - 1, item.start_frame + 12), "middle": item.start_frame + item.duration_frames // 2}
-        if any(block.typography_role.value == "caption" for block in item.layout.text_blocks):
-            frames["caption"] = min(item.end_frame - 1, item.start_frame + max(12, item.duration_frames // 3))
-        progress(f"布局预览：{index + 1}/{len(project.timeline)} 个镜头")
-        try:
-            for label, frame in frames.items():
-                path = render_layout_still(project, repo_root / "remotion", scene_dir / f"{label}.png", frame)
-                preview_paths.append(str(path))
-                audit_path = path.with_suffix(".audit.json")
-                if audit_path.is_file():
-                    scene_record.setdefault("remotion_dom_audits", []).append(json.loads(audit_path.read_text(encoding="utf-8")))
-            scene_record["preview_paths"] = preview_paths
-        except Exception as exc:
-            scene_record["preview_error"] = str(exc)
-        preview_jobs.append((index, item, scene_record))
-
-    try:
-        concurrency = max(1, min(4, int(os.getenv("URL_VISUAL_CRITIC_CONCURRENCY", "3"))))
-    except ValueError:
-        concurrency = 3
-
-    def run_critic(job):
-        index, item, scene_record = job
-        rendered = scene_record.get("rendered") or {}
-        return index, critique_scene(
-            rendered_ok=bool(rendered.get("passed")),
-            hard_issues=[],
-            preview_paths=scene_record.get("preview_paths", []),
-            scene_purpose=item.narrative.scene_purpose,
-        )
-
-    progress(f"视觉检查：0/{len(preview_jobs)} 个镜头（并发 {concurrency}）")
-    with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="layout-critic") as critic_pool:
-        futures = [critic_pool.submit(run_critic, job) for job in preview_jobs]
-        completed_critics = 0
-        for future in as_completed(futures):
-            index, critic = future.result()
-            qa["segments"][index]["visual_critic"] = critic.model_dump(mode="json")
-            completed_critics += 1
-            progress(f"视觉检查：{completed_critics}/{len(futures)} 个镜头")
-    (project_dir / "layout_qa.json").write_text(json.dumps(qa, ensure_ascii=False, indent=2), encoding="utf-8")
-    session_data = {"source": brief.model_dump(mode="json"), "music_track": track.model_dump(mode="json"), "transition_contexts": [item.model_dump(mode="json") for item in contexts], "project": project.model_dump(mode="json")}
-    (project_dir / "session.json").write_text(json.dumps(session_data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return project, session_data
+    validation = validate_final_artifact(output, width=artifact.width, height=artifact.height, fps=artifact.fps, duration_seconds=duration)
+    _write_json(project_dir / "render" / "validation.json", validation)
+    if not validation["passed"]:
+        raise RuntimeError("最终视频校验失败：" + "；".join(validation["errors"]))
+    return output
 
 
-def _storyboard_from_timeline(project: VideoProject):
-    from content_creator.schemas import CreativeIntent, DirectorPlan, DirectorTimelineItem
-    from content_creator.agents.director_agent import plan_to_storyboard
-    timeline = []
-    for index, item in enumerate(project.timeline):
-        next_item = project.timeline[index + 1] if index + 1 < len(project.timeline) else None
-        purpose = item.narrative.scene_purpose if item.narrative else "article"
-        next_purpose = next_item.narrative.scene_purpose if next_item and next_item.narrative else "article"
-        transition_intent = None if next_item is None else CreativeIntent(
-            scene_id=item.asset_id,
-            description=f"为 {purpose} 到 {next_purpose} 的图片边界选择一个已注册的完整转场，保持字幕层稳定。",
-            movement="完整图片边界切换",
-            emotion="快节奏但清晰",
-            timing="在相邻图片边界完成",
-            style="editorial",
-            energy=0.65,
-        )
-        timeline.append(DirectorTimelineItem(
-            asset_id=item.asset_id,
-            duration_frames=item.duration_frames,
-            transition=item.transition,
-            transition_strength=item.transition.intensity,
-            reason="URL registered transition boundary",
-            transition_intent=transition_intent,
-        ))
-    return plan_to_storyboard(DirectorPlan(timeline=timeline), "reference_reel")
+def run_url_video_project(context: ProjectContext, *, on_progress=None) -> Path:
+    artifact, state = generate_animation(context, on_progress=on_progress)
+    if on_progress:
+        on_progress("视频渲染")
+    return render_animation(artifact, state, on_progress=on_progress)
+
+
+def _write_json(path: Path, value: object) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)

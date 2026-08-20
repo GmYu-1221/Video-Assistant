@@ -176,12 +176,17 @@ def test_discovery_keeps_data_original_and_marks_article_content():
 def test_agent_empty_response_retries_without_truncating_candidate_pool(monkeypatch):
     brief = ArticleBrief(url="https://example.com/a", canonical_url="https://example.com/a", title="Example", text="body")
     candidates = [AssetCandidate(id=f"asset-{index:03d}", kind=AssetKind.image, source_url=f"https://example.com/{index}.jpg", page_url=brief.url, original_index=index) for index in range(4)]
-    payload = {"asset_decisions": [{"asset_id": candidate.id, "selected": index < 2, "relevance": .9 - index / 10} for index, candidate in enumerate(candidates)]}
+    payload = {"asset_decisions": [{
+        "asset_id": candidate.id, "selected": index < 3, "role": "evidence", "topics": [], "entities": [],
+        "relevance": .9 - index / 10, "visual_quality": .7, "title_match_score": .5, "reason": "ranked",
+    } for index, candidate in enumerate(candidates)]}
 
     class Provider:
         model_name = "gemini-3.6-flash"
-        def complete_json(self, _prompt): return ""
-        def complete(self, _prompt): return __import__("json").dumps(payload)
+        calls = 0
+        def complete_json(self, _prompt):
+            self.calls += 1
+            return "" if self.calls == 1 else __import__("json").dumps(payload)
 
     monkeypatch.setattr(article_service, "get_agent_provider", lambda _name: Provider())
     diagnostics = {}
@@ -370,6 +375,29 @@ def test_article_agent_receives_previews_only(monkeypatch):
     assert extraction.body not in seen["prompt"]
 
 
+def test_article_selection_repairs_unknown_id_and_saves_attempts(tmp_path, monkeypatch):
+    soup = BeautifulSoup("<article><p>" + ("有效正文内容。" * 80) + "</p></article>", "html.parser")
+    candidates = _deduplicate_text_candidates(_discover_text_candidates(str(soup), soup, "标题"))
+    valid_id = candidates[0].id
+
+    class Provider:
+        model_name = "article-test"
+        calls = 0
+        def complete_json(self, _prompt):
+            self.calls += 1
+            candidate_id = "invented-id" if self.calls == 1 else valid_id
+            return json.dumps({"selected_candidate_ids": [candidate_id], "confidence": .9, "reason": "正文"})
+
+    monkeypatch.setattr(article_service, "get_agent_provider", lambda _name: Provider())
+    extraction, diagnostics = _select_article_candidates(candidates, "标题", artifact_dir=tmp_path)
+    assert extraction.selected_candidate_ids == [valid_id]
+    assert diagnostics["agent_mode"] == "retry_success"
+    run_dir = tmp_path / "agent_runs" / "article_selection"
+    assert (run_dir / "attempt-1.txt").is_file() and (run_dir / "attempt-2.txt").is_file()
+    validation = json.loads((run_dir / "validation.json").read_text())
+    assert validation["attempts"][0]["issues"][0]["path"] == "selected_candidate_ids.0"
+
+
 def test_fetch_article_turns_401_403_into_browser_import_required(monkeypatch):
     request = httpx.Request("GET", "https://example.com/article")
     forbidden = httpx.HTTPStatusError("forbidden", request=request, response=httpx.Response(403, request=request))
@@ -420,8 +448,8 @@ def test_blog_post_body_beats_short_metadata_and_drives_asset_target(monkeypatch
     assert extraction.extraction_method == "dom"
     assert len(extraction.body) > 1200
     assert extraction.selected_html.count("<img") == 6
-    from content_creator.services.url_video import _asset_target_count
-    assert _asset_target_count(len(extraction.body)) >= 2
+    from content_creator.services.source_pipeline import asset_target_count
+    assert asset_target_count(len(extraction.body)) >= 2
 
 
 def test_jsonld_and_metadata_candidates_receive_unique_ids():
@@ -509,16 +537,27 @@ def test_candidate_thumbnail_analysis_batches_six_and_returns_all_profiles(tmp_p
             payload = json.loads(prompt)
             ids = [item["asset_id"] for item in payload["images_in_supplied_order"]]
             calls.append((ids, paths))
-            return json.dumps({"candidate_profiles": [{"asset_id": asset_id, "analysis_status": "verified", "role": "evidence", "relevance": .8, "visual_quality": .7, "eligible": True} for asset_id in ids]})
+            return json.dumps({"candidate_profiles": [{
+                "asset_id": asset_id, "role": "evidence", "topics": [], "entities": [],
+                "relevance": .8, "visual_quality": .7, "title_match_score": .5,
+                "is_qr_code": False, "is_advertisement": False, "is_page_ui": False,
+                "is_logo": False, "is_app_download": False, "contains_prominent_headline": False,
+                "embedded_headline_text": "", "headline_prominence": 0.0, "headline_bbox": None,
+                "headline_readability": 0.0, "eligible": True, "exclusion_reason": "",
+            } for asset_id in ids]})
 
     monkeypatch.setattr(article_service, "get_agent_provider", lambda _: Provider())
     diagnostics = {}
     brief = ArticleBrief(url="https://example.com/article", canonical_url="https://example.com/article", title="文章标题", text="正文内容")
-    profiles = analyze_candidate_thumbnails(brief, candidates, records, diagnostics)
+    profiles = analyze_candidate_thumbnails(brief, candidates, records, diagnostics, artifact_dir=tmp_path)
     assert [len(ids) for ids, _ in calls] == [6, 6, 1]
     assert all(len(paths) <= 6 for _, paths in calls)
     assert len(profiles) == 13
     assert diagnostics["candidate_visual_analysis"]["verified_count"] == 13
+    for batch_index in range(1, 4):
+        run_dir = tmp_path / "agent_runs" / f"asset_visual_batch-{batch_index:03d}"
+        assert (run_dir / "attempt-1.txt").is_file()
+        assert json.loads((run_dir / "validation.json").read_text())["status"] == "passed"
 
 
 def test_candidate_thumbnail_pool_is_limited_and_preserves_aspect_ratio(tmp_path, monkeypatch):
@@ -572,7 +611,15 @@ def test_uncertain_article_content_is_preserved_but_explicit_qr_is_excluded(tmp_
             ids = [item["asset_id"] for item in json.loads(prompt)["images_in_supplied_order"]]
             profiles = []
             for asset_id in ids:
-                profiles.append({"asset_id": asset_id, "analysis_status": "verified", "role": "irrelevant", "eligible": False, "is_qr_code": asset_id == "qr", "exclusion_reason": "二维码" if asset_id == "qr" else "无内容"})
+                profiles.append({
+                    "asset_id": asset_id, "role": "irrelevant", "topics": [], "entities": [],
+                    "relevance": .1, "visual_quality": .5, "title_match_score": 0.0,
+                    "is_qr_code": asset_id == "qr", "is_advertisement": False, "is_page_ui": False,
+                    "is_logo": False, "is_app_download": False, "contains_prominent_headline": False,
+                    "embedded_headline_text": "", "headline_prominence": 0.0, "headline_bbox": None,
+                    "headline_readability": 0.0, "eligible": False,
+                    "exclusion_reason": "二维码" if asset_id == "qr" else "无内容",
+                })
             return json.dumps({"candidate_profiles": profiles}, ensure_ascii=False)
 
     monkeypatch.setattr(article_service, "get_agent_provider", lambda _: Provider())
